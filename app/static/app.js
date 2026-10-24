@@ -73,8 +73,8 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Dashboard"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["dialoghi", "Dialoghi"], ["chat", "Chat"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
-const VISTE_COLLABORATORE = [["chat", "Chat"], ["account", "Il mio account"]];
+const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["dialoghi", "Dialoghi"], ["chat", "Chat"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE_COLLABORATORE = [["task", "Task"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Account Google"], ["connessioni", "Connessioni a siti e app"],
   ["canali", "Canali (Telegram)"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"]];
 
@@ -122,7 +122,7 @@ function disegna() {
   if (stato.timer) { clearInterval(stato.timer); stato.timer = null; }
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
-  const vista = { dashboard: vistaDashboard, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaDialoghi, chat: vistaChat, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaDialoghi, chat: vistaChat, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
 
@@ -132,7 +132,7 @@ const ETICHETTA_FASCIA = { pubblico: "Solo dati pubblici", interno: "Dati intern
 function vistaAgenti() {
   const gruppi = new Map();
   for (const a of stato.agenti) {
-    const g = a.divisione || "Agenti di sistema";
+    const g = a.categoria === "sentinella" ? "Agenti sentinella" : a.categoria === "referente" ? "Referente" : (a.divisione || "Agenti di sistema");
     if (!gruppi.has(g)) gruppi.set(g, []);
     gruppi.get(g).push(a);
   }
@@ -175,9 +175,9 @@ function modulo(a) {
   const sup = h("select", {}, h("option", { value: "" }, "Nessuno"),
     stato.agenti.filter(x => !a || x.id !== a.id).map(x => h("option", { value: x.id }, x.nome + " (" + x.ruolo + ")")));
   sup.value = d.superiore_id ?? "";
-  const livello = h("select", {}, [["operativo", "Operativo"], ["manager", "Manager"], ["referente", "Referente"]]
+  const livello = h("select", {}, [["operativo", "Operativo"], ["manager", "Manager"], ["referente", "Referente"], ["sentinella", "Sentinella (osserva e segnala)"]]
     .map(([v, t]) => h("option", { value: v }, t)));
-  livello.value = d.livello;
+  livello.value = d.categoria === "sentinella" ? "sentinella" : d.livello;
   const modello = h("select", {}, stato.opzioni.modelli.map(m => h("option", { value: m.nome }, m.nome + " — " + m.fornitore)));
   modello.value = d.modello;
   const fascia = h("select", {}, Object.entries({ pubblico: "Solo dati pubblici", interno: "Dati pubblici e interni", riservato: "Tutti i dati (anche riservati)" }).map(([v, t]) => h("option", { value: v }, t)));
@@ -207,8 +207,8 @@ function modulo(a) {
     msg.replaceChildren();
     const corpo = {
       nome: nome.value.trim(), ruolo: ruolo.value.trim(), istruzioni: istr.value.trim(),
-      divisione_id: div.value ? Number(div.value) : null, superiore_id: sup.value ? Number(sup.value) : null,
-      livello: livello.value, modello: modello.value, fascia_dati_max: fascia.value,
+      divisione_id: livello.value === "sentinella" ? null : (div.value ? Number(div.value) : null), superiore_id: livello.value === "sentinella" ? null : (sup.value ? Number(sup.value) : null),
+      livello: livello.value === "sentinella" ? "manager" : livello.value, modello: modello.value, fascia_dati_max: fascia.value,
       max_token_risposta: Number(tetto.value), budget_token_mensile: budget.value ? Number(budget.value) : null,
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,

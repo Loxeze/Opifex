@@ -124,3 +124,23 @@ input[type=file]{display:block;margin-top:6px;max-width:100%}
 .msg-org .risposta{font-size:12px;max-height:130px;overflow:auto;white-space:pre-wrap}
 @media (max-width:1300px){.statistiche{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:1000px){.statistiche{order:0;grid-template-columns:repeat(2,minmax(0,1fr))}.chat-org{max-height:420px}}
+
+/* ---- Task ---- */
+.task-barra{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:8px 0 14px}
+.gruppo-bottoni{display:flex;gap:4px}
+.task-riga{display:flex;gap:10px;align-items:flex-start;padding:9px 10px;border:1px solid var(--bordo);border-radius:8px;margin:6px 0;background:rgba(13,17,23,.55)}
+.task-riga input[type=checkbox]{margin-top:4px;flex:none;width:18px;height:18px}
+.task-riga.fatta .nome{text-decoration:line-through;opacity:.6}
+.task-corpo{flex:1;min-width:0;cursor:pointer}
+.task-corpo .nome{overflow-wrap:anywhere}
+.task-chip{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
+h3.scadute{color:#f87171}
+.bacheca{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;align-items:start}
+.colonna-task{background:rgba(13,17,23,.5);border:1px solid var(--bordo);border-radius:10px;padding:10px;min-height:120px}
+.colonna-task h3{margin:0 0 8px}
+.task-scheda{border:1px solid var(--bordo);border-radius:8px;padding:8px;margin:6px 0;background:rgba(10,14,20,.8)}
+.task-scheda .azioni{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}
+.dashboard .task-riga{padding:6px 8px;margin:4px 0}
+.dashboard .task-riga .nome{font-size:13px}
+.dashboard .scena .legenda{left:auto;right:12px;bottom:12px}
+.pannello input[type=date]{display:block;width:100%}

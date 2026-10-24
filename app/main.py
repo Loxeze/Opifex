@@ -24,6 +24,7 @@ from .rotte_aggiornamenti import router as router_aggiornamenti
 from .rotte_canali import router as router_canali
 from .rotte_documenti import router as router_documenti
 from .rotte_gestione import router as router_gestione
+from .rotte_task import router as router_task
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
 
@@ -98,6 +99,7 @@ app.include_router(router_richieste)
 app.include_router(router_organizzazione)
 app.include_router(router_aggiornamenti)
 app.include_router(router_canali)
+app.include_router(router_task)
 
 
 @app.get("/", include_in_schema=False)

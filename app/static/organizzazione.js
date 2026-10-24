@@ -14,7 +14,7 @@ function apriPannello(titolo, figli) {
 }
 
 // ---------- Organigramma ----------
-function calcolaLayout(dati) {
+function calcolaLayout(dati) {   // piani per azienda
   const nodi = [{ id: 0, nome: "Lorenzo", ruolo: "Titolare", centro: true, depth: 0, aziende: [], attivo: true, stato: "sereno", figli: [] }];
   const per = new Map([[0, nodi[0]]]);
   for (const a of dati.agenti) { const n = { ...a, figli: [], centro: false }; nodi.push(n); per.set(a.id, n); }
@@ -41,13 +41,33 @@ function calcolaLayout(dati) {
     if (n.esterno) n.depth = maxD + 1;
     n.sub = !n.esterno && n.depth > 0 ? n : n;
     n.x = n.r * Math.cos(n.ang || 0); n.z = n.r * Math.sin(n.ang || 0);
-    n.y = n.centro ? 0 : 0.8 * Math.sin(i * 2.399 + n.depth);
+    n.y = 0.12 * Math.sin(i * 2.399 + n.depth);
   });
+  // Piani: uno per azienda, impilati; gli agenti senza azienda stanno sul piano "Trasversali" in alto;
+  // chi serve piu' aziende sta tra i suoi piani; le sentinelle girano attorno a tutti i piani.
+  const aziendeAttive = (dati.aziende || []).filter(z => z.attiva);
+  const trasv = nodi.some(n => !n.centro && !n.esterno && !(n.aziende || []).some(id => aziendeAttive.some(z => z.id === id)));
+  const gap = 1.35;
+  const piani = [];
+  if (trasv) piani.push({ id: 0, nome: "Trasversali", colore: "#94a3b8" });
+  aziendeAttive.forEach(z => piani.push({ id: z.id, nome: z.nome, colore: z.colore || "#22d3ee" }));
+  piani.forEach((pi, k) => { pi.y = (k - (piani.length - 1) / 2) * gap; });
+  const yPiano = (id) => (piani.find(pi => pi.id === id) || {}).y;
+  const sentinelle = nodi.filter(n => n.esterno && !n.superiore_id);
+  nodi.forEach((n) => {
+    if (n.centro) { n.y = 0; return; }
+    const proprie = (n.aziende || []).map(yPiano).filter(v => v !== undefined);
+    const y0 = n.esterno ? undefined : proprie.length ? proprie.reduce((a, b) => a + b, 0) / proprie.length : (trasv ? yPiano(0) : 0);
+    if (y0 !== undefined) n.y += y0;
+  });
+  sentinelle.forEach((n, k) => { n.y = piani.length ? (k / Math.max(1, sentinelle.length - 1) - 0.5) * (piani.length - 1) * gap : 0; });
+  nodi.filter(n => n.esterno && n.superiore_id).forEach(n => { const s = per.get(n.superiore_id); n.y = s ? s.y : 0; });
+  const rMax = Math.max(1.6, ...nodi.filter(n => !n.esterno && !n.centro).map(n => n.r)) + 0.7;
   // figli di un supervisore esterno: restano vicini al loro capo
   const sposta = (n) => n.figli.forEach((f, k) => { f.esterno = n.esterno; f.r = n.r + 0.9 * (k + 1) / (n.figli.length + 1) + 0.4;
     f.ang = n.ang + (k - (n.figli.length - 1) / 2) * 0.25; f.x = f.r * Math.cos(f.ang); f.z = f.r * Math.sin(f.ang); sposta(f); });
   supervisori.forEach(sposta);
-  return { nodi, per, raggi: [...new Set(nodi.filter(n => !n.centro).map(n => Math.round(n.r * 100) / 100))] };
+  return { nodi, per, piani, rMax, raggi: [...new Set(nodi.filter(n => !n.centro && !n.esterno).map(n => Math.round(n.r * 100) / 100))] };
 }
 
 function vistaOrganigramma(incorniciata) {
@@ -55,25 +75,26 @@ function vistaOrganigramma(incorniciata) {
   const scena = h("div", { class: "scena" }, cv);
   const scheda = h("div", { class: "scheda", style: "display:none" });
   const sel = h("select", {}, h("option", { value: "" }, "Tutte le aziende"));
+  const selPro = h("select", {}, h("option", { value: "" }, "Tutti i progetti"));
   const bRot = h("button", { class: "s" }, "Rotazione: sì");
   const legenda = h("div", { class: "legenda" });
-  let dati = null, layout = null, azienda = "", scelto = null;
+  let dati = null, layout = null, azienda = "", progetto = "", scelto = null;
   let impulsi = [], dopo = null, giro = 0;
-  let rotY = 0.4, rotX = 0.35, zoom = 1, auto = true, trascina = false, ultimo = null, mossa = 0, pinch = 0;
+  let rotY = 0.4, rotX = 0.5, zoom = 1, auto = true, trascina = false, ultimo = null, mossa = 0, pinch = 0;
   let W = 360, H = 640, DPR = 1;
   const cx = cv.getContext("2d");
   const stelle = Array.from({ length: 120 }, () => ({ x: (Math.random() * 2 - 1) * 9, y: (Math.random() * 2 - 1) * 9, z: (Math.random() * 2 - 1) * 9 }));
 
   const colore = (n) => n.centro ? "#22d3ee" : !n.attivo ? "#4b5563" : n.esterno ? "#a78bfa" : COL_STATO[n.stato] || "#34d399";
   const aziendaNome = (id) => dati.aziende.find(z => z.id === id);
-  const visibile = (n) => !azienda || n.centro || !n.aziende.length || n.aziende.includes(Number(azienda));
+  const visibile = (n) => (!azienda || n.centro || !n.aziende.length || n.aziende.includes(Number(azienda))) && (!progetto || n.centro || (n.progetti || []).includes(Number(progetto)));
 
   const proietta = (x, y, z) => {
     const cy = Math.cos(rotY), sy = Math.sin(rotY), cxr = Math.cos(rotX), sxr = Math.sin(rotX);
     const x1 = x * cy - z * sy, z1 = x * sy + z * cy;
     const y2 = y * cxr - z1 * sxr, z2 = y * sxr + z1 * cxr;
     const f = 5.5 / (5.5 + z2 + 3.2);
-    const s = Math.min(W, H) * 0.145 * zoom;
+    const s = Math.min(W, H) * 0.098 * zoom;
     return { px: W / 2 + x1 * s * f, py: H / 2 + y2 * s * f, f, z: z2 };
   };
 
@@ -94,11 +115,28 @@ function vistaOrganigramma(incorniciata) {
     if (!layout) {
       cx.fillStyle = "#7d8a99"; cx.font = "13px monospace"; cx.textAlign = "center"; cx.fillText("Caricamento…", W / 2, H / 2); return;
     }
-    cx.strokeStyle = "rgba(40,54,70,0.9)"; cx.lineWidth = 1;
-    for (const r of layout.raggi) {
-      cx.beginPath();
-      for (let t = 0; t <= 64; t++) { const an = t / 64 * Math.PI * 2; const p = proietta(r * Math.cos(an), 0, r * Math.sin(an)); t ? cx.lineTo(p.px, p.py) : cx.moveTo(p.px, p.py); }
-      cx.stroke();
+    // asse verticale di Lorenzo che attraversa tutti i piani
+    if (layout.piani.length) {
+      const a0 = proietta(0, layout.piani[0].y - 0.8, 0), a1 = proietta(0, layout.piani[layout.piani.length - 1].y + 0.8, 0);
+      cx.strokeStyle = "rgba(34,211,238,0.35)"; cx.lineWidth = 1.5; cx.beginPath(); cx.moveTo(a0.px, a0.py); cx.lineTo(a1.px, a1.py); cx.stroke();
+    }
+    const cerchio = (R, y) => { cx.beginPath(); for (let t = 0; t <= 72; t++) { const an = t / 72 * Math.PI * 2; const p = proietta(R * Math.cos(an), y, R * Math.sin(an)); t ? cx.lineTo(p.px, p.py) : cx.moveTo(p.px, p.py); } };
+    // i piani, dal piu' lontano al piu' vicino
+    const ordPiani = layout.piani.slice().sort((a, b) => proietta(0, b.y, 0).z - proietta(0, a.y, 0).z);
+    for (const pi of ordPiani) {
+      const attivo = !azienda || pi.id === Number(azienda) || pi.id === 0;
+      cx.globalAlpha = attivo ? 1 : 0.25;
+      cerchio(layout.rMax, pi.y); cx.fillStyle = pi.colore + "17"; cx.fill(); cx.strokeStyle = pi.colore + "aa"; cx.lineWidth = 1.5; cx.stroke();
+      cx.strokeStyle = pi.colore + "33"; cx.lineWidth = 1;
+      for (const r of layout.raggi) { cerchio(r, pi.y); cx.stroke(); }
+      const lp = proietta(-layout.rMax, pi.y, 0);
+      cx.fillStyle = pi.colore; cx.font = "bold 11px monospace"; cx.textAlign = "right"; cx.fillText(pi.nome, lp.px - 6, lp.py + 4);
+    }
+    cx.globalAlpha = 1;
+    // anello delle sentinelle
+    if (layout.nodi.some(n => n.esterno && !n.superiore_id)) {
+      const re = layout.nodi.find(n => n.esterno && !n.superiore_id).r;
+      cx.setLineDash([5, 6]); cx.strokeStyle = "rgba(167,139,250,0.4)"; cerchio(re, 0); cx.stroke(); cx.setLineDash([]);
     }
     for (const n of layout.nodi) n.p = proietta(n.x, n.y, n.z);
     for (const n of layout.nodi) {
@@ -154,7 +192,8 @@ function vistaOrganigramma(incorniciata) {
           n.carico === null ? null : h("div", { class: "barra-c" }, h("i", { style: "width:" + n.carico + "%;background:" + c }))),
         h("div", {}, h("small", {}, "Modello"), h("span", {}, n.modello))),
       h("div", { class: "sotto" }, "Risponde a: " + sup + (dip ? " · " + dip : "")),
-      h("div", { class: "sotto" }, "Aziende: " + (nomiAz.join(", ") || "tutte (trasversale)")),
+      h("div", { class: "sotto" }, "Progetti: " + ((n.progetti || []).map(i => (dati.progetti || []).find(z => z.id === i)?.nome).filter(Boolean).join(", ") || "nessuno")),
+      h("div", { class: "sotto" }, "Aziende: " + (nomiAz.join(", ") || "tutte (trasversale)") + (n.categoria === "sentinella" ? " · Sentinella" : "")),
       h("div", { class: "azioni" },
         h("button", { class: "p", onclick: () => { const a = stato.agenti.find(x => x.id === n.id); if (a) modulo(a); } }, "Apri scheda"),
         h("button", { class: "s", onclick: () => vai("chat") }, "Parla"))]);
@@ -163,7 +202,7 @@ function vistaOrganigramma(incorniciata) {
 
   const disegnaLegenda = () => riempi(legenda, [
     h("div", {}, h("i", { style: "background:#22d3ee" }), "Lorenzo (centro)"),
-    h("div", {}, h("i", { style: "background:#a78bfa" }), "Supervisori esterni"),
+    h("div", {}, h("i", { style: "background:#a78bfa" }), "Sentinelle (osservano, non intervengono)"),
     h("div", {}, h("i", { style: "background:#34d399" }), "Sereno"),
     h("div", {}, h("i", { style: "background:#fbbf24" }), "Sotto pressione"),
     h("div", {}, h("i", { style: "background:#f87171" }), "In difficoltà"),
@@ -229,12 +268,16 @@ function vistaOrganigramma(incorniciata) {
       const corrente = sel.value;
       riempi(sel, [h("option", { value: "" }, "Tutte le aziende"), dati.aziende.filter(z => z.attiva).map(z => h("option", { value: z.id }, z.nome))]);
       sel.value = corrente; azienda = sel.value;
+      const cp = selPro.value;
+      riempi(selPro, [h("option", { value: "" }, "Tutti i progetti"), (dati.progetti || []).map(z => h("option", { value: z.id }, z.nome))]);
+      selPro.value = cp; progetto = selPro.value;
       disegnaLegenda();
       if (scelto !== null) { const n = layout.per.get(scelto); if (n) mostraScheda(n); }
     } catch (e) { /* ritenta al prossimo giro */ }
   };
 
   sel.addEventListener("change", () => { azienda = sel.value; });
+  selPro.addEventListener("change", () => { progetto = selPro.value; });
   bRot.addEventListener("click", () => { auto = !auto; bRot.textContent = "Rotazione: " + (auto ? "sì" : "no"); });
   const punto = (e) => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   cv.addEventListener("pointerdown", (e) => { trascina = true; ultimo = { x: e.clientX, y: e.clientY }; mossa = 0; try { cv.setPointerCapture(e.pointerId); } catch (x) { /* ok */ } });
@@ -261,8 +304,8 @@ function vistaOrganigramma(incorniciata) {
   }, { passive: true });
   cv.addEventListener("touchend", () => { pinch = 0; });
 
-  scena.append(h("div", { class: "comandi" }, sel, bRot,
-    h("button", { class: "s", onclick: () => { rotY = 0.4; rotX = 0.35; zoom = 1; } }, "Centra vista"),
+  scena.append(h("div", { class: "comandi" }, sel, selPro, bRot,
+    h("button", { class: "s", onclick: () => { rotY = 0.4; rotX = 0.5; zoom = 1; } }, "Centra vista"),
     h("button", { class: "s", onclick: () => vai("impostazioni", "struttura") }, "+ Azienda / reparto"),
     h("button", { class: "s", onclick: () => modulo(null) }, "+ Nuovo agente")), legenda, scheda);
   carica(); interroga();

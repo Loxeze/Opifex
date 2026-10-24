@@ -101,6 +101,7 @@ def _registra(conn, agente_id: int, azione: str, utente_id: int, dettagli: dict)
 
 QUERY_AGENTI = """
 SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divisione, a.superiore_id,
+       CASE WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' WHEN a.tipo = 'sistema' THEN 'sentinella' ELSE a.livello END AS categoria,
        a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.budget_token_mensile,
        a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi,
        COALESCE((SELECT array_agg(x.azienda_id ORDER BY x.azienda_id) FROM agenti_aziende x WHERE x.agente_id = a.id), '{}') AS aziende,

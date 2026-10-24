@@ -79,11 +79,12 @@ function vistaDashboard() {
   const boxAvvisi = h("div", { class: "pan-corpo" },
     garanzie.length ? avviso("Dati interni e riservati bloccati verso: " + garanzie.map(f => f.nome).join(", ") + ". Mancano le garanzie del fornitore.", "avv") : avviso("Garanzie dei fornitori attive.", "ok"),
     stato.agenti.some(a => !a.attivo) ? h("p", { class: "sotto" }, stato.agenti.filter(a => !a.attivo).length + " agenti spenti.") : null);
+  const daFare = pannelloDaFare();
   let cicli = 0;
   caricaRichieste(); caricaProgetti();
-  stato.timer2 = setInterval(() => { aggiornaChat(); if (++cicli % 3 === 0) { caricaRichieste(); caricaProgetti(); aggiornaStat(); } }, 3000);
+  stato.timer2 = setInterval(() => { aggiornaChat(); if (++cicli % 3 === 0) { caricaRichieste(); caricaProgetti(); aggiornaStat(); daFare.ricarica(); } }, 3000);
   return h("div", { class: "dashboard" }, barra,
-    h("div", { class: "colonna col-sx" }, pannello("Richieste degli agenti", boxRic), pannello("Progetti", boxPro, h("button", { class: "s", onclick: () => vai("progetti") }, "Apri"))),
+    h("div", { class: "colonna col-sx" }, daFare.el, pannello("Richieste degli agenti", boxRic), pannello("Progetti", boxPro, h("button", { class: "s", onclick: () => vai("progetti") }, "Apri"))),
     scena,
     h("div", { class: "colonna col-dx" }, pannello("Chat dell'organizzazione · in diretta", boxChat), pannello("Avvisi", boxAvvisi)));
 }
