@@ -86,3 +86,6 @@
 - Allegati nella chat (fino a 5 file, PDF/Word/TXT/MD/CSV, 10 MB l'uno).
 - Voce: modalita' "server" (trascrizione OpenAI) + prova microfono + errori chiari.
 - Documenti bloccati dalla riservatezza: l'agente e la chat ora lo dicono (prima erano nascosti in silenzio).
+
+## 1.10.1 (fatto)
+- Pagina Chat: pannello "Richieste da risolvere" in cima, raggruppate per agente, espandibili, risposta diretta, bloccanti evidenziate.

@@ -147,3 +147,8 @@ h3.scadute{color:#f87171}
 
 .chat-doppia{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
 @media (max-width:900px){.chat-doppia{grid-template-columns:minmax(0,1fr)}}
+
+details.richiesta{border:1px solid var(--bordo,#ccc);border-radius:8px;padding:8px 10px;margin:6px 0}
+details.richiesta.bloccante{border-left:4px solid #c0392b}
+details.richiesta>summary,details.gruppo-richieste>summary{cursor:pointer;font-weight:600}
+details.gruppo-richieste{margin:8px 0}

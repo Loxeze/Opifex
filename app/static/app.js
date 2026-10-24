@@ -562,6 +562,56 @@ function vistaDialoghi(senzaTitoli) {
   ];
 }
 
+
+// Pannello «Richieste da risolvere»: raggruppate per agente, ognuna espandibile con la propria risposta
+function pannelloRichieste(dopo) {
+  const box = h("div", { class: "carta", style: "margin-bottom:14px" });
+  const msg = h("div");
+  let firma = null;
+  const aperte = stato.richAperte = stato.richAperte || new Set();
+  const carica = async (forza) => {
+    let el;
+    try { el = await api("GET", "/gestione/richieste?stato=aperta"); } catch (e) { return; }
+    const f = el.map(r => r.id).join(",");
+    if (!forza && f === firma) return;                      // niente cambiamenti: non cancello le risposte che sto scrivendo
+    if (!forza && box.querySelector("textarea") && [...box.querySelectorAll("textarea")].some(t => t.value)) return;
+    firma = f; stato.richieste = el.length;
+    const gruppi = new Map();
+    for (const r of el) { if (!gruppi.has(r.agente)) gruppi.set(r.agente, []); gruppi.get(r.agente).push(r); }
+    const invia = async (r, ris) => {
+      if (!ris.value.trim()) { msg.replaceChildren(avviso("Scrivi la risposta", "no")); return; }
+      try { await api("POST", "/gestione/richieste/" + r.id + "/risposta", { risposta: ris.value }); aperte.delete(r.id); carica(true); if (dopo) dopo(); }
+      catch (x) { msg.replaceChildren(avviso(x.message, "no")); }
+    };
+    const carta = (r) => {
+      const ris = h("textarea", { style: "min-height:70px", placeholder: "La tua risposta (Invio per inviare, Maiusc+Invio per andare a capo)" });
+      ris.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); invia(r, ris); } });
+      const d = h("details", { class: "richiesta" + (r.bloccante ? " bloccante" : "") },
+        h("summary", {}, (r.bloccante ? "BLOCCANTE · " : "") + (r.domanda.length > 110 ? r.domanda.slice(0, 110) + "…" : r.domanda)),
+        h("div", { class: "risposta" }, r.domanda),
+        h("div", { class: "sotto" }, new Date(r.creata_il).toLocaleString("it-IT")), ris,
+        h("div", { class: "azioni" }, h("button", { class: "p", onclick: () => invia(r, ris) }, "Rispondi"),
+          h("button", { class: "s", onclick: async () => { try { await api("POST", "/gestione/richieste/" + r.id + "/annulla"); aperte.delete(r.id); carica(true); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Non serve più")));
+      if (aperte.has(r.id)) d.open = true;
+      d.addEventListener("toggle", () => { if (d.open) aperte.add(r.id); else aperte.delete(r.id); });
+      return d;
+    };
+    const tutteAperte = () => box.querySelectorAll("details.richiesta").forEach(x => { x.open = true; });
+    const tutteChiuse = () => box.querySelectorAll("details.richiesta").forEach(x => { x.open = false; });
+    riempi(box, [
+      h("div", { class: "riga", style: "align-items:center;justify-content:space-between" },
+        h("h3", { style: "margin:0" }, el.length ? "Richieste da risolvere (" + el.length + ")" : "Nessuna richiesta da risolvere"),
+        el.length ? h("div", { class: "azioni" }, h("button", { class: "s", onclick: tutteAperte }, "Espandi tutte"), h("button", { class: "s", onclick: tutteChiuse }, "Comprimi tutte")) : null),
+      el.length ? null : h("p", { class: "sotto" }, "Quando un agente ha bisogno di un'informazione la trovi qui."),
+      [...gruppi].map(([nome, rr]) => h("details", { class: "gruppo-richieste", open: true },
+        h("summary", {}, nome + " · " + rr.length + (rr.some(x => x.bloccante) ? " (con bloccanti)" : "")), rr.map(carta))),
+      msg]);
+  };
+  carica(true);
+  stato.timerRich = setInterval(() => { if (!document.body.contains(box)) { clearInterval(stato.timerRich); return; } carica(false); }, 8000);
+  return box;
+}
+
 // ---------- Chat (pagina unica: chat con l'agente + dialoghi tra agenti) ----------
 function vistaChat() {
   const riep = h("div", { class: "riga", style: "margin-bottom:12px" });
@@ -578,7 +628,7 @@ function vistaChat() {
     } catch (e) { /* riprova */ }
   };
   aggiorna(); stato.timer2 = setInterval(aggiorna, 6000);
-  return [h("h2", {}, "Chat"), riep, lavoro,
+  return [h("h2", {}, "Chat"), pannelloRichieste(aggiorna), riep, lavoro,
     h("div", { class: "chat-doppia" }, h("div", { class: "chat-sx" }, vistaChatSolo()), h("div", { class: "chat-dx" }, vistaDialoghi(true)))];
 }
 
