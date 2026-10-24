@@ -29,6 +29,7 @@ class DatiAgente(BaseModel):
     divisione_id: int | None = None
     superiore_id: int | None = None
     livello: str = "operativo"
+    sentinella: bool = False
     modello: str
     istruzioni: str = Field(min_length=1, max_length=8000)
     fascia_dati_max: str = "pubblico"
@@ -50,6 +51,7 @@ class ModificaAgente(BaseModel):
     divisione_id: int | None = None
     superiore_id: int | None = None
     livello: str | None = None
+    sentinella: bool | None = None
     modello: str | None = None
     istruzioni: str | None = Field(default=None, min_length=1, max_length=8000)
     fascia_dati_max: str | None = None
@@ -86,6 +88,16 @@ def _valida(conn, d: dict):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Connessione inesistente")
 
 
+def _regola_posizione(dati: dict):
+    """Una sentinella sta fuori da dipartimenti e gerarchia. Tutti gli altri (tranne il referente) devono avere un dipartimento o un superiore."""
+    if dati.get("sentinella"):
+        dati["divisione_id"], dati["superiore_id"], dati["livello"] = None, None, "manager"
+        return
+    if dati.get("livello") != "referente" and not dati.get("divisione_id") and not dati.get("superiore_id"):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Per un agente che non e' una sentinella scegli un dipartimento o un superiore a cui risponde")
+
+
 def _scrivi_connessioni(conn, agente_id: int, ids: list[int]):
     conn.execute("DELETE FROM agenti_connessioni WHERE agente_id = %s", (agente_id,))
     for cid in dict.fromkeys(ids):
@@ -101,7 +113,8 @@ def _registra(conn, agente_id: int, azione: str, utente_id: int, dettagli: dict)
 
 QUERY_AGENTI = """
 SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divisione, a.superiore_id,
-       CASE WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' WHEN a.tipo = 'sistema' THEN 'sentinella' ELSE a.livello END AS categoria,
+       a.sentinella,
+       CASE WHEN a.sentinella THEN 'sentinella' WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' ELSE a.livello END AS categoria,
        a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.budget_token_mensile,
        a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi,
        COALESCE((SELECT array_agg(x.azienda_id ORDER BY x.azienda_id) FROM agenti_aziende x WHERE x.agente_id = a.id), '{}') AS aziende,
@@ -142,6 +155,7 @@ def opzioni(_: dict = Depends(solo_titolare)):
 def crea(d: DatiAgente, utente: dict = Depends(solo_titolare)):
     dati = d.model_dump()
     dati["siti_consentiti"] = _pulisci_siti(d.siti_consentiti)
+    _regola_posizione(dati)
     with connessione() as conn:
         _valida(conn, dati)
         if conn.execute("SELECT 1 FROM agenti WHERE lower(nome) = lower(%s)", (d.nome,)).fetchone():
@@ -149,12 +163,12 @@ def crea(d: DatiAgente, utente: dict = Depends(solo_titolare)):
         riga = conn.execute(
             """INSERT INTO agenti (divisione_id, superiore_id, nome, ruolo, livello, tipo, modello, fascia_dati_max,
                    istruzioni, max_token_risposta, budget_token_mensile, accesso_web, siti_consentiti,
-                   max_ricerche, attivo, modello_dialogo, dialoghi_attivi)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-            (d.divisione_id, d.superiore_id, d.nome, d.ruolo, d.livello,
-             "divisione" if d.divisione_id else "sistema", d.modello, d.fascia_dati_max, d.istruzioni,
+                   max_ricerche, attivo, modello_dialogo, dialoghi_attivi, sentinella)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (dati["divisione_id"], dati["superiore_id"], d.nome, d.ruolo, dati["livello"],
+             "divisione" if dati["divisione_id"] else "sistema", d.modello, d.fascia_dati_max, d.istruzioni,
              d.max_token_risposta, d.budget_token_mensile, d.accesso_web, dati["siti_consentiti"],
-             d.max_ricerche, d.attivo, d.modello_dialogo or None, d.dialoghi_attivi),
+             d.max_ricerche, d.attivo, d.modello_dialogo or None, d.dialoghi_attivi, bool(dati.get("sentinella"))),
         ).fetchone()
         _scrivi_connessioni(conn, riga["id"], d.connessioni)
         _registra(conn, riga["id"], "agente_creato", utente["id"], {"nome": d.nome})
@@ -169,8 +183,16 @@ def modifica(agente_id: int, d: ModificaAgente, utente: dict = Depends(solo_tito
     if campi.get("siti_consentiti") is not None:
         campi["siti_consentiti"] = _pulisci_siti(campi["siti_consentiti"])
     with connessione() as conn:
-        if conn.execute("SELECT 1 FROM agenti WHERE id = %s", (agente_id,)).fetchone() is None:
+        attuale = conn.execute("SELECT divisione_id, superiore_id, livello, sentinella FROM agenti WHERE id = %s", (agente_id,)).fetchone()
+        if attuale is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Agente inesistente")
+        if any(k in campi for k in ("sentinella", "livello", "divisione_id", "superiore_id")):
+            risultato = {**attuale, **{k: campi[k] for k in ("sentinella", "livello", "divisione_id", "superiore_id") if k in campi}}
+            if campi.get("sentinella") is None:
+                risultato["sentinella"] = bool(attuale["sentinella"]) if "sentinella" not in campi else False
+            _regola_posizione(risultato)
+            for k in ("sentinella", "livello", "divisione_id", "superiore_id"):
+                campi[k] = risultato[k]
         _valida(conn, campi)
         if campi.get("superiore_id") == agente_id:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Un agente non puo' rispondere a se stesso")

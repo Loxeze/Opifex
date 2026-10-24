@@ -122,4 +122,21 @@ with TestClient(app) as c:
        (ag["Aurora"]["categoria"], ag["Auditor"]["categoria"], ag["Marco"]["categoria"], ag["Scout"]["categoria"]) == ("referente", "sentinella", "manager", "operativo"))
     og = {a["nome"]: a for a in c.get("/gestione/organigramma", headers=HT).json()["agenti"]}
     ok("anche l'organigramma conosce la categoria", og["Sentinella"]["categoria"] == "sentinella" and og["Leo"]["categoria"] == "operativo")
+    # --- cambio di categoria: sentinella <-> operativo
+    base = {"nome": "Vigile", "ruolo": "Osserva", "livello": "operativo", "modello": "claude-haiku-5-5", "istruzioni": "Osservi e segnali.", "sentinella": True, "divisione_id": mk, "superiore_id": marco}
+    r = c.post("/gestione/agenti", headers=HT, json=base)
+    vid = r.json()["id"]
+    ag = {a["id"]: a for a in c.get("/gestione/agenti", headers=HT).json()}[vid]
+    ok("creata come sentinella: fuori da dipartimenti e gerarchia", r.status_code == 201 and ag["categoria"] == "sentinella" and ag["divisione_id"] is None and ag["superiore_id"] is None)
+    r = c.put(f"/gestione/agenti/{vid}", headers=HT, json={"sentinella": False, "livello": "operativo", "divisione_id": None, "superiore_id": None})
+    ok("da sentinella a operativo senza dipartimento/superiore: errore chiaro", r.status_code == 422 and "dipartimento" in r.text, r.text[:120])
+    r = c.put(f"/gestione/agenti/{vid}", headers=HT, json={"sentinella": False, "livello": "operativo", "divisione_id": mk, "superiore_id": marco})
+    ag = {a["id"]: a for a in c.get("/gestione/agenti", headers=HT).json()}[vid]
+    ok("da sentinella a operativo con dipartimento e superiore: riuscito", r.status_code == 200 and ag["categoria"] == "operativo" and ag["divisione_id"] == mk and ag["superiore_id"] == marco and ag["tipo"] == "divisione", str(ag["categoria"]))
+    ok("ora le task di progetto gli si possono assegnare", c.post("/task", headers=HT, json={"titolo": "x", "assegnato_agente_id": vid}).status_code == 201)
+    r = c.put(f"/gestione/agenti/{vid}", headers=HT, json={"sentinella": True})
+    ag = {a["id"]: a for a in c.get("/gestione/agenti", headers=HT).json()}[vid]
+    ok("e di nuovo sentinella con un solo campo", r.status_code == 200 and ag["categoria"] == "sentinella" and ag["superiore_id"] is None and ag["divisione_id"] is None)
+    ok("operativo senza dipartimento ne' superiore alla creazione -> 422", c.post("/gestione/agenti", headers=HT, json={**base, "nome": "Orfano", "sentinella": False, "divisione_id": None, "superiore_id": None}).status_code == 422)
+    ok("modifica semplice di un agente normale non cambia la sua posizione", c.put(f"/gestione/agenti/{leo}", headers=HT, json={"ruolo": "Video e reel!"}).status_code == 200)
 print(f"TOTALE: {sum(ris)}/{len(ris)} controlli superati")

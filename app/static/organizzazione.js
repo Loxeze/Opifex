@@ -19,7 +19,7 @@ function calcolaLayout(dati) {   // piani per azienda
   const per = new Map([[0, nodi[0]]]);
   for (const a of dati.agenti) { const n = { ...a, figli: [], centro: false }; nodi.push(n); per.set(a.id, n); }
   for (const n of nodi.slice(1)) (per.get(n.superiore_id ?? 0) || nodi[0]).figli.push(n);
-  const esterno = (n) => n.tipo === "sistema" && n.livello !== "referente" && n.superiore_id == null;
+  const esterno = (n) => n.categoria === "sentinella";
   const profondita = (n, d) => { n.depth = d; n.figli.forEach(f => profondita(f, d + 1)); };
   profondita(nodi[0], 0);
   const foglie = (n) => (n.peso = n.figli.length ? n.figli.reduce((s, f) => s + foglie(f), 0) : 1);

@@ -208,7 +208,7 @@ function modulo(a) {
     const corpo = {
       nome: nome.value.trim(), ruolo: ruolo.value.trim(), istruzioni: istr.value.trim(),
       divisione_id: livello.value === "sentinella" ? null : (div.value ? Number(div.value) : null), superiore_id: livello.value === "sentinella" ? null : (sup.value ? Number(sup.value) : null),
-      livello: livello.value === "sentinella" ? "manager" : livello.value, modello: modello.value, fascia_dati_max: fascia.value,
+      livello: livello.value === "sentinella" ? "manager" : livello.value, sentinella: livello.value === "sentinella", modello: modello.value, fascia_dati_max: fascia.value,
       max_token_risposta: Number(tetto.value), budget_token_mensile: budget.value ? Number(budget.value) : null,
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,
@@ -275,7 +275,7 @@ function modulo(a) {
       h("div", { class: "riga" }, h("label", {}, "Dipartimento", div), h("label", {}, "Risponde a", sup)),
       h("label", {}, "Aziende per cui lavora", h("p", { class: "aiuto" }, "Una o più. Se non ne scegli nessuna lavora per tutte (agente trasversale)."),
         azCb.length ? azCb.map(([z, cb]) => h("label", { class: "spunta" }, cb, z.nome)) : h("p", { class: "aiuto" }, "Nessuna azienda: creale nella scheda Struttura.")),
-      h("div", { class: "riga" }, h("label", {}, "Livello", livello), h("label", {}, "Modello AI", modello)),
+      h("div", { class: "riga" }, h("label", {}, "Categoria", h("p", { class: "aiuto" }, "La sentinella osserva e segnala, sta fuori dai dipartimenti. Per tutte le altre scegli dipartimento o superiore."), livello), h("label", {}, "Modello AI", modello)),
       h("h3", {}, "Riservatezza e costi"),
       h("label", {}, "Dati che può ricevere", h("p", { class: "aiuto" }, "Anche se qui scegli un livello alto, i dati escono verso un fornitore solo se il fornitore ha le garanzie attive."), fascia),
       h("div", { class: "riga" },

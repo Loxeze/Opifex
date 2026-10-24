@@ -177,7 +177,7 @@ def organigramma(_: dict = Depends(solo_titolare)):
     """Dati per il grafico: aziende, dipartimenti e agenti con stato reale (carico = uso del tetto mensile)."""
     with connessione() as conn:
         agenti = conn.execute(
-            """SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.superiore_id, a.divisione_id, a.attivo, a.modello,
+            """SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.sentinella, a.superiore_id, a.divisione_id, a.attivo, a.modello,
                       COALESCE((SELECT array_agg(x.azienda_id ORDER BY x.azienda_id) FROM agenti_aziende x WHERE x.agente_id = a.id), '{}') AS aziende,
                       COALESCE((SELECT array_agg(pa.progetto_id ORDER BY pa.progetto_id) FROM progetti_agenti pa WHERE pa.agente_id = a.id), '{}') AS progetti,
                       EXISTS (SELECT 1 FROM sospensioni_agenti s WHERE s.agente_id = a.id AND s.riattivato_il IS NULL) AS sospeso,
@@ -188,7 +188,7 @@ def organigramma(_: dict = Depends(solo_titolare)):
                       a.budget_token_mensile
                FROM agenti a ORDER BY a.id""").fetchall()
         for a in agenti:
-            a["categoria"] = "referente" if a["tipo"] == "sistema" and a["livello"] == "referente" else "sentinella" if a["tipo"] == "sistema" else a["livello"]
+            a["categoria"] = "sentinella" if a["sentinella"] else "referente" if a["tipo"] == "sistema" and a["livello"] == "referente" else a["livello"]
             if a["bloccanti"]:
                 a["stato"] = "difficolta"
             elif a["sospeso"] or a["richieste"] or (a["budget_token_mensile"] and a["token_mese"] >= 0.85 * a["budget_token_mensile"]):

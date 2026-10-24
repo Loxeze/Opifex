@@ -12,7 +12,7 @@ from .permessi import divisioni_visibili, utente_corrente
 router = APIRouter(prefix="/task")
 STATI = ("da_fare", "in_corso", "in_attesa", "completata")
 PRIORITA = ("bassa", "normale", "alta", "urgente")
-SENTINELLA = "(a.tipo = 'sistema' AND a.livello <> 'referente')"
+SENTINELLA = "a.sentinella"
 
 
 def _tit(u: dict) -> bool:

@@ -37,7 +37,7 @@ def colleghi(conn, agente_id: int) -> list[dict]:
     Tutti: il proprio superiore e i subordinati diretti. Manager e referente: anche tutti i propri sottoposti (a qualunque
     livello) e gli altri manager/referente. Supervisori esterni (agenti di sistema): qualunque agente attivo.
     """
-    a = conn.execute("SELECT id, livello, tipo, superiore_id FROM agenti WHERE id = %s", (agente_id,)).fetchone()
+    a = conn.execute("SELECT id, livello, tipo, sentinella, superiore_id FROM agenti WHERE id = %s", (agente_id,)).fetchone()
     if a is None:
         return []
     return conn.execute(
@@ -52,7 +52,7 @@ def colleghi(conn, agente_id: int) -> list[dict]:
               OR %(vigila)s)
            ORDER BY id""",
         {"id": agente_id, "sup": a["superiore_id"], "gest": a["livello"] in ("manager", "referente"),
-         "vigila": a["tipo"] == "sistema" and a["livello"] != "referente"}).fetchall()
+         "vigila": bool(a["sentinella"])}).fetchall()
 
 
 def _modello_dialogo(conn, agente_id: int) -> dict:
