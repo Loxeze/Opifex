@@ -575,7 +575,7 @@ function vistaChat() {
       stato.chatAgente = agente.id;
       const r = await api("POST", "/agenti/" + scelta.value + "/chat", { messaggio: testo.value, fascia_dati: f.value });
       stato.conversazione.unshift({ agente: agente.nome, domanda: testo.value, risposta: r.risposta, t: r.token_input + r.token_output,
-        usati: r.documenti_usati || [], esclusi: r.documenti_esclusi_per_riservatezza || [] });
+        usati: r.documenti_usati || [], esclusi: r.documenti_esclusi_per_riservatezza || [], avvisi: r.avvisi || [] });
       testo.value = ""; disegna();
       if (Voce.leggiRisposte || Voce.viva) {
         Voce.leggi(r.risposta, () => { if (Voce.viva && stato.vista === "chat" && Voce.avviaAscolto) Voce.avviaAscolto(); });
@@ -616,7 +616,8 @@ function vistaChat() {
       h("div", { class: "risposta" }, c.risposta),
       Voce.supportoLettura ? h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => Voce.leggi(c.risposta) }, "🔊 Ascolta")) : null,
       c.usati.length ? h("div", { class: "sotto", style: "margin-top:8px" }, "Documenti consultati: " + c.usati.join(", ")) : null,
-      c.esclusi.length ? avviso("Non consultati per riservatezza: " + c.esclusi.join(", "), "avv") : null)),
+      c.esclusi.length ? avviso("Non consultati per riservatezza: " + c.esclusi.join(", "), "avv") : null,
+      (c.avvisi || []).map(t => avviso(t, "avv")))),
   ];
 }
 

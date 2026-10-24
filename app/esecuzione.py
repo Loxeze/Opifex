@@ -122,6 +122,13 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     conn.commit()
                     raise EsecuzioneBloccata("Sito «" + s_["nome"] + "» (dati " + s_["fascia_contenuto"] + "): " + motivo_)
 
+        # Siti con credenziali assegnati all'agente ma non attivi (accesso non ancora provato con successo): l'agente e l'utente lo devono sapere
+        avvisi = []
+        for x in conn.execute(
+                """SELECT c.nome, c.stato FROM agenti_connessioni ac JOIN connessioni c ON c.id = ac.connessione_id
+                   JOIN accessi_siti s ON s.connessione_id = c.id WHERE ac.agente_id = %s AND c.stato <> 'attiva'""", (agente_id,)).fetchall():
+            avvisi.append(f"Il collegamento «{x['nome']}» ha le credenziali ma non e' attivo (stato: {x['stato'].replace('_', ' ')}): "
+                          "in Collegamenti premi «Prova accesso»; se riesce diventa attivo e l'agente puo' usarlo.")
         # Contesto: documenti (elenco + brani pertinenti), cronologia della chat, visione d'insieme per chi vede tutto.
         # Ogni brano entra solo se la sua fascia puo' uscire verso il fornitore.
         messaggio_originale = messaggio
@@ -138,6 +145,8 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                 prefisso.append("Conversazione precedente con questo utente (continua da qui, non farti ripetere cio' che ha gia' detto):\n" + st)
         if doc_ctx:
             prefisso.append(doc_ctx)
+        if avvisi:
+            prefisso.append("NOTA DI SISTEMA: " + " ".join(avvisi) + " Finche' non e' attivo non puoi leggere quel sito: non chiedere credenziali a Lorenzo, di' che il collegamento va attivato.")
         if prefisso:
             messaggio = "\n\n=====\n\n".join(prefisso) + "\n\n=== Richiesta ===\n" + messaggio
         risposte_l = richieste.risposte_da_consegnare(conn, agente_id)
@@ -209,6 +218,11 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                 def gestore(nome, dati):
                     f = gestori.get(nome)
                     return f(nome, dati) if f else "ERRORE: strumento sconosciuto"
+                if siti:
+                    elenco_s = "; ".join(f"{s_['nome']}: dominio {s_['dominio']}, pagina di accesso {s_['url_login']}" for s_ in siti)
+                    avviso_extra += ("\n\nSITI COLLEGATI: " + elenco_s + ". Il sistema effettua l'accesso (login) da solo con le credenziali custodite nella cassaforte: "
+                                     "tu NON le conosci e NON servono. Non chiedere mai nome utente o password a Lorenzo: apri direttamente le pagine con apri_pagina "
+                                     "partendo dall'indirizzo indicato e naviga con segui_link e compila_ricerca.")
                 nav_cm = None
                 if siti:
                     elenco = [{"dominio": s_["dominio"], "url_login": s_["url_login"], "max_pagine": s_["max_pagine"],
@@ -262,4 +276,4 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             memoria.registra_scambio(conn, agente_id, utente_id, messaggio_originale, ris.testo, fascia_dati)
     return {"agente": a["nome"], "risposta": ris.testo, "richieste_create": n_richieste,
             "token_input": ris.token_input, "token_output": ris.token_output,
-            "documenti_usati": usati, "documenti_esclusi_per_riservatezza": esclusi}
+            "documenti_usati": usati, "documenti_esclusi_per_riservatezza": esclusi, "avvisi": avvisi}
