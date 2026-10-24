@@ -222,3 +222,36 @@ def impulsi(dopo: datetime | None = None, _: dict = Depends(solo_titolare)):
                ) u ORDER BY t LIMIT 100""", {"d": dopo}).fetchall()
         return {"adesso": adesso.isoformat(),
                 "impulsi": [{"tipo": r["tipo"], "da": r["da"], "a": r["a"], "t": r["t"].isoformat()} for r in righe]}
+
+
+@router.get("/dashboard/statistiche")
+def statistiche(_: dict = Depends(solo_titolare)):
+    """Numeri della barra in alto della Dashboard: consumi, attivita' e stato dell'organizzazione."""
+    with connessione() as conn:
+        r = conn.execute(
+            """SELECT
+                 COALESCE(SUM(CASE WHEN creato_il >= date_trunc('day', NOW()) THEN COALESCE(token_input,0)+COALESCE(token_output,0) END),0)::bigint AS token_oggi,
+                 COALESCE(SUM(CASE WHEN creato_il >= date_trunc('day', NOW()) THEN COALESCE(costo_stimato,0) END),0)::float AS costo_oggi,
+                 COALESCE(SUM(COALESCE(token_input,0)+COALESCE(token_output,0)),0)::bigint AS token_mese,
+                 COALESCE(SUM(COALESCE(costo_stimato,0)),0)::float AS costo_mese,
+                 COALESCE(SUM(COALESCE(token_input,0)),0)::bigint AS input_mese,
+                 COALESCE(SUM(COALESCE(token_output,0)),0)::bigint AS output_mese
+               FROM costi_api WHERE creato_il >= date_trunc('month', NOW())""").fetchone()
+        r["messaggi_oggi"] = conn.execute("SELECT count(*) AS n FROM messaggi_agenti WHERE creato_il >= date_trunc('day', NOW())").fetchone()["n"]
+        r["agenti_attivi"] = conn.execute("SELECT count(*) AS n FROM agenti WHERE attivo").fetchone()["n"]
+        r["agenti_totali"] = conn.execute("SELECT count(*) AS n FROM agenti").fetchone()["n"]
+        r["richieste_aperte"] = conn.execute("SELECT count(*) AS n FROM richieste_informazioni WHERE stato='aperta'").fetchone()["n"]
+        r["richieste_bloccanti"] = conn.execute("SELECT count(*) AS n FROM richieste_informazioni WHERE stato='aperta' AND bloccante").fetchone()["n"]
+        r["limite_dialoghi_giorno"] = int(conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave='dialoghi_budget_token_giornaliero'").fetchone()["valore"] or 0) \
+            if conn.execute("SELECT 1 FROM impostazioni_sistema WHERE chiave='dialoghi_budget_token_giornaliero'").fetchone() else 0
+        r["token_dialoghi_oggi"] = int(conn.execute(
+            "SELECT COALESCE(SUM(COALESCE(token_input,0)+COALESCE(token_output,0)),0) AS t FROM costi_api WHERE tipo='dialogo' AND creato_il >= date_trunc('day', NOW())").fetchone()["t"])
+        r["giorni"] = conn.execute(
+            """SELECT to_char(g::date, 'DD/MM') AS giorno,
+                      COALESCE((SELECT SUM(COALESCE(token_input,0)+COALESCE(token_output,0)) FROM costi_api c WHERE c.creato_il >= g AND c.creato_il < g + INTERVAL '1 day'),0)::bigint AS token
+               FROM generate_series(date_trunc('day', NOW()) - INTERVAL '6 days', date_trunc('day', NOW()), INTERVAL '1 day') g ORDER BY g""").fetchall()
+        r["top_agenti"] = conn.execute(
+            """SELECT a.nome, SUM(COALESCE(c.token_input,0)+COALESCE(c.token_output,0))::bigint AS token
+               FROM costi_api c JOIN agenti a ON a.id = c.agente_id WHERE c.creato_il >= date_trunc('month', NOW())
+               GROUP BY a.nome ORDER BY token DESC LIMIT 3""").fetchall()
+        return r

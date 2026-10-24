@@ -37,22 +37,55 @@ function vistaDashboard() {
         h("div", { class: "sotto" }, p.agenti.length + " agenti · Drive: " + ({ ok: "pronto", da_sincronizzare: "da creare", errore: "errore" })[p.drive_stato]))) : h("p", { class: "sotto" }, "Nessun progetto."));
     } catch (e) { boxPro.replaceChildren(avviso(e.message, "no")); }
   };
-  const attivi = stato.agenti.filter(a => a.attivo);
-  const si = (v, t) => h("span", { class: "chip " + (v ? "ok" : "no") }, (v ? "✓ " : "✕ ") + t);
-  const boxAgenti = h("div", { class: "pan-corpo" }, attivi.map(a => h("div", { class: "voce voce-clic", tabindex: 0, role: "button", onclick: () => modulo(a), onkeydown: (e) => { if (e.key === "Enter") modulo(a); } },
-    h("div", { class: "nome" }, a.nome, h("span", { class: "sotto" }, " · " + a.ruolo)),
-    h("div", { class: "chips" }, h("span", { class: "chip" }, NOME_FASCIA_AGENTE[a.fascia_dati_max] || a.fascia_dati_max), si(a.accesso_web, "web"), si(a.dialoghi_attivi, "parla con i colleghi"),
-      h("span", { class: "chip" }, (a.connessioni || []).length + " connessioni")))));
+  // --- chat in tempo reale di tutta l'organizzazione (messaggi tra agenti)
+  const boxChat = h("div", { class: "pan-corpo chat-org" }, h("p", { class: "sotto" }, "Caricamento…"));
+  let ultimoId = 0, primo = true;
+  const voceChat = (m) => h("div", { class: "msg-org" },
+    h("div", { class: "sotto" }, h("b", {}, (m.da || "?") + " → " + (m.a || "?")), " · " + new Date(m.creato_il).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" }) + " · " + m.titolo),
+    h("div", { class: "risposta" }, m.testo));
+  const aggiornaChat = async () => {
+    try {
+      const nuovi = await api("GET", "/gestione/dialoghi/feed" + (primo ? "" : "?dopo_id=" + ultimoId));
+      const alFondo = boxChat.scrollTop + boxChat.clientHeight >= boxChat.scrollHeight - 40;
+      if (primo || (nuovi.length && boxChat.firstChild && boxChat.firstChild.tagName === "P")) boxChat.replaceChildren();
+      if (primo && !nuovi.length) boxChat.append(h("p", { class: "sotto" }, "Nessuna conversazione ancora. Quando gli agenti si parlano la vedi qui, in diretta."));
+      for (const m of nuovi) { boxChat.append(voceChat(m)); ultimoId = Math.max(ultimoId, m.id); }
+      if (primo || (nuovi.length && alFondo)) boxChat.scrollTop = boxChat.scrollHeight;
+      primo = false;
+    } catch (e) { /* riprova al prossimo giro */ }
+  };
+  aggiornaChat();
+  // --- barra dei numeri in alto
+  const barra = h("div", { class: "statistiche" });
+  const fm = (n) => n >= 1e6 ? (n / 1e6).toFixed(2).replace(".", ",") + " M" : n >= 1e3 ? (n / 1e3).toFixed(1).replace(".", ",") + " k" : String(n);
+  const tessera = (titolo, valore, sotto, extra) => h("div", { class: "tessera" }, h("div", { class: "sotto" }, titolo), h("div", { class: "valore" }, valore), sotto ? h("div", { class: "sotto" }, sotto) : null, extra || null);
+  const aggiornaStat = async () => {
+    try {
+      const x = await api("GET", "/gestione/dashboard/statistiche");
+      const grafico = h("canvas", { width: 120, height: 28, class: "mini", "aria-label": "Token negli ultimi 7 giorni" });
+      const g = grafico.getContext("2d"), mx = Math.max(1, ...x.giorni.map(d => d.token));
+      g.fillStyle = "#22d3ee"; x.giorni.forEach((d, i) => { const hh = Math.max(1, Math.round(26 * d.token / mx)); g.fillRect(i * 17 + 1, 28 - hh, 13, hh); });
+      riempi(barra, [
+        tessera("Token oggi", fm(x.token_oggi), "$ " + x.costo_oggi.toFixed(2) + " stimati", grafico),
+        tessera("Token del mese", fm(x.token_mese), "$ " + x.costo_mese.toFixed(2) + " · in " + fm(x.input_mese) + " · out " + fm(x.output_mese)),
+        tessera("Più attivi del mese", x.top_agenti.length ? x.top_agenti.map(t => t.nome).join(", ") : "—", x.top_agenti.length ? fm(x.top_agenti[0].token) + " token il primo" : "nessun consumo"),
+        tessera("Messaggi tra agenti oggi", String(x.messaggi_oggi), x.limite_dialoghi_giorno ? "dialoghi: " + fm(x.token_dialoghi_oggi) + " / " + fm(x.limite_dialoghi_giorno) + " token" : null),
+        tessera("Agenti attivi", x.agenti_attivi + " / " + x.agenti_totali, null),
+        tessera("Richieste aperte", String(x.richieste_aperte), x.richieste_bloccanti ? x.richieste_bloccanti + " bloccanti" : "nessuna bloccante")]);
+    } catch (e) { barra.replaceChildren(avviso(e.message, "no")); }
+  };
+  aggiornaStat();
   const garanzie = ((stato.opzioni && stato.opzioni.fornitori) || []).filter(f => !(f.non_conservazione_attiva && f.dpa_firmato));
   const boxAvvisi = h("div", { class: "pan-corpo" },
     garanzie.length ? avviso("Dati interni e riservati bloccati verso: " + garanzie.map(f => f.nome).join(", ") + ". Mancano le garanzie del fornitore.", "avv") : avviso("Garanzie dei fornitori attive.", "ok"),
     stato.agenti.some(a => !a.attivo) ? h("p", { class: "sotto" }, stato.agenti.filter(a => !a.attivo).length + " agenti spenti.") : null);
+  let cicli = 0;
   caricaRichieste(); caricaProgetti();
-  stato.timer2 = setInterval(() => { caricaRichieste(); caricaProgetti(); }, 10000);
-  return h("div", { class: "dashboard" },
+  stato.timer2 = setInterval(() => { aggiornaChat(); if (++cicli % 3 === 0) { caricaRichieste(); caricaProgetti(); aggiornaStat(); } }, 3000);
+  return h("div", { class: "dashboard" }, barra,
     h("div", { class: "colonna col-sx" }, pannello("Richieste degli agenti", boxRic), pannello("Progetti", boxPro, h("button", { class: "s", onclick: () => vai("progetti") }, "Apri"))),
     scena,
-    h("div", { class: "colonna col-dx" }, pannello("Cosa possono fare gli agenti", boxAgenti), pannello("Avvisi", boxAvvisi)));
+    h("div", { class: "colonna col-dx" }, pannello("Chat dell'organizzazione · in diretta", boxChat), pannello("Avvisi", boxAvvisi)));
 }
 
 function vistaImpostazioni() {
