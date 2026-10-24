@@ -16,14 +16,19 @@ function vistaDashboard() {
     try {
       const el = await api("GET", "/gestione/richieste?stato=aperta");
       stato.richieste = el.length;
+      // se stai scrivendo una risposta, non ridisegnare: perderesti il testo
+      if (boxRic.contains(document.activeElement) || [...boxRic.querySelectorAll("input")].some(i => i.value.trim())) return;
       riempi(boxRic, el.length ? [el.slice(0, 4).map(r => {
-        const ris = h("input", { type: "text", placeholder: "Rispondi…", maxlength: 2000 });
+        const ris = h("input", { type: "text", placeholder: "Rispondi… (Invio per inviare)", maxlength: 2000 });
+        const invia = async (btn) => {
+          if (!ris.value.trim()) return; if (btn) btn.disabled = true; ris.disabled = true;
+          try { await api("POST", "/gestione/richieste/" + r.id + "/risposta", { risposta: ris.value }); ris.value = ""; caricaRichieste(); }
+          catch (x) { alert(x.message); ris.disabled = false; if (btn) btn.disabled = false; } };
+        ris.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); invia(null); } });
         return h("div", { class: "voce" },
           h("div", { class: "nome" }, (r.bloccante ? "BLOCCANTE · " : "") + r.agente),
           h("div", { class: "sotto" }, r.domanda),
-          h("div", { class: "riga-inline" }, ris, h("button", { class: "p", onclick: async (e) => {
-            if (!ris.value.trim()) return; e.currentTarget.disabled = true;
-            try { await api("POST", "/gestione/richieste/" + r.id + "/risposta", { risposta: ris.value }); caricaRichieste(); } catch (x) { alert(x.message); e.currentTarget.disabled = false; } } }, "Invia")));
+          h("div", { class: "riga-inline" }, ris, h("button", { class: "p", onclick: (e) => invia(e.currentTarget) }, "Invia")));
       }), el.length > 4 ? h("button", { class: "s", onclick: () => vai("richieste") }, "Vedi tutte (" + el.length + ")") : null]
         : h("p", { class: "sotto" }, "Nessuna richiesta aperta. Gli agenti hanno tutto ciò che serve."));
     } catch (e) { boxRic.replaceChildren(avviso(e.message, "no")); }

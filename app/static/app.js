@@ -392,7 +392,11 @@ function vistaRichieste() {
     try {
       const el = await api("GET", "/gestione/richieste?stato=" + filtro);
       riempi(lista, el.length ? el.map(r => {
-        const ris = h("textarea", { style: "min-height:60px", placeholder: "La tua risposta: l'agente la riceve al prossimo lavoro" });
+        const ris = h("textarea", { style: "min-height:60px", placeholder: "La tua risposta: l'agente la riceve al prossimo lavoro (Invio per inviare, Maiusc+Invio per andare a capo)" });
+        ris.addEventListener("keydown", async (e) => {
+          if (e.key !== "Enter" || e.shiftKey || !ris.value.trim()) return; e.preventDefault();
+          try { await api("POST", "/gestione/richieste/" + r.id + "/risposta", { risposta: ris.value }); carica(); }
+          catch (x) { msg.replaceChildren(avviso(x.message, "no")); } });
         return h("div", { class: "carta", style: "margin-bottom:10px" },
           h("div", { class: "nome" }, (r.bloccante ? "BLOCCANTE · " : "") + r.agente),
           h("div", { class: "risposta" }, r.domanda),
