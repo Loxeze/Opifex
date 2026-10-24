@@ -73,3 +73,6 @@
 - Plaud (registratore riunioni): import trascrizioni/riassunti -> estrazione task/decisioni -> proposta task agli agenti (approvazione umana). Via cartella Drive / email / webhook (Zapier); verificare API ufficiale Plaud
 - Occhiali Meta: app companion (PWA/mobile) con voce hands-free verso Aurora/manager tramite Meta Wearables Device Access Toolkit (mic/audio/camera; Display = web app). Prima verificare disponibilita in Italia e modello occhiali; fase 0: PWA vivavoce via Bluetooth
 - Casella email Aruba (IMAP/SMTP generico, non solo Gmail): connettore IMAP per agenti (cerca/leggi/bozza), password nella cassaforte; usabile anche per ricevere le email di Plaud. App Bluetooth/occhiali: sviluppo successivo
+
+## FATTO in 1.8.0 (25/10): ripresa immediata dopo risposta; @Nome/​/agente su Telegram; Chat unificata + riepilogo; modifica progetti e allineamento (progetti+imprese); chiavi fornitori da app, modelli GPT, Stato sistemi; posta IMAP (Aruba)
+## PER 1.9.0: Canva, Brevo, Plaud (import riunioni -> task), strumenti agenti anche su OpenAI, task fase 2/3 (coda agenti, Calendar), vista controllo documenti, riordino menu
