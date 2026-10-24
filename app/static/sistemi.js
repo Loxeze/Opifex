@@ -78,16 +78,17 @@ function bloccoPosta() {
       const STATO = { attiva: "attiva", errore: "errore", da_provare: "da provare" };
       riempi(corpo, [
         d.caselle.length ? d.caselle.map(c => {
-          const cb = d.agenti.map(a => ({ a, c: h("input", { type: "checkbox" }) })); cb.forEach(x => { x.c.checked = c.agenti.includes(x.a.id); });
+          const sel = h("select", {}, h("option", { value: "" }, "— nessun agente —"), d.agenti.map(a => h("option", { value: a.id }, a.nome + (a.dipartimento ? " (" + a.dipartimento + ")" : ""))));
+          sel.value = c.agenti.length ? String(c.agenti[0]) : "";
           const m2 = h("div");
           return h("div", { class: "carta", style: "margin-bottom:12px" },
             h("div", { class: "nome" }, c.etichetta + " — " + c.email),
             h("div", { class: "sotto" }, c.host + ":" + c.porta + " · stato: " + STATO[c.stato]),
             c.ultimo_errore ? avviso(c.ultimo_errore, "no") : null,
-            h("div", { class: "sotto" }, "Agenti che la gestiscono (leggono e preparano bozze, mai invio):"),
-            h("div", { class: "riga" }, cb.map(x => h("label", { style: "flex:0 0 auto;margin-right:12px" }, x.c, " " + x.a.nome))), m2,
+            h("div", { class: "sotto" }, "Agente a cui è affidata in esclusiva (legge e prepara bozze, mai invio; nessun altro agente la vede):"),
+            sel, d.agenti.length ? null : h("p", { class: "aiuto" }, "Nessun agente disponibile: sposta un agente nel dipartimento Corrispondenza (o in un dipartimento con l'opzione «gestisce la posta»)."), m2,
             h("div", { class: "azioni" },
-              h("button", { class: "s", onclick: async () => { try { await api("PUT", "/gestione/posta/" + c.id + "/agenti", { agenti: cb.filter(x => x.c.checked).map(x => x.a.id) }); m2.replaceChildren(avviso("Salvato", "ok")); } catch (e) { m2.replaceChildren(avviso(e.message, "no")); } } }, "Salva agenti"),
+              h("button", { class: "s", onclick: async () => { try { await api("PUT", "/gestione/posta/" + c.id + "/agente", { agente_id: sel.value ? Number(sel.value) : null }); m2.replaceChildren(avviso("Salvato", "ok")); } catch (e) { m2.replaceChildren(avviso(e.message, "no")); } } }, "Salva"),
               h("button", { class: "s", onclick: async () => { try { const r = await api("POST", "/gestione/posta/" + c.id + "/prova"); m2.replaceChildren(avviso(r.esito, r.ok ? "ok" : "no")); } catch (e) { m2.replaceChildren(avviso(e.message, "no")); } } }, "Prova"),
               h("button", { class: "r", onclick: async () => { if (!confirm("Scollegare questa casella?")) return; try { await api("DELETE", "/gestione/posta/" + c.id); carica(); } catch (e) { m2.replaceChildren(avviso(e.message, "no")); } } }, "Scollega")));
         }) : h("p", { class: "sotto" }, "Nessuna casella collegata."),

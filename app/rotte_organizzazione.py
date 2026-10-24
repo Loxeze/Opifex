@@ -34,6 +34,7 @@ class DatiDivisione(BaseModel):
     aziende: list[int] | None = None       # tutte le aziende servite dal dipartimento
     colore: str = "#a78bfa"
     attiva: bool = True
+    gestisce_posta: bool = False           # dipartimento Corrispondenza: i suoi agenti possono avere caselle di posta in esclusiva
 
 
 @router.get("/aziende")
@@ -138,7 +139,7 @@ def _salva_aziende(conn, did: int, d: DatiDivisione):
 def elenco_divisioni(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         return conn.execute(
-            """SELECT d.id, d.nome, d.descrizione, d.azienda_id, d.colore, d.attiva,
+            """SELECT d.id, d.nome, d.descrizione, d.azienda_id, d.colore, d.attiva, d.gestisce_posta,
                       COALESCE((SELECT array_agg(x.azienda_id ORDER BY x.azienda_id) FROM divisioni_aziende x WHERE x.divisione_id = d.id), '{}') AS aziende,
                       (SELECT count(*) FROM agenti a WHERE a.divisione_id = d.id) AS agenti
                FROM divisioni d ORDER BY d.id""").fetchall()
@@ -150,8 +151,8 @@ def crea_divisione(d: DatiDivisione, _: dict = Depends(solo_titolare)):
         _controlla_azienda(conn, d)
         if conn.execute("SELECT 1 FROM divisioni WHERE lower(nome) = lower(%s)", (d.nome,)).fetchone():
             raise HTTPException(status.HTTP_409_CONFLICT, "Esiste gia' un dipartimento con questo nome")
-        r = conn.execute("INSERT INTO divisioni (nome, descrizione, azienda_id, colore, attiva) VALUES (%s,%s,%s,%s,%s) RETURNING id",
-                         (d.nome, d.descrizione, None, d.colore, d.attiva)).fetchone()
+        r = conn.execute("INSERT INTO divisioni (nome, descrizione, azienda_id, colore, attiva, gestisce_posta) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+                         (d.nome, d.descrizione, None, d.colore, d.attiva, d.gestisce_posta)).fetchone()
         _salva_aziende(conn, r["id"], d)
     return {"id": r["id"]}
 
@@ -162,8 +163,8 @@ def modifica_divisione(did: int, d: DatiDivisione, _: dict = Depends(solo_titola
         _controlla_azienda(conn, d)
         if conn.execute("SELECT 1 FROM divisioni WHERE lower(nome) = lower(%s) AND id <> %s", (d.nome, did)).fetchone():
             raise HTTPException(status.HTTP_409_CONFLICT, "Esiste gia' un dipartimento con questo nome")
-        r = conn.execute("UPDATE divisioni SET nome=%s, descrizione=%s, azienda_id=%s, colore=%s, attiva=%s WHERE id=%s RETURNING id",
-                         (d.nome, d.descrizione, None, d.colore, d.attiva, did)).fetchone()
+        r = conn.execute("UPDATE divisioni SET nome=%s, descrizione=%s, azienda_id=%s, colore=%s, attiva=%s, gestisce_posta=%s WHERE id=%s RETURNING id",
+                         (d.nome, d.descrizione, None, d.colore, d.attiva, d.gestisce_posta, did)).fetchone()
         if r is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Dipartimento inesistente")
         _salva_aziende(conn, did, d)

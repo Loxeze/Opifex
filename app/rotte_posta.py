@@ -16,8 +16,12 @@ def elenco(_: dict = Depends(solo_titolare)):
             """SELECT c.id, c.etichetta, c.email, c.host, c.porta, c.utente, c.stato, c.ultimo_errore,
                       COALESCE((SELECT array_agg(x.agente_id ORDER BY x.agente_id) FROM agenti_caselle_posta x WHERE x.casella_id = c.id), '{}') AS agenti
                FROM caselle_posta c ORDER BY c.id""").fetchall()
-        agenti = conn.execute("SELECT id, nome, ruolo FROM agenti WHERE attivo ORDER BY id").fetchall()
-    return {"caselle": caselle, "agenti": agenti}
+        # solo gli agenti dei dipartimenti che gestiscono la posta (piu' quelli che hanno gia' una casella)
+        agenti = conn.execute("""SELECT a.id, a.nome, a.ruolo, d.nome AS dipartimento FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
+                                 WHERE a.attivo AND (d.gestisce_posta OR EXISTS (SELECT 1 FROM agenti_caselle_posta x WHERE x.agente_id = a.id))
+                                 ORDER BY a.id""").fetchall()
+        dipartimenti = conn.execute("SELECT id, nome FROM divisioni WHERE gestisce_posta AND attiva ORDER BY id").fetchall()
+    return {"caselle": caselle, "agenti": agenti, "dipartimenti": dipartimenti}
 
 
 class NuovaCasella(BaseModel):
@@ -65,22 +69,31 @@ def prova(cid: int, _: dict = Depends(solo_titolare)):
         return _prova(conn, c)
 
 
-class Agenti(BaseModel):
-    agenti: list[int]
+class Affidamento(BaseModel):
+    agente_id: int | None = None      # None = nessun agente
 
 
-@router.put("/{cid}/agenti")
-def assegna(cid: int, d: Agenti, _: dict = Depends(solo_titolare)):
+@router.put("/{cid}/agente")
+def affida(cid: int, d: Affidamento, u: dict = Depends(solo_titolare)):
+    """Affida la casella in esclusiva a un solo agente, che deve stare in un dipartimento che gestisce la posta."""
     with connessione() as conn:
-        if conn.execute("SELECT 1 FROM caselle_posta WHERE id=%s", (cid,)).fetchone() is None:
+        c = conn.execute("SELECT email FROM caselle_posta WHERE id=%s", (cid,)).fetchone()
+        if c is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Casella inesistente")
-        attivi = {r["id"] for r in conn.execute("SELECT id FROM agenti WHERE attivo").fetchall()}
-        if not set(d.agenti) <= attivi:
+        if d.agente_id is None:
+            conn.execute("DELETE FROM agenti_caselle_posta WHERE casella_id=%s", (cid,))
+            registro.registra(conn, u, "collegamento", "casella di posta tolta all'agente", c["email"], "posta", cid)
+            return {"stato": "ok"}
+        a = conn.execute("""SELECT a.nome, a.attivo, d.gestisce_posta FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
+                            WHERE a.id=%s""", (d.agente_id,)).fetchone()
+        if a is None or not a["attivo"]:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Agente inesistente o spento")
-        conn.execute("DELETE FROM agenti_caselle_posta WHERE casella_id=%s", (cid,))
-        for a in set(d.agenti):   # un agente ha una sola casella: l'ultima assegnazione vince
-            conn.execute("INSERT INTO agenti_caselle_posta (agente_id, casella_id) VALUES (%s,%s) "
-                         "ON CONFLICT (agente_id) DO UPDATE SET casella_id = EXCLUDED.casella_id", (a, cid))
+        if not a["gestisce_posta"]:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                "Le caselle si affidano solo agli agenti di un dipartimento che gestisce la posta (es. Corrispondenza): sposta l'agente li'")
+        conn.execute("INSERT INTO agenti_caselle_posta (agente_id, casella_id) VALUES (%s,%s) "
+                     "ON CONFLICT (casella_id) DO UPDATE SET agente_id = EXCLUDED.agente_id", (d.agente_id, cid))
+        registro.registra(conn, u, "collegamento", "casella di posta affidata in esclusiva", c["email"], "posta", cid, "", {"agente": a["nome"]})
     return {"stato": "ok"}
 
 

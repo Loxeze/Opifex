@@ -370,7 +370,7 @@ function formAzienda(z, tutte, dopo) {
 }
 
 function formDivisione(d0, aziende, dopo) {
-  const d = d0 || { nome: "", descrizione: "", azienda_id: null, colore: "#a78bfa", attiva: true };
+  const d = d0 || { nome: "", descrizione: "", azienda_id: null, colore: "#a78bfa", attiva: true, gestisce_posta: false };
   const nome = h("input", { type: "text", value: d.nome, maxlength: 80 });
   const desc = h("input", { type: "text", value: d.descrizione || "", maxlength: 500 });
   const attuali = d.aziende || (d.azienda_id ? [d.azienda_id] : []);
@@ -378,10 +378,12 @@ function formDivisione(d0, aziende, dopo) {
   const az = h("div", {}, azCb.length ? azCb.map(([z, cb]) => h("label", { class: "spunta" }, cb, z.nome)) : h("p", { class: "aiuto" }, "Nessuna azienda ancora."));
   const col = h("input", { type: "color", value: d.colore });
   const att = h("input", { type: "checkbox" }); att.checked = d.attiva;
+  const posta = h("input", { type: "checkbox" }); posta.checked = !!d.gestisce_posta;
   const msg = h("div");
-  const corpo = () => ({ nome: nome.value.trim(), descrizione: desc.value.trim() || null, aziende: azCb.filter(([, cb]) => cb.checked).map(([z]) => z.id), colore: col.value, attiva: att.checked });
+  const corpo = () => ({ nome: nome.value.trim(), descrizione: desc.value.trim() || null, aziende: azCb.filter(([, cb]) => cb.checked).map(([z]) => z.id), colore: col.value, attiva: att.checked, gestisce_posta: posta.checked });
   const chiudi = apriPannello(d0 ? d0.nome : "Nuovo dipartimento", [
     h("div", { class: "interruttore" }, att, h("span", {}, "Dipartimento attivo")),
+    h("div", { class: "interruttore" }, posta, h("span", {}, "Gestisce la posta (i suoi agenti possono avere caselle di posta in esclusiva)")),
     h("label", {}, "Nome", nome), h("label", {}, "Cosa fa", desc), h("label", {}, "Aziende servite", h("p", { class: "aiuto" }, "Un dipartimento può servire più aziende (es. Marketing per due realtà). Senza nessuna è trasversale."), az), h("label", {}, "Colore", col), msg,
     h("div", { class: "azioni" },
       h("button", { class: "p", onclick: async () => { try { await api(d0 ? "PUT" : "POST", d0 ? "/gestione/divisioni/" + d0.id : "/gestione/divisioni", corpo()); chiudi(); await ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva"),

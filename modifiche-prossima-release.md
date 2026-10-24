@@ -89,3 +89,6 @@
 
 ## 1.10.1 (fatto)
 - Pagina Chat: pannello "Richieste da risolvere" in cima, raggruppate per agente, espandibili, risposta diretta, bloccanti evidenziate.
+
+## 1.10.2 (fatto)
+- Dipartimento Corrispondenza (opzione "gestisce la posta" sui dipartimenti); caselle affidate in esclusiva a un agente, piu caselle per agente; solo agenti di dipartimenti abilitati.

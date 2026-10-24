@@ -178,10 +178,10 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             gmail_tool = bool(a["fornitore"] == "anthropic" and strumenti_gmail.account_valido(conn, a["gmail_account_id"])
                               and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
                                              a["non_conservazione_attiva"], a["dpa_firmato"])[0])
-            posta_c = (strumenti_posta.casella_agente(conn, agente_id)
+            posta_c = (strumenti_posta.caselle_agente(conn, agente_id)
                        if a["fornitore"] == "anthropic" and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
                                                                         a["non_conservazione_attiva"], a["dpa_firmato"])[0] else None)
-            posta_tool = posta_c is not None
+            posta_tool = bool(posta_c)
             social_tool = bool(a["fornitore"] == "anthropic" and a["social_attivo"] and buffer_social.collegato(conn))
             if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
@@ -242,7 +242,7 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
 
                 if posta_tool:
                     extra.extend(strumenti_posta.STRUMENTI)
-                    avviso_extra += strumenti_posta.AVVISO
+                    avviso_extra += strumenti_posta.AVVISO + " Caselle tue: " + ", ".join(c["email"] for c in posta_c) + "."
                     gp = strumenti_posta.gestore(conn, posta_c, agente_id)
                     for s_ in strumenti_posta.STRUMENTI:
                         gestori[s_["name"]] = gp
