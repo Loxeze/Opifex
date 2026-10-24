@@ -86,8 +86,12 @@ def documenti_visibili(conn, agente_id: int) -> list[dict]:
 
 def contesto_documenti(conn, a: dict, testo: str) -> tuple[str, list[str], list[str]]:
     """Elenco dei documenti disponibili + brani pertinenti; se la ricerca per parole non trova nulla, l'inizio dei documenti."""
-    docs = [d for d in documenti_visibili(conn, a["id"]) if _ok(a, d["fascia_dati"])]  # i nomi dei documenti che non possono uscire non escono
+    tutti = documenti_visibili(conn, a["id"])
+    docs = [d for d in tutti if _ok(a, d["fascia_dati"])]
     usati, esclusi, blocchi = [], [], []
+    for d in tutti:   # documenti assegnati ma che il modello di questo agente non puo' ricevere: lo si dice, non si tace
+        if not _ok(a, d["fascia_dati"]) and d["nome"] not in esclusi:
+            esclusi.append(d["nome"])
     for pz in pezzi_pertinenti(conn, a["id"], testo):
         if _ok(a, pz["fascia_dati"]):
             blocchi.append(f"[{pz['nome']}]\n{pz['testo']}")
@@ -95,8 +99,13 @@ def contesto_documenti(conn, a: dict, testo: str) -> tuple[str, list[str], list[
                 usati.append(pz["nome"])
         elif pz["nome"] not in esclusi:
             esclusi.append(pz["nome"])
+    nota = ""
+    if esclusi:
+        nota = (f"Documenti assegnati a te ma NON leggibili dal tuo modello per il livello di riservatezza o le garanzie del fornitore: "
+                + ", ".join(f"«{n}»" for n in esclusi)
+                + ". Non puoi vederli: dillo chiaramente a Lorenzo (serve abbassare la riservatezza del documento o dare garanzie al fornitore, in Sicurezza e garanzie). ")
     if not docs:
-        return "", usati, esclusi
+        return nota, usati, esclusi
     if not blocchi:  # nessuna parola in comune: do almeno l'inizio dei documenti, cosi' l'agente sa di cosa trattano
         for d in docs[:4]:
             p = conn.execute("SELECT testo FROM pezzi_documenti WHERE documento_id = %s ORDER BY id LIMIT 1", (d["id"],)).fetchone()
@@ -104,7 +113,7 @@ def contesto_documenti(conn, a: dict, testo: str) -> tuple[str, list[str], list[
                 blocchi.append(f"[{d['nome']} - inizio del documento]\n{p['testo']}")
                 usati.append(d["nome"])
     elenco = ", ".join(f"«{d['nome']}»" for d in docs)
-    out = f"Documenti a tua disposizione: {elenco}. "
+    out = nota + f"Documenti a tua disposizione: {elenco}. "
     if blocchi:
         out += ("Brani utili (usali se pertinenti e cita il documento):\n\n" + "\n\n---\n\n".join(blocchi))
     return out, usati, esclusi

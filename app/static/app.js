@@ -265,7 +265,7 @@ function modulo(a) {
     try { stato.documenti = await api("GET", "/gestione/documenti"); } catch (e) { sezioneDoc.replaceChildren(avviso(e.message, "no")); return; }
     const miei = stato.documenti.filter(x => x.assegnazioni.some(y => y.agente_id === a.id));
     const sotto = discendentiDi(a.id);
-    const file = h("input", { type: "file", accept: ".pdf,.docx,.txt,.md,.csv" });
+    const file = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.txt,.md,.csv" });
     const fasciaDoc = h("select", {}, Object.entries(ETICHETTA_FASCIA).map(([v, t]) => h("option", { value: v }, t))); fasciaDoc.value = "interno";
     const elenco = miei.map(x => {
       const mia = x.assegnazioni.find(y => y.agente_id === a.id);
@@ -289,12 +289,21 @@ function modulo(a) {
     });
     sezioneDoc.replaceChildren(...[
       miei.length ? elenco : h("p", { class: "aiuto" }, "Nessun documento: carica qui quello di riferimento per " + d.nome + "."),
-      h("label", {}, "Carica un documento", file), h("label", {}, "Riservatezza", fasciaDoc), m,
+      h("label", {}, "Carica uno o più documenti", h("p", { class: "aiuto" }, "Puoi sceglierne quanti vuoi insieme: tutti avranno la stessa riservatezza."), file), h("label", {}, "Riservatezza", fasciaDoc), m,
       h("div", { class: "azioni" }, h("button", { class: "s", onclick: async (ev) => {
-        if (!file.files[0]) { m.replaceChildren(avviso("Scegli un file", "no")); return; }
-        const b = ev.currentTarget; b.disabled = true; b.textContent = "Caricamento…";
-        const f = new FormData(); f.append("file", file.files[0]); f.append("nome", ""); f.append("fascia_dati", fasciaDoc.value); f.append("per_tutti", "false"); f.append("agenti", String(a.id));
-        try { await api("POST", "/gestione/documenti", f); caricaDoc(); } catch (e) { m.replaceChildren(avviso(e.message, "no")); b.disabled = false; b.textContent = "Carica"; } } }, "Carica"))].flat(Infinity));
+        const scelti = [...file.files];
+        if (!scelti.length) { m.replaceChildren(avviso("Scegli almeno un file", "no")); return; }
+        const b = ev.currentTarget; b.disabled = true;
+        const riusciti = [], falliti = [];
+        for (let i = 0; i < scelti.length; i++) {
+          b.textContent = "Caricamento " + (i + 1) + " di " + scelti.length + "…";
+          const f = new FormData(); f.append("file", scelti[i]); f.append("nome", ""); f.append("fascia_dati", fasciaDoc.value); f.append("per_tutti", "false"); f.append("agenti", String(a.id));
+          try { await api("POST", "/gestione/documenti", f); riusciti.push(scelti[i].name); } catch (e) { falliti.push(scelti[i].name + ": " + e.message); }
+        }
+        await caricaDoc();
+        // dopo il ridisegno l'esito resta visibile in cima alla sezione
+        if (falliti.length || riusciti.length > 1) sezioneDoc.prepend(falliti.length ? avviso(riusciti.length + " caricati, " + falliti.length + " non riusciti — " + falliti.join(" · "), "avv") : avviso(riusciti.length + " documenti caricati.", "ok"));
+      } }, "Carica"))].flat(Infinity));
   };
   caricaDoc();
 
@@ -584,19 +593,33 @@ function vistaChatSolo() {
   const testo = h("textarea", { placeholder: "Scrivi il messaggio o premi il microfono e parla…" });
   const msg = h("div");
   const bInvia = h("button", { class: "p" }, "Invia");
+  const allegati = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.txt,.md,.csv" });
+  const elencoAll = h("div", { class: "sotto" });
+  allegati.addEventListener("change", () => { elencoAll.textContent = allegati.files.length ? "Allegati: " + [...allegati.files].map(x => x.name).join(", ") : ""; });
+  const modoVoce = h("select", {}, h("option", { value: "browser" }, "Browser (gratuito)"), h("option", { value: "server" }, "Server con OpenAI (più affidabile)"));
+  modoVoce.value = Voce.modo;
+  modoVoce.addEventListener("change", () => { Voce.modo = modoVoce.value; });
+  const provaMic = h("div", { class: "sotto" });
   const bMic = h("button", { class: "s", type: "button", title: "Detta il messaggio con la voce" }, "🎤 Parla");
   const stile = (ascolto) => { bMic.textContent = ascolto ? "⏹ Smetti di ascoltare" : "🎤 Parla"; bMic.classList.toggle("p", !!ascolto); };
   const invia = async () => {
-    if (!testo.value.trim()) return;
+    if (!testo.value.trim() && !allegati.files.length) return;
     msg.replaceChildren();
     Voce.ferma();
     bInvia.disabled = true; bInvia.textContent = "Attendi…";
     try {
       const agente = attivi.find(a => a.id === Number(scelta.value));
       stato.chatAgente = agente.id;
-      const r = await api("POST", "/agenti/" + scelta.value + "/chat", { messaggio: testo.value, fascia_dati: f.value });
-      stato.conversazione.unshift({ agente: agente.nome, domanda: testo.value, risposta: r.risposta, t: r.token_input + r.token_output,
-        usati: r.documenti_usati || [], esclusi: r.documenti_esclusi_per_riservatezza || [], avvisi: r.avvisi || [] });
+      let r;
+      if (allegati.files.length) {
+        const fd = new FormData(); fd.append("messaggio", testo.value); fd.append("fascia_dati", f.value);
+        for (const x of allegati.files) fd.append("file", x);
+        r = await api("POST", "/agenti/" + scelta.value + "/chat-allegati", fd);
+      } else r = await api("POST", "/agenti/" + scelta.value + "/chat", { messaggio: testo.value, fascia_dati: f.value });
+      const avvAll = [];
+      if (r.allegati_troncati && r.allegati_troncati.length) avvAll.push("File letti solo in parte perché lunghi: " + r.allegati_troncati.join(", "));
+      stato.conversazione.unshift({ agente: agente.nome, domanda: testo.value + (r.allegati_letti ? "\n📎 " + r.allegati_letti.join(", ") : ""), risposta: r.risposta, t: r.token_input + r.token_output,
+        usati: r.documenti_usati || [], esclusi: r.documenti_esclusi_per_riservatezza || [], avvisi: (r.avvisi || []).concat(avvAll) });
       testo.value = ""; disegna();
       if (Voce.leggiRisposte || Voce.viva) {
         Voce.leggi(r.risposta, () => { if (Voce.viva && stato.vista === "chat" && Voce.avviaAscolto) Voce.avviaAscolto(); });
@@ -606,13 +629,19 @@ function vistaChatSolo() {
   bInvia.addEventListener("click", invia);
   // dettatura: con «vivavoce» attivo, quando smetti di parlare il messaggio parte da solo
   const ascolta = () => {
+    const fineAscolto = (t) => { stile(false); if (Voce.viva && t) invia(); else if (Voce.viva && stato.vista === "chat") setTimeout(() => Voce.viva && Voce.avviaAscolto && Voce.avviaAscolto(), 400); };
+    const statoAscolto = (s) => { if (s === null) stile(false); else if (s === "ascolto") { stile(true); msg.replaceChildren(); } else if (s === "trascrivo") msg.replaceChildren(avviso("Trascrivo la registrazione…", "ok")); else if (s) msg.replaceChildren(avviso(s, "avv")); };
+    if (Voce.modo === "server") {
+      if (!Voce.registra(testo, fineAscolto, statoAscolto, f.value)) msg.replaceChildren(avviso("Questo browser non può registrare dal microfono.", "avv"));
+      return;
+    }
     if (!Voce.ascolta(testo, (t) => { stile(false); if (Voce.viva && t) invia(); else if (Voce.viva && stato.vista === "chat") setTimeout(() => Voce.viva && Voce.avviaAscolto && Voce.avviaAscolto(), 400); },
       (s) => { if (s === null) stile(false); else if (s === "ascolto") stile(true); else if (s) msg.replaceChildren(avviso(s, "avv")); })) {
       msg.replaceChildren(avviso("Il tuo browser non supporta la dettatura vocale: usa Chrome, Edge o Safari.", "avv"));
     }
   };
   Voce.avviaAscolto = ascolta;
-  bMic.addEventListener("click", () => { if (Voce.inAscolto()) { Voce.viva = false; Voce.ferma(); stile(false); } else ascolta(); });
+  bMic.addEventListener("click", () => { if (Voce.inAscolto()) { Voce.viva = false; Voce.termina(); stile(false); } else ascolta(); });
   testo.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); invia(); } });
   const leggi = h("input", { type: "checkbox" }); leggi.checked = Voce.leggiRisposte;
   leggi.addEventListener("change", () => { Voce.leggiRisposte = leggi.checked; });
@@ -625,11 +654,14 @@ function vistaChatSolo() {
     h("div", { class: "carta" },
       h("div", { class: "riga" }, h("label", {}, "Agente", scelta),
         h("label", {}, "Tipo di dati nel messaggio", f)),
-      h("label", {}, "Messaggio (Invio per inviare, Maiusc+Invio per andare a capo)", testo), msg,
+      h("label", {}, "Messaggio (Invio per inviare, Maiusc+Invio per andare a capo)", testo),
+      h("label", {}, "Allegati (facoltativi: PDF, Word, TXT, MD, CSV; fino a 5 file, 10 MB ciascuno)", allegati), elencoAll, msg,
       h("div", { class: "azioni" }, vocale ? bMic : null, h("button", { class: "s", type: "button", onclick: () => { Voce.fermaTutto(); viva.checked = false; stile(false); } }, "⏹ Silenzio"), bInvia),
       vocale ? h("div", { class: "interruttore" }, leggi, h("span", {}, "Leggi ad alta voce le risposte")) : null,
       Voce.supportoDettatura ? h("div", { class: "interruttore" }, viva, h("span", {}, "Vivavoce: parli, il messaggio parte quando smetti, l'agente risponde a voce e riascolta")) : null,
-      vocale ? h("p", { class: "aiuto" }, "La dettatura usa il riconoscimento vocale del browser: in Chrome l'audio passa dal servizio di Google. Non dettare dati riservati se non vuoi che escano dal tuo computer.") : null),
+      vocale ? h("label", {}, "Trascrizione della voce", modoVoce) : null,
+      vocale ? h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => Voce.provaMicrofono(t => provaMic.replaceChildren(document.createTextNode(t))) }, "🔧 Prova il microfono")) : null, provaMic,
+      vocale ? h("p", { class: "aiuto" }, "Browser: usa il riconoscimento vocale del browser (non funziona su Firefox e Brave). Server: registra e trascrive con OpenAI, richiede la chiave OpenAI e vale per qualsiasi browser. Con il browser: in Chrome l'audio passa dal servizio di Google. Non dettare dati riservati se non vuoi che escano dal tuo computer.") : null),
     stato.conversazione.map(c => h("div", { class: "carta", style: "margin-top:12px" },
       h("div", { class: "sotto" }, "Tu → " + c.agente),
       h("div", { class: "risposta" }, c.domanda),

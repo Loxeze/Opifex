@@ -31,6 +31,7 @@ from .rotte_fornitori import router as router_fornitori
 from .rotte_posta import router as router_posta
 from .rotte_registro import router as router_registro
 from .rotte_sistema import router as router_sistema
+from .rotte_voce import router as router_voce
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
 
@@ -137,6 +138,7 @@ app.include_router(router_fornitori)
 app.include_router(router_posta)
 app.include_router(router_registro)
 app.include_router(router_sistema)
+app.include_router(router_voce)
 
 
 @app.get("/", include_in_schema=False)
