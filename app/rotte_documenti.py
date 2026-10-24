@@ -23,9 +23,14 @@ def _assegna(conn, documento_id: int, ids: list[int]):
     for i in dict.fromkeys(ids):
         if conn.execute("SELECT 1 FROM agenti WHERE id = %s", (i,)).fetchone() is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Agente inesistente")
-    conn.execute("DELETE FROM documenti_agenti WHERE documento_id = %s", (documento_id,))
+    # l'elenco del titolare sostituisce le assegnazioni dirette; i passaggi fatti dai manager restano finche' il passante ha il documento
+    conn.execute("DELETE FROM documenti_agenti WHERE documento_id = %s AND passato_da IS NULL", (documento_id,))
     for i in dict.fromkeys(ids):
-        conn.execute("INSERT INTO documenti_agenti (documento_id, agente_id) VALUES (%s, %s)", (documento_id, i))
+        conn.execute("INSERT INTO documenti_agenti (documento_id, agente_id) VALUES (%s, %s) ON CONFLICT (documento_id, agente_id) DO UPDATE SET passato_da = NULL", (documento_id, i))
+    while conn.execute("""DELETE FROM documenti_agenti x WHERE x.documento_id = %s AND x.passato_da IS NOT NULL
+                          AND NOT EXISTS (SELECT 1 FROM documenti_agenti y WHERE y.documento_id = x.documento_id AND y.agente_id = x.passato_da)
+                          RETURNING 1""", (documento_id,)).fetchone():
+        pass
 
 
 @router.post("/documenti", status_code=201)
@@ -63,8 +68,41 @@ def elenco(_: dict = Depends(solo_titolare)):
         return conn.execute(
             """SELECT d.id, d.nome, d.nome_file, d.fascia_dati, d.per_tutti, d.caratteri, d.creato_il,
                       COALESCE((SELECT array_agg(da.agente_id ORDER BY da.agente_id)
-                                FROM documenti_agenti da WHERE da.documento_id = d.id), '{}') AS agenti
-               FROM documenti d ORDER BY d.creato_il DESC""").fetchall()
+                                FROM documenti_agenti da WHERE da.documento_id = d.id), '{}') AS agenti,
+                      COALESCE((SELECT json_agg(json_build_object('agente_id', da.agente_id, 'passato_da', da.passato_da) ORDER BY da.agente_id)
+                                FROM documenti_agenti da WHERE da.documento_id = d.id), '[]'::json) AS assegnazioni,
+                      u.nome AS caricato_da
+               FROM documenti d LEFT JOIN utenti u ON u.id = d.caricato_da ORDER BY d.creato_il DESC""").fetchall()
+
+
+def _discendenti(conn, agente_id: int) -> set[int]:
+    return {r["id"] for r in conn.execute(
+        """WITH RECURSIVE sotto AS (SELECT id FROM agenti WHERE superiore_id = %s
+                                    UNION SELECT a.id FROM agenti a JOIN sotto s ON a.superiore_id = s.id)
+           SELECT id FROM sotto""", (agente_id,)).fetchall()}
+
+
+class Passaggio(BaseModel):
+    agenti: list[int]
+
+
+@router.put("/agenti/{agente_id}/documenti/{doc_id}/passa")
+def passa_ai_sottoposti(agente_id: int, doc_id: int, p: Passaggio, utente: dict = Depends(solo_titolare)):
+    """Il documento di un agente viene girato ai suoi sottoposti (anche piu' in basso): scelta di chi deve usarlo per il suo lavoro.
+    I superiori lo vedono comunque in automatico. L'elenco sostituisce i passaggi fatti in precedenza da questo agente."""
+    with connessione() as conn:
+        if conn.execute("SELECT 1 FROM documenti_agenti WHERE documento_id=%s AND agente_id=%s", (doc_id, agente_id)).fetchone() is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "L'agente non ha questo documento")
+        sotto = _discendenti(conn, agente_id)
+        scelti = list(dict.fromkeys(p.agenti))
+        if not set(scelti) <= sotto:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Si puo' passare un documento solo ai propri sottoposti")
+        conn.execute("DELETE FROM documenti_agenti WHERE documento_id=%s AND passato_da=%s", (doc_id, agente_id))
+        for i in scelti:
+            conn.execute("INSERT INTO documenti_agenti (documento_id, agente_id, passato_da) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING", (doc_id, i, agente_id))
+        conn.execute("INSERT INTO registro_azioni (azione, dettagli, utente_id) VALUES ('documento_passato', %s::jsonb, %s)",
+                     (json.dumps({"documento_id": doc_id, "da": agente_id, "a": scelti}), utente["id"]))
+    return {"stato": "ok"}
 
 
 class ModificaDocumento(BaseModel):

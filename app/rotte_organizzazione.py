@@ -30,7 +30,8 @@ class DatiAzienda(BaseModel):
 class DatiDivisione(BaseModel):
     nome: str = Field(min_length=1, max_length=80)
     descrizione: str | None = Field(default=None, max_length=500)
-    azienda_id: int | None = None
+    azienda_id: int | None = None          # compatibilita': se manca "aziende" vale come unica azienda
+    aziende: list[int] | None = None       # tutte le aziende servite dal dipartimento
     colore: str = "#a78bfa"
     attiva: bool = True
 
@@ -41,7 +42,7 @@ def elenco_aziende(_: dict = Depends(solo_titolare)):
         return conn.execute(
             """SELECT a.id, a.nome, a.territorio, a.profilo, a.criteri_interesse, a.colore, a.attiva,
                       COALESCE((SELECT array_agg(x.agente_id ORDER BY x.agente_id) FROM agenti_aziende x WHERE x.azienda_id = a.id), '{}') AS agenti,
-                      COALESCE((SELECT array_agg(d.id ORDER BY d.id) FROM divisioni d WHERE d.azienda_id = a.id), '{}') AS divisioni
+                      COALESCE((SELECT array_agg(x.divisione_id ORDER BY x.divisione_id) FROM divisioni_aziende x WHERE x.azienda_id = a.id), '{}') AS divisioni
                FROM aziende a ORDER BY a.id""").fetchall()
 
 
@@ -101,10 +102,23 @@ def assegna_aziende(agente_id: int, d: AssegnaAziende, _: dict = Depends(solo_ti
     return {"stato": "ok"}
 
 
+def _aziende_scelte(d: DatiDivisione) -> list[int]:
+    return list(dict.fromkeys(d.aziende if d.aziende is not None else ([d.azienda_id] if d.azienda_id is not None else [])))
+
+
 def _controlla_azienda(conn, d: DatiDivisione):
     _colore(d.colore)
-    if d.azienda_id is not None and conn.execute("SELECT 1 FROM aziende WHERE id = %s", (d.azienda_id,)).fetchone() is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Azienda inesistente")
+    for i in _aziende_scelte(d):
+        if conn.execute("SELECT 1 FROM aziende WHERE id = %s", (i,)).fetchone() is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Azienda inesistente")
+
+
+def _salva_aziende(conn, did: int, d: DatiDivisione):
+    scelte = _aziende_scelte(d)
+    conn.execute("DELETE FROM divisioni_aziende WHERE divisione_id = %s", (did,))
+    for i in scelte:
+        conn.execute("INSERT INTO divisioni_aziende (divisione_id, azienda_id) VALUES (%s,%s)", (did, i))
+    conn.execute("UPDATE divisioni SET azienda_id = %s WHERE id = %s", (scelte[0] if scelte else None, did))
 
 
 @router.get("/divisioni")
@@ -112,6 +126,7 @@ def elenco_divisioni(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         return conn.execute(
             """SELECT d.id, d.nome, d.descrizione, d.azienda_id, d.colore, d.attiva,
+                      COALESCE((SELECT array_agg(x.azienda_id ORDER BY x.azienda_id) FROM divisioni_aziende x WHERE x.divisione_id = d.id), '{}') AS aziende,
                       (SELECT count(*) FROM agenti a WHERE a.divisione_id = d.id) AS agenti
                FROM divisioni d ORDER BY d.id""").fetchall()
 
@@ -123,7 +138,8 @@ def crea_divisione(d: DatiDivisione, _: dict = Depends(solo_titolare)):
         if conn.execute("SELECT 1 FROM divisioni WHERE lower(nome) = lower(%s)", (d.nome,)).fetchone():
             raise HTTPException(status.HTTP_409_CONFLICT, "Esiste gia' un dipartimento con questo nome")
         r = conn.execute("INSERT INTO divisioni (nome, descrizione, azienda_id, colore, attiva) VALUES (%s,%s,%s,%s,%s) RETURNING id",
-                         (d.nome, d.descrizione, d.azienda_id, d.colore, d.attiva)).fetchone()
+                         (d.nome, d.descrizione, None, d.colore, d.attiva)).fetchone()
+        _salva_aziende(conn, r["id"], d)
     return {"id": r["id"]}
 
 
@@ -134,9 +150,10 @@ def modifica_divisione(did: int, d: DatiDivisione, _: dict = Depends(solo_titola
         if conn.execute("SELECT 1 FROM divisioni WHERE lower(nome) = lower(%s) AND id <> %s", (d.nome, did)).fetchone():
             raise HTTPException(status.HTTP_409_CONFLICT, "Esiste gia' un dipartimento con questo nome")
         r = conn.execute("UPDATE divisioni SET nome=%s, descrizione=%s, azienda_id=%s, colore=%s, attiva=%s WHERE id=%s RETURNING id",
-                         (d.nome, d.descrizione, d.azienda_id, d.colore, d.attiva, did)).fetchone()
+                         (d.nome, d.descrizione, None, d.colore, d.attiva, did)).fetchone()
         if r is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Dipartimento inesistente")
+        _salva_aziende(conn, did, d)
     return {"stato": "ok"}
 
 
@@ -179,7 +196,9 @@ def organigramma(_: dict = Depends(solo_titolare)):
             a["carico"] = min(100, round(100 * a["token_mese"] / a["budget_token_mensile"])) if a["budget_token_mensile"] else None
         return {
             "aziende": conn.execute("SELECT id, nome, colore, attiva FROM aziende ORDER BY id").fetchall(),
-            "divisioni": conn.execute("SELECT id, nome, azienda_id, colore, attiva FROM divisioni ORDER BY id").fetchall(),
+            "divisioni": conn.execute("""SELECT d.id, d.nome, d.azienda_id, d.colore, d.attiva,
+                                         COALESCE((SELECT array_agg(x.azienda_id ORDER BY x.azienda_id) FROM divisioni_aziende x WHERE x.divisione_id = d.id), '{}') AS aziende
+                                  FROM divisioni d ORDER BY d.id""").fetchall(),
             "agenti": agenti,
         }
 

@@ -50,7 +50,7 @@ function calcolaLayout(dati) {
   return { nodi, per, raggi: [...new Set(nodi.filter(n => !n.centro).map(n => Math.round(n.r * 100) / 100))] };
 }
 
-function vistaOrganigramma() {
+function vistaOrganigramma(incorniciata) {
   const cv = h("canvas", {});
   const scena = h("div", { class: "scena" }, cv);
   const scheda = h("div", { class: "scheda", style: "display:none" });
@@ -88,8 +88,8 @@ function vistaOrganigramma() {
   };
 
   const disegnaScena = () => {
-    cx.fillStyle = "#05070a"; cx.fillRect(0, 0, W, H);
-    cx.fillStyle = "rgba(125,138,153,0.35)";
+    cx.clearRect(0, 0, W, H);   // lo sfondo digitale e' nel CSS (.scena)
+    cx.fillStyle = "rgba(120,220,255,0.38)";
     for (const s of stelle) { const p = proietta(s.x, s.y, s.z); cx.fillRect(p.px, p.py, 1.2, 1.2); }
     if (!layout) {
       cx.fillStyle = "#7d8a99"; cx.font = "13px monospace"; cx.textAlign = "center"; cx.fillText("Caricamento…", W / 2, H / 2); return;
@@ -157,7 +157,7 @@ function vistaOrganigramma() {
       h("div", { class: "sotto" }, "Aziende: " + (nomiAz.join(", ") || "tutte (trasversale)")),
       h("div", { class: "azioni" },
         h("button", { class: "p", onclick: () => { const a = stato.agenti.find(x => x.id === n.id); if (a) modulo(a); } }, "Apri scheda"),
-        h("button", { class: "s", onclick: () => { stato.vista = "chat"; disegna(); } }, "Parla"))]);
+        h("button", { class: "s", onclick: () => vai("chat") }, "Parla"))]);
   };
   const chiudiScheda = () => { scelto = null; scheda.style.display = "none"; };
 
@@ -263,7 +263,7 @@ function vistaOrganigramma() {
 
   scena.append(h("div", { class: "comandi" }, sel, bRot,
     h("button", { class: "s", onclick: () => { rotY = 0.4; rotX = 0.35; zoom = 1; } }, "Centra vista"),
-    h("button", { class: "s", onclick: () => { stato.vista = "struttura"; disegna(); } }, "+ Azienda / reparto"),
+    h("button", { class: "s", onclick: () => vai("impostazioni", "struttura") }, "+ Azienda / reparto"),
     h("button", { class: "s", onclick: () => modulo(null) }, "+ Nuovo agente")), legenda, scheda);
   carica(); interroga();
   stato.timer = setInterval(() => { interroga(); if (++giro % 8 === 0) carica(); }, 2000);
@@ -291,7 +291,7 @@ function vistaStruttura() {
         h("div", { class: "griglia" }, divisioni.map(d => h("div", { class: "carta agente", tabindex: 0, role: "button", onclick: () => formDivisione(d, aziende, carica) },
           h("div", { class: "nome" }, h("span", { class: "puntino", style: "background:" + d.colore }), d.nome, d.attiva ? "" : " (disattivato)"),
           h("div", { class: "sotto" }, d.descrizione || "—"),
-          h("div", { class: "sotto" }, (aziende.find(z => z.id === d.azienda_id)?.nome || "Nessuna azienda") + " · " + d.agenti + " agenti"))))]);
+          h("div", { class: "sotto" }, ((d.aziende || []).map(i => aziende.find(z => z.id === i)?.nome).filter(Boolean).join(", ") || "Trasversale") + " · " + d.agenti + " agenti"))))]);
     } catch (e) { lista.replaceChildren(avviso(e.message, "no")); }
   };
   carica();
@@ -325,15 +325,16 @@ function formDivisione(d0, aziende, dopo) {
   const d = d0 || { nome: "", descrizione: "", azienda_id: null, colore: "#a78bfa", attiva: true };
   const nome = h("input", { type: "text", value: d.nome, maxlength: 80 });
   const desc = h("input", { type: "text", value: d.descrizione || "", maxlength: 500 });
-  const az = h("select", {}, h("option", { value: "" }, "Nessuna (trasversale)"), aziende.map(z => h("option", { value: z.id }, z.nome)));
-  az.value = d.azienda_id ?? "";
+  const attuali = d.aziende || (d.azienda_id ? [d.azienda_id] : []);
+  const azCb = aziende.map(z => { const cb = h("input", { type: "checkbox" }); cb.checked = attuali.includes(z.id); return [z, cb]; });
+  const az = h("div", {}, azCb.length ? azCb.map(([z, cb]) => h("label", { class: "spunta" }, cb, z.nome)) : h("p", { class: "aiuto" }, "Nessuna azienda ancora."));
   const col = h("input", { type: "color", value: d.colore });
   const att = h("input", { type: "checkbox" }); att.checked = d.attiva;
   const msg = h("div");
-  const corpo = () => ({ nome: nome.value.trim(), descrizione: desc.value.trim() || null, azienda_id: az.value ? Number(az.value) : null, colore: col.value, attiva: att.checked });
+  const corpo = () => ({ nome: nome.value.trim(), descrizione: desc.value.trim() || null, aziende: azCb.filter(([, cb]) => cb.checked).map(([z]) => z.id), colore: col.value, attiva: att.checked });
   const chiudi = apriPannello(d0 ? d0.nome : "Nuovo dipartimento", [
     h("div", { class: "interruttore" }, att, h("span", {}, "Dipartimento attivo")),
-    h("label", {}, "Nome", nome), h("label", {}, "Cosa fa", desc), h("label", {}, "Azienda", az), h("label", {}, "Colore", col), msg,
+    h("label", {}, "Nome", nome), h("label", {}, "Cosa fa", desc), h("label", {}, "Aziende servite", h("p", { class: "aiuto" }, "Un dipartimento può servire più aziende (es. Marketing per due realtà). Senza nessuna è trasversale."), az), h("label", {}, "Colore", col), msg,
     h("div", { class: "azioni" },
       h("button", { class: "p", onclick: async () => { try { await api(d0 ? "PUT" : "POST", d0 ? "/gestione/divisioni/" + d0.id : "/gestione/divisioni", corpo()); chiudi(); await ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva"),
       d0 ? h("button", { class: "r", onclick: async () => { if (!confirm("Eliminare il dipartimento?")) return; try { await api("DELETE", "/gestione/divisioni/" + d0.id); chiudi(); await ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Elimina") : null,

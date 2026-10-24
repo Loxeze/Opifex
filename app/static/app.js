@@ -4,7 +4,7 @@
 const radice = document.getElementById("radice");
 let token = null;
 try { token = sessionStorage.getItem("token"); } catch (e) { /* sessionStorage non disponibile */ }
-let stato = { vista: "organigramma", richieste: 0, agenti: [], opzioni: null, connessioni: [], documenti: [], conversazione: [] };
+let stato = { vista: "dashboard", sezione: "profilo", richieste: 0, agenti: [], opzioni: null, connessioni: [], documenti: [], conversazione: [] };
 
 function h(tag, attrs, ...figli) {
   const el = document.createElement(tag);
@@ -73,17 +73,21 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["organigramma", "Organigramma"], ["struttura", "Struttura"], ["agenti", "Agenti"], ["documenti", "Documenti"], ["connessioni", "Connessioni"], ["richieste", "Richieste"], ["dialoghi", "Dialoghi"], ["chat", "Chat"], ["briefing", "Briefing"], ["canali", "Canali"], ["progetti", "Progetti"], ["collegamenti", "Collegamenti"], ["utenti", "Utenti"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza"], ["account", "Account"]];
-const VISTE_COLLABORATORE = ["chat", "account"];
+const VISTE = [["dashboard", "Dashboard"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["dialoghi", "Dialoghi"], ["chat", "Chat"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE_COLLABORATORE = [["chat", "Chat"], ["account", "Il mio account"]];
+const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Account Google"], ["connessioni", "Connessioni a siti e app"],
+  ["canali", "Canali (Telegram)"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"]];
+
+function vai(vista, sezione) { stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
 function cornice(contenuto) {
   radice.replaceChildren(
     h("header", {}, h("h1", {}, "Opifex ", h("small", {}, "// officina")),
-      h("nav", {}, VISTE.filter(([id]) => stato.ruolo === "titolare" || VISTE_COLLABORATORE.includes(id)).map(([id, nome]) =>
-        h("button", { class: stato.vista === id ? "attivo" : "", onclick: () => { stato.vista = id; disegna(); } },
-          nome + (id === "richieste" && stato.richieste ? " (" + stato.richieste + ")" : "")))),
+      h("nav", {}, (stato.ruolo === "titolare" ? VISTE : VISTE_COLLABORATORE).map(([id, nome]) =>
+        h("button", { class: stato.vista === id || (id === "dashboard" && stato.vista === "richieste") ? "attivo" : "", onclick: () => vai(id) },
+          nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : "")))),
       h("button", { class: "s", onclick: esci }, "Esci")),
-    h("main", {}, contenuto));
+    h("main", { class: stato.vista === "dashboard" ? "largo" : "" }, contenuto));
 }
 
 async function avvia() {
@@ -92,7 +96,7 @@ async function avvia() {
     stato.ruolo = io.ruolo_globale;
     if (stato.ruolo !== "titolare") {   // il collaboratore vede solo la chat con gli agenti delle sue divisioni
       stato.agenti = await api("GET", "/agenti");
-      if (!VISTE_COLLABORATORE.includes(stato.vista)) stato.vista = "chat";
+      if (!VISTE_COLLABORATORE.some(([id]) => id === stato.vista)) stato.vista = "chat";
       return disegna();
     }
     const [agenti, opzioni, connessioni, documenti, cont] = await Promise.all([
@@ -117,7 +121,8 @@ async function ricarica() {
 function disegna() {
   if (stato.timer) { clearInterval(stato.timer); stato.timer = null; }
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
-  const vista = { organigramma: vistaOrganigramma, struttura: vistaStruttura, aggiornamenti: vistaAggiornamenti, canali: vistaCanali, progetti: vistaProgetti, collegamenti: vistaCollegamenti, utenti: vistaUtenti, account: vistaAccount }[stato.vista] || { agenti: vistaAgenti, documenti: vistaDocumenti, connessioni: vistaConnessioni, richieste: vistaRichieste, dialoghi: vistaDialoghi, chat: vistaChat, briefing: vistaBriefing, sicurezza: vistaSicurezza }[stato.vista];
+  if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
+  const vista = { dashboard: vistaDashboard, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaDialoghi, chat: vistaChat, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
 
@@ -217,6 +222,48 @@ function modulo(a) {
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
 
+  // --- documenti di riferimento dell'agente (solo agenti gia' salvati)
+  const sezioneDoc = h("div");
+  const discendentiDi = (id) => { const r = []; const coda = [id]; while (coda.length) { const x = coda.shift(); for (const f of stato.agenti.filter(y => y.superiore_id === x)) { r.push(f); coda.push(f.id); } } return r; };
+  const caricaDoc = async () => {
+    if (nuovo) { sezioneDoc.replaceChildren(h("p", { class: "aiuto" }, "Prima salva l'agente: poi potrai caricare qui il suo documento di riferimento.")); return; }
+    const m = h("div");
+    try { stato.documenti = await api("GET", "/gestione/documenti"); } catch (e) { sezioneDoc.replaceChildren(avviso(e.message, "no")); return; }
+    const miei = stato.documenti.filter(x => x.assegnazioni.some(y => y.agente_id === a.id));
+    const sotto = discendentiDi(a.id);
+    const file = h("input", { type: "file", accept: ".pdf,.docx,.txt,.md,.csv" });
+    const fasciaDoc = h("select", {}, Object.entries(ETICHETTA_FASCIA).map(([v, t]) => h("option", { value: v }, t))); fasciaDoc.value = "interno";
+    const elenco = miei.map(x => {
+      const mia = x.assegnazioni.find(y => y.agente_id === a.id);
+      const da = mia.passato_da ? stato.agenti.find(y => y.id === mia.passato_da)?.nome : null;
+      const pannello = h("div", { style: "display:none;margin:8px 0" });
+      const caselle = sotto.map(f => { const cb = h("input", { type: "checkbox" }); cb.checked = x.assegnazioni.some(y => y.agente_id === f.id && y.passato_da === a.id); return [f, cb]; });
+      pannello.append(h("p", { class: "aiuto" }, "Scegli chi tra i tuoi sottoposti deve usare questo documento per il suo lavoro. Tu e i tuoi superiori lo vedete comunque."),
+        caselle.map(([f, cb]) => h("label", { class: "spunta" }, cb, f.nome + " (" + f.ruolo + ")")),
+        h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
+          try { await api("PUT", "/gestione/agenti/" + a.id + "/documenti/" + x.id + "/passa", { agenti: caselle.filter(([, cb]) => cb.checked).map(([f]) => f.id) }); caricaDoc(); }
+          catch (e) { m.replaceChildren(avviso(e.message, "no")); } } }, "Salva passaggi")));
+      return h("div", { class: "carta", style: "margin-bottom:8px" },
+        h("div", { class: "nome" }, x.nome), h("div", { class: "sotto" }, x.nome_file + " · " + ETICHETTA_FASCIA[x.fascia_dati] + (da ? " · passato da " + da : "")),
+        h("div", { class: "azioni", style: "margin-top:8px" },
+          sotto.length ? h("button", { class: "s", onclick: () => { pannello.style.display = pannello.style.display === "none" ? "" : "none"; } }, "Passa ai sottoposti") : null,
+          mia.passato_da ? null : h("button", { class: "s", onclick: async () => {
+            if (!confirm("Togliere il documento a " + d.nome + "? Resta nel repository.")) return;
+            try { await api("PUT", "/gestione/documenti/" + x.id, { agenti: x.assegnazioni.filter(y => !y.passato_da && y.agente_id !== a.id).map(y => y.agente_id) }); caricaDoc(); }
+            catch (e) { m.replaceChildren(avviso(e.message, "no")); } } }, "Togli")),
+        pannello);
+    });
+    sezioneDoc.replaceChildren(...[
+      miei.length ? elenco : h("p", { class: "aiuto" }, "Nessun documento: carica qui quello di riferimento per " + d.nome + "."),
+      h("label", {}, "Carica un documento", file), h("label", {}, "Riservatezza", fasciaDoc), m,
+      h("div", { class: "azioni" }, h("button", { class: "s", onclick: async (ev) => {
+        if (!file.files[0]) { m.replaceChildren(avviso("Scegli un file", "no")); return; }
+        const b = ev.currentTarget; b.disabled = true; b.textContent = "Caricamento…";
+        const f = new FormData(); f.append("file", file.files[0]); f.append("nome", ""); f.append("fascia_dati", fasciaDoc.value); f.append("per_tutti", "false"); f.append("agenti", String(a.id));
+        try { await api("POST", "/gestione/documenti", f); caricaDoc(); } catch (e) { m.replaceChildren(avviso(e.message, "no")); b.disabled = false; b.textContent = "Carica"; } } }, "Carica"))].flat(Infinity));
+  };
+  caricaDoc();
+
   const chiudi = () => sfondo.remove();
   const sfondo = h("div", { class: "pannello-sfondo", onclick: (e) => { if (e.target === sfondo) chiudi(); } },
     h("div", { class: "pannello", role: "dialog", "aria-label": nuovo ? "Nuovo agente" : "Modifica " + d.nome },
@@ -241,6 +288,7 @@ function modulo(a) {
       h("div", { class: "interruttore" }, web, h("span", {}, "Può cercare sul web (solo modelli Claude per ora)")),
       h("label", {}, "Siti consentiti", h("p", { class: "aiuto" }, "Un sito per riga. Se lasci vuoto può cercare su qualsiasi sito."), siti),
       h("label", {}, "Ricerche massime per risposta", ricerche),
+      h("h3", {}, "Documento di riferimento"), sezioneDoc,
       h("h3", {}, "Connessioni"),
       conn.length ? conn.map(([c, cb]) => h("label", { class: "spunta" }, cb, c.nome + " (" + c.tipo + ")"))
         : h("p", { class: "aiuto" }, "Nessuna connessione ancora: creale nella scheda Connessioni."),
@@ -525,55 +573,6 @@ function vistaBriefing() {
 
 
 // ---------- Documenti ----------
-function vistaDocumenti() {
-  const nome = h("input", { type: "text", maxlength: 200, placeholder: "Se vuoto usa il nome del file" });
-  const file = h("input", { type: "file", accept: ".pdf,.docx,.txt,.md,.csv" });
-  const fascia = h("select", {}, Object.entries(ETICHETTA_FASCIA).map(([v, t]) => h("option", { value: v }, t)));
-  fascia.value = "interno";
-  const tutti = h("input", { type: "checkbox" });
-  const scelti = stato.agenti.filter(a => a.attivo).map(a => {
-    const cb = h("input", { type: "checkbox", value: a.id }); return [a, cb];
-  });
-  const msg = h("div");
-  const carica = async (ev) => {
-    msg.replaceChildren();
-    if (!file.files[0]) { msg.replaceChildren(avviso("Scegli un file", "no")); return; }
-    const btn = ev.currentTarget; btn.disabled = true; btn.textContent = "Caricamento…";
-    const f = new FormData();
-    f.append("file", file.files[0]); f.append("nome", nome.value); f.append("fascia_dati", fascia.value);
-    f.append("per_tutti", tutti.checked ? "true" : "false");
-    f.append("agenti", scelti.filter(([, cb]) => cb.checked).map(([a]) => a.id).join(","));
-    try { const r = await api("POST", "/gestione/documenti", f); await ricarica(); }
-    catch (e) { msg.replaceChildren(avviso(e.message, "no")); btn.disabled = false; btn.textContent = "Carica"; }
-  };
-  const nomiAgenti = (d) => d.per_tutti ? "tutti gli agenti" :
-    ((d.agenti.map(i => stato.agenti.find(a => a.id === i)?.nome).filter(Boolean).join(", ") || "nessun agente") + " e dai loro superiori");
-  return [
-    h("h2", {}, "Documenti"),
-    h("p", { class: "sotto" }, "I documenti diventano la memoria degli agenti: quando rispondono, consultano i passaggi pertinenti. Formati: PDF, Word, TXT, MD, CSV (massimo 15 MB)."),
-    h("div", { class: "griglia" }, stato.documenti.map(d => h("div", { class: "carta" },
-      h("div", { class: "nome" }, d.nome),
-      h("div", { class: "sotto" }, d.nome_file + " — " + Math.round(d.caratteri / 1000) + " mila caratteri"),
-      h("div", {}, h("span", { class: "etichetta " + (d.fascia_dati === "pubblico" ? "ok" : "avv") }, ETICHETTA_FASCIA[d.fascia_dati])),
-      h("div", { class: "sotto" }, "Consultabile da: " + nomiAgenti(d)),
-      h("div", { class: "azioni" },
-        h("button", { class: "s", onclick: () => modificaDocumento(d) }, "Modifica"),
-        h("button", { class: "r", onclick: async () => {
-          if (!confirm("Eliminare «" + d.nome + "»?")) return;
-          try { await api("DELETE", "/gestione/documenti/" + d.id); await ricarica(); } catch (e) { alert(e.message); }
-        } }, "Elimina"))))),
-    stato.documenti.length ? null : h("p", { class: "sotto" }, "Nessun documento ancora."),
-    h("h3", {}, "Carica un documento"),
-    h("div", { class: "carta" },
-      h("label", {}, "File", file), h("label", {}, "Nome (facoltativo)", nome),
-      h("label", {}, "Riservatezza", h("p", { class: "aiuto" }, "I documenti interni e riservati vengono consultati solo quando il fornitore AI ha le garanzie attive (scheda Sicurezza)."), fascia),
-      h("label", { class: "spunta" }, tutti, "Consultabile da tutti gli agenti"),
-      h("label", {}, "Oppure solo da questi agenti", h("p", { class: "aiuto" }, "Scegli l'agente di livello più basso che deve poterlo usare: lo vedranno anche tutti i suoi superiori, fino ad Aurora.")),
-      h("div", { class: "riga" }, scelti.map(([a, cb]) => h("label", { class: "spunta", style: "flex:0 0 190px" }, cb, a.nome))),
-      msg, h("div", { class: "azioni" }, h("button", { class: "p", onclick: carica }, "Carica"))),
-  ];
-}
-
 function modificaDocumento(d) {
   const nome = h("input", { type: "text", value: d.nome, maxlength: 200 });
   const fascia = h("select", {}, Object.entries(ETICHETTA_FASCIA).map(([v, t]) => h("option", { value: v }, t)));
