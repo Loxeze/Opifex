@@ -60,6 +60,7 @@ class DatiAgente(BaseModel):
     vede_tutto: bool = False
     drive_attivo: bool = False
     gmail_account_id: int | None = None
+    social_attivo: bool = False
     fasi: list[Fase] = []
     connessioni: list[int] = []
 
@@ -86,6 +87,7 @@ class ModificaAgente(BaseModel):
     vede_tutto: bool | None = None
     drive_attivo: bool | None = None
     gmail_account_id: int | None = None
+    social_attivo: bool | None = None
     fasi: list[Fase] | None = None
     connessioni: list[int] | None = None
 
@@ -143,7 +145,7 @@ SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divis
        a.sentinella,
        CASE WHEN a.sentinella THEN 'sentinella' WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' ELSE a.livello END AS categoria,
        a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.budget_token_mensile,
-       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id,
+       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo,
        COALESCE((SELECT json_agg(json_build_object('titolo', f.titolo, 'istruzioni', f.istruzioni, 'approvazione', f.approvazione,
                                                     'parere_superiore', f.parere_superiore) ORDER BY f.posizione)
                  FROM fasi_agente f WHERE f.agente_id = a.id), '[]'::json) AS fasi,
@@ -194,12 +196,12 @@ def crea(d: DatiAgente, utente: dict = Depends(solo_titolare)):
         riga = conn.execute(
             """INSERT INTO agenti (divisione_id, superiore_id, nome, ruolo, livello, tipo, modello, fascia_dati_max,
                    istruzioni, max_token_risposta, budget_token_mensile, accesso_web, siti_consentiti,
-                   max_ricerche, attivo, modello_dialogo, dialoghi_attivi, sentinella, vede_tutto, drive_attivo, gmail_account_id)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                   max_ricerche, attivo, modello_dialogo, dialoghi_attivi, sentinella, vede_tutto, drive_attivo, gmail_account_id, social_attivo)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (dati["divisione_id"], dati["superiore_id"], d.nome, d.ruolo, dati["livello"],
              "divisione" if dati["divisione_id"] else "sistema", d.modello, d.fascia_dati_max, d.istruzioni,
              d.max_token_risposta, d.budget_token_mensile, d.accesso_web, dati["siti_consentiti"],
-             d.max_ricerche, d.attivo, d.modello_dialogo or None, d.dialoghi_attivi, bool(dati.get("sentinella")), d.vede_tutto, d.drive_attivo, d.gmail_account_id),
+             d.max_ricerche, d.attivo, d.modello_dialogo or None, d.dialoghi_attivi, bool(dati.get("sentinella")), d.vede_tutto, d.drive_attivo, d.gmail_account_id, d.social_attivo),
         ).fetchone()
         _scrivi_connessioni(conn, riga["id"], d.connessioni)
         if d.fasi:

@@ -9,6 +9,7 @@ import json
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
 from . import agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail
+from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
 
@@ -27,7 +28,7 @@ def _carica_agente(conn, agente_id: int) -> dict:
         """
         SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.tipo, a.fascia_dati_max, a.attivo,
                a.modello AS modello_richiesto,
-               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
+               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
                m.id AS modello_id, m.nome AS modello_nome,
                m.costo_input_per_milione, m.costo_output_per_milione,
                f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
@@ -164,7 +165,8 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             gmail_tool = bool(a["fornitore"] == "anthropic" and strumenti_gmail.account_valido(conn, a["gmail_account_id"])
                               and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
                                              a["non_conservazione_attiva"], a["dpa_firmato"])[0])
-            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool:
+            social_tool = bool(a["fornitore"] == "anthropic" and a["social_attivo"] and buffer_social.collegato(conn))
+            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -208,6 +210,12 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     g = strumenti_google.gestore(conn, agente_id)
                     for s_ in strumenti_google.STRUMENTI:
                         gestori[s_["name"]] = g
+                if social_tool:
+                    extra.extend(buffer_social.STRUMENTI)
+                    avviso_extra += buffer_social.AVVISO
+                    gs = buffer_social.gestore(conn, agente_id)
+                    for s_ in buffer_social.STRUMENTI:
+                        gestori[s_["name"]] = gs
                 if gmail_tool:
                     extra.extend(strumenti_gmail.STRUMENTI)
                     avviso_extra += strumenti_gmail.AVVISO
