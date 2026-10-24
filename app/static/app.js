@@ -78,7 +78,7 @@ const VISTE_COLLABORATORE = [["task", "Task"], ["chat", "Chat"], ["account", "Il
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Account Google"], ["connessioni", "Connessioni a siti e app"],
   ["canali", "Canali (Telegram)"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"]];
 
-function vai(vista, sezione) { stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
+function vai(vista, sezione) { if (vista !== "chat") Voce.fermaTutto(); stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
 function cornice(contenuto) {
   radice.replaceChildren(
@@ -525,33 +525,66 @@ function vistaDialoghi() {
 function vistaChat() {
   const attivi = stato.agenti.filter(a => a.attivo);
   const scelta = h("select", {}, attivi.map(a => h("option", { value: a.id }, a.nome + " — " + a.ruolo)));
+  if (stato.chatAgente && attivi.some(a => a.id === stato.chatAgente)) scelta.value = stato.chatAgente;
+  scelta.addEventListener("change", () => { stato.chatAgente = Number(scelta.value); });
   const f = h("select", {}, Object.entries(ETICHETTA_FASCIA).map(([v, t]) => h("option", { value: v }, t)));
-  f.value = "pubblico";
-  const testo = h("textarea", { placeholder: "Scrivi il messaggio…" });
+  f.value = stato.chatFascia || "pubblico";
+  f.addEventListener("change", () => { stato.chatFascia = f.value; });
+  const testo = h("textarea", { placeholder: "Scrivi il messaggio o premi il microfono e parla…" });
   const msg = h("div");
-  const invia = async (ev) => {
+  const bInvia = h("button", { class: "p" }, "Invia");
+  const bMic = h("button", { class: "s", type: "button", title: "Detta il messaggio con la voce" }, "🎤 Parla");
+  const stile = (ascolto) => { bMic.textContent = ascolto ? "⏹ Smetti di ascoltare" : "🎤 Parla"; bMic.classList.toggle("p", !!ascolto); };
+  const invia = async () => {
+    if (!testo.value.trim()) return;
     msg.replaceChildren();
-    const btn = ev.currentTarget; btn.disabled = true; btn.textContent = "Attendi…";
+    Voce.ferma();
+    bInvia.disabled = true; bInvia.textContent = "Attendi…";
     try {
       const agente = attivi.find(a => a.id === Number(scelta.value));
+      stato.chatAgente = agente.id;
       const r = await api("POST", "/agenti/" + scelta.value + "/chat", { messaggio: testo.value, fascia_dati: f.value });
       stato.conversazione.unshift({ agente: agente.nome, domanda: testo.value, risposta: r.risposta, t: r.token_input + r.token_output,
         usati: r.documenti_usati || [], esclusi: r.documenti_esclusi_per_riservatezza || [] });
       testo.value = ""; disegna();
-    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); btn.disabled = false; btn.textContent = "Invia"; }
+      if (Voce.leggiRisposte || Voce.viva) {
+        Voce.leggi(r.risposta, () => { if (Voce.viva && stato.vista === "chat" && Voce.avviaAscolto) Voce.avviaAscolto(); });
+      } else if (Voce.viva && Voce.avviaAscolto) Voce.avviaAscolto();
+    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); bInvia.disabled = false; bInvia.textContent = "Invia"; Voce.viva = false; }
   };
+  bInvia.addEventListener("click", invia);
+  // dettatura: con «vivavoce» attivo, quando smetti di parlare il messaggio parte da solo
+  const ascolta = () => {
+    if (!Voce.ascolta(testo, (t) => { stile(false); if (Voce.viva && t) invia(); else if (Voce.viva && stato.vista === "chat") setTimeout(() => Voce.viva && Voce.avviaAscolto && Voce.avviaAscolto(), 400); },
+      (s) => { if (s === null) stile(false); else if (s === "ascolto") stile(true); else if (s) msg.replaceChildren(avviso(s, "avv")); })) {
+      msg.replaceChildren(avviso("Il tuo browser non supporta la dettatura vocale: usa Chrome, Edge o Safari.", "avv"));
+    }
+  };
+  Voce.avviaAscolto = ascolta;
+  bMic.addEventListener("click", () => { if (Voce.inAscolto()) { Voce.viva = false; Voce.ferma(); stile(false); } else ascolta(); });
+  testo.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); invia(); } });
+  const leggi = h("input", { type: "checkbox" }); leggi.checked = Voce.leggiRisposte;
+  leggi.addEventListener("change", () => { Voce.leggiRisposte = leggi.checked; });
+  const viva = h("input", { type: "checkbox" }); viva.checked = Voce.viva;
+  viva.addEventListener("change", () => { Voce.viva = viva.checked; if (viva.checked) ascolta(); else { Voce.ferma(); Voce.fermaLettura(); stile(false); } });
+  const vocale = Voce.supportoDettatura || Voce.supportoLettura;
+  if (Voce.viva && vocale && !Voce.inAscolto() && !(Voce.supportoLettura && speechSynthesis.speaking)) setTimeout(ascolta, 300);
   return [
     h("h2", {}, "Chat con gli agenti"),
     h("div", { class: "carta" },
       h("div", { class: "riga" }, h("label", {}, "Agente", scelta),
         h("label", {}, "Tipo di dati nel messaggio", f)),
-      h("label", {}, "Messaggio", testo), msg,
-      h("div", { class: "azioni" }, h("button", { class: "p", onclick: invia }, "Invia"))),
+      h("label", {}, "Messaggio (Invio per inviare, Maiusc+Invio per andare a capo)", testo), msg,
+      h("div", { class: "azioni" }, vocale ? bMic : null, h("button", { class: "s", type: "button", onclick: () => { Voce.fermaTutto(); viva.checked = false; stile(false); } }, "⏹ Silenzio"), bInvia),
+      vocale ? h("div", { class: "interruttore" }, leggi, h("span", {}, "Leggi ad alta voce le risposte")) : null,
+      Voce.supportoDettatura ? h("div", { class: "interruttore" }, viva, h("span", {}, "Vivavoce: parli, il messaggio parte quando smetti, l'agente risponde a voce e riascolta")) : null,
+      vocale ? h("p", { class: "aiuto" }, "La dettatura usa il riconoscimento vocale del browser: in Chrome l'audio passa dal servizio di Google. Non dettare dati riservati se non vuoi che escano dal tuo computer.") : null),
     stato.conversazione.map(c => h("div", { class: "carta", style: "margin-top:12px" },
       h("div", { class: "sotto" }, "Tu → " + c.agente),
       h("div", { class: "risposta" }, c.domanda),
       h("div", { class: "sotto", style: "margin-top:10px" }, c.agente + " (" + c.t + " token)"),
       h("div", { class: "risposta" }, c.risposta),
+      Voce.supportoLettura ? h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => Voce.leggi(c.risposta) }, "🔊 Ascolta")) : null,
       c.usati.length ? h("div", { class: "sotto", style: "margin-top:8px" }, "Documenti consultati: " + c.usati.join(", ")) : null,
       c.esclusi.length ? avviso("Non consultati per riservatezza: " + c.esclusi.join(", "), "avv") : null)),
   ];

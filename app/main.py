@@ -83,6 +83,7 @@ async def intestazioni_sicure(richiesta, call_next):
     risposta.headers["X-Frame-Options"] = "DENY"
     risposta.headers["X-Content-Type-Options"] = "nosniff"
     risposta.headers["Referrer-Policy"] = "no-referrer"
+    risposta.headers["Permissions-Policy"] = "microphone=(self), camera=(), geolocation=()"
     return risposta
 
 

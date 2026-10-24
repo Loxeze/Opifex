@@ -112,6 +112,11 @@ function vistaAccount() {
             if (nuova.value !== nuova2.value) return mostra("Le due password non coincidono", "no");
             try { const r = await api("POST", "/account/password", { attuale: att.value, nuova: nuova.value }); nuovoToken(r.token);
               att.value = nuova.value = nuova2.value = ""; mostra("Password cambiata. Le altre sessioni aperte sono state chiuse.", "ok"); } catch (e) { mostra(e.message, "no"); } } }, "Cambia password"))),
+        h("h3", {}, "Voce"),
+        h("div", { class: "carta" },
+          h("div", { class: "interruttore" }, (() => { const c = h("input", { type: "checkbox" }); c.checked = Voce.leggiRisposte; c.addEventListener("change", () => { Voce.leggiRisposte = c.checked; }); return c; })(),
+            h("span", {}, "Leggi ad alta voce le risposte degli agenti (su questo dispositivo)")),
+          h("p", { class: "aiuto" }, Voce.supportoLettura ? "Nella Chat trovi il pulsante «Parla» per dettare i messaggi e il «Vivavoce» per conversare a voce." : "Questo browser non supporta la lettura vocale.")),
         h("h3", {}, "Secondo fattore"), h("div", { class: "carta" }, sezione2fa), msg]);
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };
