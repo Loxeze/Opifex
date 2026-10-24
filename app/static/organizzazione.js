@@ -7,7 +7,7 @@ const TXT_STATO = { sereno: "Sereno", pressione: "Sotto pressione", difficolta: 
 
 function apriPannello(titolo, figli) {
   const chiudi = () => sfondo.remove();
-  const sfondo = h("div", { class: "pannello-sfondo", onclick: (e) => { if (e.target === sfondo) chiudi(); } },
+  const sfondo = h("div", { class: "pannello-sfondo" },
     h("div", { class: "pannello", role: "dialog", "aria-label": titolo }, h("h2", {}, titolo), figli));
   document.body.append(sfondo);
   return chiudi;

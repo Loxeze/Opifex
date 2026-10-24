@@ -265,7 +265,7 @@ function modulo(a) {
   caricaDoc();
 
   const chiudi = () => sfondo.remove();
-  const sfondo = h("div", { class: "pannello-sfondo", onclick: (e) => { if (e.target === sfondo) chiudi(); } },
+  const sfondo = h("div", { class: "pannello-sfondo" },
     h("div", { class: "pannello", role: "dialog", "aria-label": nuovo ? "Nuovo agente" : "Modifica " + d.nome },
       h("h2", {}, nuovo ? "Nuovo agente" : d.nome),
       h("div", { class: "interruttore" }, attivo, h("span", {}, "Agente attivo (se spento non risponde e non lavora)")),
@@ -366,7 +366,7 @@ function modulo_accesso(c) {
       pw.value = ""; chiudi(); await ricarica();
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
-  const sfondo = h("div", { class: "pannello-sfondo", onclick: (e) => { if (e.target === sfondo) chiudi(); } },
+  const sfondo = h("div", { class: "pannello-sfondo" },
     h("div", { class: "pannello", role: "dialog" },
       h("h2", {}, "Accesso a " + c.nome),
       avviso("La password viene cifrata sul server e non viene mai mostrata né inviata ai modelli AI: la digita il browser del server. Dopo il salvataggio premi «Prova accesso».", "avv"),
@@ -590,7 +590,7 @@ function modificaDocumento(d) {
       chiudi(); await ricarica();
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
-  const sfondo = h("div", { class: "pannello-sfondo", onclick: (e) => { if (e.target === sfondo) chiudi(); } },
+  const sfondo = h("div", { class: "pannello-sfondo" },
     h("div", { class: "pannello", role: "dialog" },
       h("h2", {}, "Modifica documento"), h("label", {}, "Nome", nome), h("label", {}, "Riservatezza", fascia),
       h("label", { class: "spunta" }, tutti, "Consultabile da tutti gli agenti"),

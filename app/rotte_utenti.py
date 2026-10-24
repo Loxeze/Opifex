@@ -5,7 +5,7 @@ import hmac
 import secrets
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from . import cassaforte, totp
@@ -16,6 +16,7 @@ from .sicurezza import HASH_FINTO, cifra_password, crea_sfida, crea_token, leggi
 
 router = APIRouter()
 
+MAX_ERRORI_IP = 30      # errori ammessi da uno stesso indirizzo di rete (qualunque email), per la stessa finestra
 MAX_ERRORI = 5          # errori consentiti ...
 FINESTRA_MIN = 15       # ... ogni 15 minuti, per ogni email
 ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -25,21 +26,27 @@ def _impronta(testo: str) -> str:
     return hmac.new(impostazioni.secret_key.encode(), testo.strip().lower().encode(), hashlib.sha256).hexdigest()
 
 
-def _bloccato(conn, chiave: str) -> bool:
+def _chiave_ip(request: Request) -> str:
+    return _impronta("ip:" + (request.client.host if request.client else "?"))
+
+
+def _bloccato(conn, chiave: str, massimo: int = MAX_ERRORI) -> bool:
     n = conn.execute("SELECT count(*) AS n FROM tentativi_accesso WHERE chiave=%s AND quando > NOW() - make_interval(mins => %s)",
                      (chiave, FINESTRA_MIN)).fetchone()["n"]
-    return n >= MAX_ERRORI
+    return n >= massimo
 
 
-def _errore_tentativo(conn, chiave: str):
+def _errore_tentativo(conn, chiave: str, ip: str | None = None):
     # connessione a parte: l'errore resta registrato anche se la richiesta fallisce e annulla il resto
     with connessione() as c2:
         c2.execute("INSERT INTO tentativi_accesso (chiave) VALUES (%s)", (chiave,))
+        if ip:
+            c2.execute("INSERT INTO tentativi_accesso (chiave) VALUES (%s)", (ip,))
         c2.execute("DELETE FROM tentativi_accesso WHERE quando < NOW() - INTERVAL '1 day'")
 
 
-def _controlla_blocco(conn, chiave: str):
-    if _bloccato(conn, chiave):
+def _controlla_blocco(conn, chiave: str, ip: str | None = None):
+    if _bloccato(conn, chiave) or (ip and _bloccato(conn, ip, MAX_ERRORI_IP)):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
                             f"Troppi tentativi sbagliati. Riprova tra {FINESTRA_MIN} minuti.")
 
@@ -91,18 +98,18 @@ class DatiLogin(BaseModel):
 
 
 @router.post("/login")
-def login(d: DatiLogin):
-    chiave = _impronta(d.email)
+def login(d: DatiLogin, request: Request):
+    chiave, ip = _impronta(d.email), _chiave_ip(request)
     with connessione() as conn:
-        _controlla_blocco(conn, chiave)
+        _controlla_blocco(conn, chiave, ip)
         u = conn.execute("SELECT * FROM utenti WHERE email=%s AND attivo", (d.email.strip().lower(),)).fetchone()
         # stessi messaggi e stessi tempi per email o password errate
         if u is None:
             verifica_password(d.password, HASH_FINTO)
-            _errore_tentativo(conn, chiave)
+            _errore_tentativo(conn, chiave, ip)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenziali non valide")
         if not verifica_password(d.password, u["password_hash"]):
-            _errore_tentativo(conn, chiave)
+            _errore_tentativo(conn, chiave, ip)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenziali non valide")
         r = _prossimo_passo(conn, u)
     # compatibilita': chi entra subito riceve anche nome e ruolo come prima
@@ -164,38 +171,39 @@ class ConfermaSfida(BaseModel):
     codice: str = Field(max_length=20)
 
 
-def _conferma(conn, u: dict, codice: str) -> list[str]:
+def _conferma(conn, u: dict, codice: str, ip: str | None = None) -> list[str]:
     chiave = _impronta(u["email"])
-    _controlla_blocco(conn, chiave)
+    _controlla_blocco(conn, chiave, ip)
     if not u["totp_segreto_cifrato"] or u["totp_attivo"]:
         raise HTTPException(status.HTTP_409_CONFLICT, "Nessuna configurazione in corso")
     passo = totp.verifica(cassaforte.decifra(u["totp_segreto_cifrato"]), codice)
     if passo is None:
-        _errore_tentativo(conn, chiave)
+        _errore_tentativo(conn, chiave, ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Codice non corretto")
     conn.execute("UPDATE utenti SET totp_attivo=TRUE, totp_ultimo_passo=%s, token_valido_dal=NOW() WHERE id=%s", (passo, u["id"]))
     return _nuovi_recupero(conn, u["id"])
 
 
 @router.post("/login/2fa/conferma")
-def conferma_da_sfida(d: ConfermaSfida):
+def conferma_da_sfida(d: ConfermaSfida, request: Request):
     with connessione() as conn:
         u = _utente_da_sfida(conn, d.sfida)
         if u["deve_cambiare_password"]:
             raise HTTPException(status.HTTP_409_CONFLICT, "Prima scegli la tua password")
-        codici = _conferma(conn, u, d.codice)
+        codici = _conferma(conn, u, d.codice, _chiave_ip(request))
         u = conn.execute("SELECT * FROM utenti WHERE id=%s", (u["id"],)).fetchone()
         return _sessione(conn, u, {"codici_recupero": codici})
 
 
 @router.post("/login/2fa")
-def secondo_fattore(d: ConfermaSfida):
+def secondo_fattore(d: ConfermaSfida, request: Request):
+    ip = _chiave_ip(request)
     with connessione() as conn:
         u = _utente_da_sfida(conn, d.sfida)
         if u["deve_cambiare_password"] or not u["totp_attivo"]:
             raise HTTPException(status.HTTP_409_CONFLICT, "Passo non valido")
         chiave = _impronta(u["email"])
-        _controlla_blocco(conn, chiave)
+        _controlla_blocco(conn, chiave, ip)
         passo = totp.verifica(cassaforte.decifra(u["totp_segreto_cifrato"]), d.codice, u["totp_ultimo_passo"])
         if passo is not None:
             # il passo si consuma con un aggiornamento condizionato: due richieste insieme non passano entrambe
@@ -207,7 +215,7 @@ def secondo_fattore(d: ConfermaSfida):
                                     SELECT id FROM codici_recupero WHERE utente_id=%s AND codice_hash=%s AND usato_il IS NULL LIMIT 1)
                                   RETURNING id""", (u["id"], _hash_recupero(d.codice))).fetchone() if len(d.codice.replace("-", "").replace(" ", "")) == 10 else None
             if rec is None:
-                _errore_tentativo(conn, chiave)
+                _errore_tentativo(conn, chiave, ip)
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Codice non corretto")
             rimasti = conn.execute("SELECT count(*) AS n FROM codici_recupero WHERE utente_id=%s AND usato_il IS NULL", (u["id"],)).fetchone()["n"]
             return _sessione(conn, u, {"recupero_usato": True, "codici_rimasti": rimasti})
