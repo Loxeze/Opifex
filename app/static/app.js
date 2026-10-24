@@ -790,9 +790,13 @@ function vistaSicurezza() {
       const msg = h("div");
       const salva = async () => {
         try { await api("PUT", "/gestione/fornitori/" + f.nome, { non_conservazione_attiva: nc.checked, dpa_firmato: dpa.checked });
-          await ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+          stato.salvatoSicurezza = f.nome; await ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
       };
+      const completo = f.non_conservazione_attiva && f.dpa_firmato;
+      if (stato.salvatoSicurezza === f.nome) { msg.replaceChildren(avviso("Salvato.", "ok")); stato.salvatoSicurezza = null; }
       return h("div", { class: "carta" }, h("div", { class: "nome" }, f.nome),
+        completo ? avviso("Garanzie complete: a questo fornitore possono arrivare anche dati interni e riservati (entro il limite sotto).", "ok")
+                 : avviso("Garanzie incomplete: a questo fornitore arrivano solo dati pubblici. Servono entrambe le spunte.", "avv"),
         h("div", { class: "sotto" }, "Dati ammessi al massimo: " + ETICHETTA_FASCIA[f.fascia_dati_max]),
         h("label", { class: "spunta" }, nc, "Non conservazione dei dati attiva"),
         h("label", { class: "spunta" }, dpa, "DPA firmato"),

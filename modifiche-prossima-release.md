@@ -92,3 +92,6 @@
 
 ## 1.10.2 (fatto)
 - Dipartimento Corrispondenza (opzione "gestisce la posta" sui dipartimenti); caselle affidate in esclusiva a un agente, piu caselle per agente; solo agenti di dipartimenti abilitati.
+
+## 1.10.3 (fatto)
+- Sicurezza dei dati: dopo Salva compare "Salvato" e ogni fornitore mostra se le garanzie sono complete o incomplete (prima il salvataggio funzionava ma senza alcun segnale).
