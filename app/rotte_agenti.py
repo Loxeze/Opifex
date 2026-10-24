@@ -28,7 +28,7 @@ def chat_con_agente(agente_id: int, d: Domanda, utente: dict = Depends(utente_co
         if a is None or a["divisione_id"] not in visibili:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Agente fuori dalle tue divisioni")
     try:
-        return esegui_agente(agente_id, d.messaggio, d.fascia_dati, utente["id"])
+        return esegui_agente(agente_id, d.messaggio, d.fascia_dati, utente["id"], memorizza=True)
     except EsecuzioneBloccata as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     except (ErroreFornitore, CassaforteNonConfigurata, ErroreNavigazione) as e:

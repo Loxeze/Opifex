@@ -193,6 +193,8 @@ function modulo(a) {
     stato.opzioni.modelli.map(m => h("option", { value: m.nome }, m.nome + " — " + m.fornitore)));
   modDialogo.value = d.modello_dialogo || "";
   const dialoga = h("input", { type: "checkbox" }); dialoga.checked = !!d.dialoghi_attivi;
+  const vedeTutto = h("input", { type: "checkbox" }); vedeTutto.checked = !!d.vede_tutto;
+  const driveAttivo = h("input", { type: "checkbox" }); driveAttivo.checked = !!d.drive_attivo;
   const conn = stato.connessioni.map(c => {
     const cb = h("input", { type: "checkbox", value: c.id }); cb.checked = d.connessioni.includes(c.id);
     return [c, cb];
@@ -212,7 +214,7 @@ function modulo(a) {
       max_token_risposta: Number(tetto.value), budget_token_mensile: budget.value ? Number(budget.value) : null,
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,
-      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked,
+      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked,
       connessioni: conn.filter(([, cb]) => cb.checked).map(([c]) => c.id),
     };
     try {
@@ -283,6 +285,8 @@ function modulo(a) {
         h("label", {}, "Budget mensile (token)", budget)),
       h("h3", {}, "Dialoghi con gli altri agenti"),
       h("div", { class: "interruttore" }, dialoga, h("span", {}, "Può fare domande a superiore, subordinati e altri manager mentre lavora")),
+      h("div", { class: "interruttore" }, vedeTutto, h("span", {}, "Vede cosa fai e cosa ti dicono gli altri agenti (sintesi recente, nei limiti di riservatezza)")),
+      h("div", { class: "interruttore" }, driveAttivo, h("span", {}, "Può creare e modificare fogli e documenti Google nella cartella Opifex (non può cancellare)")),
       h("label", {}, "Modello per i dialoghi", h("p", { class: "aiuto" }, "Per parlare con i colleghi basta un modello semplice ed economico: il modello di lavoro sopra resta per pensare e svolgere i compiti."), modDialogo),
       h("h3", {}, "Accesso al web"),
       h("div", { class: "interruttore" }, web, h("span", {}, "Può cercare sul web (solo modelli Claude per ora)")),

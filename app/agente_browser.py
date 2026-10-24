@@ -57,9 +57,15 @@ def _esegui_strumento(nav: Navigatore | None, nome: str, dati: dict, extra=None)
 
 
 def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_token: int, nav: Navigatore | None,
-                         strumenti_extra: list | None = None, gestore_extra=None, avviso_extra: str = "") -> Risposta:
+                         strumenti_extra: list | None = None, gestore_extra=None, avviso_extra: str = "",
+                         web: dict | None = None) -> Risposta:
     """nav: browser (facoltativo). strumenti_extra/gestore_extra: altri strumenti (es. domande ai colleghi)."""
     strumenti = (STRUMENTI if nav is not None else []) + (strumenti_extra or [])
+    if web:  # ricerca web gestita da Anthropic, come nella chiamata semplice
+        sw = {"type": "web_search_20250305", "name": "web_search", "max_uses": web.get("max_ricerche", 3)}
+        if web.get("siti"):
+            sw["allowed_domains"] = web["siti"]
+        strumenti = strumenti + [sw]
     extra = ({s["name"] for s in (strumenti_extra or [])}, gestore_extra) if strumenti_extra else None
     sistema = istruzioni + (AVVISO if nav is not None else "") + avviso_extra
     messaggi = [{"role": "user", "content": messaggio}]
@@ -70,6 +76,9 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
                          "messages": messaggi, "tools": strumenti})
         t_in += d["usage"]["input_tokens"]; t_out += d["usage"]["output_tokens"]
         testo_finale = "".join(b.get("text", "") for b in d["content"] if b.get("type") == "text")
+        if d.get("stop_reason") == "pause_turn":  # la ricerca web del fornitore chiede di proseguire
+            messaggi.append({"role": "assistant", "content": d["content"]})
+            continue
         if d.get("stop_reason") != "tool_use":
             return Risposta(testo_finale, t_in, t_out)
         messaggi.append({"role": "assistant", "content": d["content"]})
@@ -77,7 +86,7 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
         for b in d["content"]:
             if b.get("type") == "tool_use":
                 esito = _esegui_strumento(nav, b["name"], b.get("input") or {}, extra)
-                if extra is not None and b["name"] in extra[0]:
+                if b["name"] == "chiedi_a_agente":
                     contenuto = esito  # risposta di un collega: va trattata come messaggio di lavoro
                 else:
                     contenuto = "<contenuto_pagina_non_fidato>\n" + esito + "\n</contenuto_pagina_non_fidato>"

@@ -157,7 +157,7 @@ def _verso_aurora(conn, testo: str, fascia: str) -> str:
     uid = _titolare_id(conn)
     conn.commit()
     try:
-        return esegui_agente(aurora["id"], testo, fascia, uid)["risposta"]
+        return esegui_agente(aurora["id"], testo, fascia, uid, memorizza=True)["risposta"]
     except EsecuzioneBloccata as e:
         return "Aurora non puo' rispondere: " + str(e)
     except (ErroreFornitore, cassaforte.CassaforteNonConfigurata, ErroreNavigazione) as e:

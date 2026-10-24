@@ -6,7 +6,7 @@ import json
 
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
-from . import richieste
+from . import memoria, richieste
 from .riservatezza import anonimizza, puo_uscire
 
 REGOLE = """Stai dialogando con un collega della stessa organizzazione di Lorenzo Zeppa (un altro agente AI).
@@ -112,7 +112,9 @@ def _fai_parlare(conn, parlante_id: int, destinatario_id: int, conv_id: int, ist
         conn.commit()
         raise DialogoBloccato(motivo)
     sistema = p["istruzioni"] + "\n\n" + REGOLE + richieste.REGOLA
-    contenuto = anonimizza(_storia(conn, conv_id) + "\n\n=== Tocca a te ===\n" + istruzione)
+    storia = _storia(conn, conv_id)
+    doc_ctx, _u, _e = memoria.contesto_documenti(conn, p, istruzione + "\n" + storia)  # anche nei dialoghi gli agenti vedono i loro documenti
+    contenuto = anonimizza((doc_ctx + "\n\n=====\n\n" if doc_ctx else "") + storia + "\n\n=== Tocca a te ===\n" + istruzione)
     try:
         r = chiama_modello(p["fornitore"], p["modello_nome"], sistema, contenuto, MAX_TOKEN_DIALOGO)
     except ErroreFornitore as e:

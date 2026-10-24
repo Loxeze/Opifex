@@ -41,6 +41,8 @@ class DatiAgente(BaseModel):
     attivo: bool = True
     modello_dialogo: str | None = None
     dialoghi_attivi: bool = False
+    vede_tutto: bool = False
+    drive_attivo: bool = False
     connessioni: list[int] = []
 
 
@@ -63,6 +65,8 @@ class ModificaAgente(BaseModel):
     attivo: bool | None = None
     modello_dialogo: str | None = None
     dialoghi_attivi: bool | None = None
+    vede_tutto: bool | None = None
+    drive_attivo: bool | None = None
     connessioni: list[int] | None = None
 
 
@@ -116,7 +120,7 @@ SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divis
        a.sentinella,
        CASE WHEN a.sentinella THEN 'sentinella' WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' ELSE a.livello END AS categoria,
        a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.budget_token_mensile,
-       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi,
+       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo,
        COALESCE((SELECT array_agg(x.azienda_id ORDER BY x.azienda_id) FROM agenti_aziende x WHERE x.agente_id = a.id), '{}') AS aziende,
        COALESCE((SELECT array_agg(ac.connessione_id ORDER BY ac.connessione_id)
                  FROM agenti_connessioni ac WHERE ac.agente_id = a.id), '{}') AS connessioni,
@@ -163,12 +167,12 @@ def crea(d: DatiAgente, utente: dict = Depends(solo_titolare)):
         riga = conn.execute(
             """INSERT INTO agenti (divisione_id, superiore_id, nome, ruolo, livello, tipo, modello, fascia_dati_max,
                    istruzioni, max_token_risposta, budget_token_mensile, accesso_web, siti_consentiti,
-                   max_ricerche, attivo, modello_dialogo, dialoghi_attivi, sentinella)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                   max_ricerche, attivo, modello_dialogo, dialoghi_attivi, sentinella, vede_tutto, drive_attivo)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (dati["divisione_id"], dati["superiore_id"], d.nome, d.ruolo, dati["livello"],
              "divisione" if dati["divisione_id"] else "sistema", d.modello, d.fascia_dati_max, d.istruzioni,
              d.max_token_risposta, d.budget_token_mensile, d.accesso_web, dati["siti_consentiti"],
-             d.max_ricerche, d.attivo, d.modello_dialogo or None, d.dialoghi_attivi, bool(dati.get("sentinella"))),
+             d.max_ricerche, d.attivo, d.modello_dialogo or None, d.dialoghi_attivi, bool(dati.get("sentinella")), d.vede_tutto, d.drive_attivo),
         ).fetchone()
         _scrivi_connessioni(conn, riga["id"], d.connessioni)
         _registra(conn, riga["id"], "agente_creato", utente["id"], {"nome": d.nome})
