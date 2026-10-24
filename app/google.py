@@ -169,6 +169,25 @@ def cartella(tok: str, nome: str, genitore: str, esistente: str | None = None) -
                  json={"name": nome, "mimeType": "application/vnd.google-apps.folder", "parents": [genitore]})["id"]
 
 
+def radice_valida(conn, tok: str) -> str:
+    """Id della cartella «Opifex». Se quella salvata non esiste per l'account collegato (es. era di un altro account),
+    ne trova una chiamata Opifex nel Drive dell'account oppure la crea, e la salva."""
+    radice = _leggi(conn, "drive_radice_id")
+    h = {"Authorization": "Bearer " + tok}
+    if radice:
+        try:
+            f = _http("GET", f"{_DRIVE}/{radice}", params={"fields": "id,trashed,mimeType"}, headers=h)
+            if not f.get("trashed") and f.get("mimeType") == "application/vnd.google-apps.folder":
+                return radice
+        except ErroreGoogle:
+            pass
+    nuova = cartella(tok, "Opifex", "root")
+    _scrivi(conn, "drive_radice_id", nuova)
+    conn.execute("UPDATE progetti SET drive_stato='da_sincronizzare', drive_cartella_id=NULL, drive_agent_id=NULL, drive_repository_id=NULL")
+    conn.execute("UPDATE progetti_agenti SET drive_cartella_id=NULL")
+    return nuova
+
+
 def sincronizza_progetto(conn, progetto_id: int) -> dict:
     """Crea (o completa) Opifex/<Progetto>/{agent/<Agente>/, repository}. Si puo' ripetere senza creare doppioni."""
     account = int(_leggi(conn, "drive_account_id") or 0)
@@ -177,9 +196,8 @@ def sincronizza_progetto(conn, progetto_id: int) -> dict:
         if not account:
             raise ErroreGoogle("Nessun account Google scelto per Drive: collegalo nella scheda Collegamenti")
         tok = token_accesso(conn, account)
-        radice = _leggi(conn, "drive_radice_id")
-        if not radice:
-            raise ErroreGoogle("Cartella radice di Drive non impostata")
+        radice = radice_valida(conn, tok)
+        p = conn.execute("SELECT * FROM progetti WHERE id=%s", (progetto_id,)).fetchone()  # riletto: la radice nuova azzera gli id vecchi
         cart = cartella(tok, p["nome"], radice, p["drive_cartella_id"])
         agent = cartella(tok, "agent", cart, p["drive_agent_id"])
         repo = cartella(tok, "repository", cart, p["drive_repository_id"])

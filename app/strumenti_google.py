@@ -59,14 +59,14 @@ def _richiesta(metodo, url, tok, **kw):
 
 def _contesto(conn):
     account = int(_leggi(conn, "drive_account_id") or 0)
-    radice = _leggi(conn, "drive_radice_id")
-    if not account or not radice:
+    if not account:
         raise ErroreGoogle("Google Drive non e' collegato (Impostazioni > Account Google)")
-    return token_accesso(conn, account), radice
+    tok = token_accesso(conn, account)
+    return tok, google.radice_valida(conn, tok)
 
 
 def collegato(conn) -> bool:
-    return bool(int(_leggi(conn, 'drive_account_id') or 0) and _leggi(conn, 'drive_radice_id'))
+    return bool(int(_leggi(conn, 'drive_account_id') or 0))
 
 
 def _nell_albero(tok: str, file_id: str, radice: str) -> bool:
