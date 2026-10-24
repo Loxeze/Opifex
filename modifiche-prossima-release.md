@@ -95,3 +95,6 @@
 
 ## 1.10.3 (fatto)
 - Sicurezza dei dati: dopo Salva compare "Salvato" e ogni fornitore mostra se le garanzie sono complete o incomplete (prima il salvataggio funzionava ma senza alcun segnale).
+
+## Da fare (suggerimenti di Lorenzo, non urgenti)
+- Etichette agenti nelle tendine (chat, assegnazioni, ecc.): mostrare "Nome — Dipartimento — Azienda/e — ruolo", non solo "Nome — ruolo". Es. "Scout — Bandi — cerca nuovi bandi", "Sofia — Marketing — Castello di Montarrenti — social media". Un'unica funzione condivisa per tutte le tendine.
