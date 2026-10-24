@@ -40,7 +40,7 @@ class DatiDivisione(BaseModel):
 def elenco_aziende(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         return conn.execute(
-            """SELECT a.id, a.nome, a.territorio, a.profilo, a.criteri_interesse, a.colore, a.attiva,
+            """SELECT a.id, a.nome, a.territorio, a.profilo, a.criteri_interesse, a.colore, a.attiva, a.allineamento, a.allineamento_il,
                       COALESCE((SELECT array_agg(x.agente_id ORDER BY x.agente_id) FROM agenti_aziende x WHERE x.azienda_id = a.id), '{}') AS agenti,
                       COALESCE((SELECT array_agg(x.divisione_id ORDER BY x.divisione_id) FROM divisioni_aziende x WHERE x.azienda_id = a.id), '{}') AS divisioni
                FROM aziende a ORDER BY a.id""").fetchall()
@@ -65,6 +65,19 @@ def modifica_azienda(aid: int, d: DatiAzienda, _: dict = Depends(solo_titolare))
             raise HTTPException(status.HTTP_409_CONFLICT, "Esiste gia' un'azienda con questo nome")
         r = conn.execute("UPDATE aziende SET nome=%s, territorio=%s, profilo=%s, criteri_interesse=%s, colore=%s, attiva=%s WHERE id=%s RETURNING id",
                          (d.nome, d.territorio, d.profilo, d.criteri_interesse, d.colore, d.attiva, aid)).fetchone()
+        if r is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Azienda inesistente")
+    return {"stato": "ok"}
+
+
+class Allineamento(BaseModel):
+    testo: str = Field(max_length=20000)
+
+
+@router.put("/aziende/{aid}/allineamento")
+def allineamento_azienda(aid: int, d: Allineamento, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        r = conn.execute("UPDATE aziende SET allineamento=%s, allineamento_il=NOW() WHERE id=%s RETURNING id", (d.testo.strip(), aid)).fetchone()
         if r is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Azienda inesistente")
     return {"stato": "ok"}

@@ -19,7 +19,9 @@ function vistaProgetti() {
         p.descrizione ? h("div", { class: "sotto" }, p.descrizione) : null,
         h("div", { class: "sotto" }, "Agenti coinvolti: " + p.agenti.length + " · Drive: " + ({ ok: "cartelle create", da_sincronizzare: "da creare", errore: "errore" })[p.drive_stato]),
         p.drive_errore && p.drive_stato === "errore" ? avviso(p.drive_errore, "no") : null,
+        p.allineamento ? h("div", { class: "sotto", style: "margin-top:6px;white-space:pre-wrap" }, "Allineamento" + (p.allineamento_il ? " (" + new Date(p.allineamento_il).toLocaleDateString("it-IT") + ")" : "") + ": " + p.allineamento.slice(0, 300) + (p.allineamento.length > 300 ? "…" : "")) : null,
         h("div", { class: "azioni" },
+          h("button", { class: "s", onclick: () => modificaProgetto(p, carica, msg) }, "Modifica"),
           p.drive_url ? h("a", { href: p.drive_url, target: "_blank", rel: "noopener noreferrer" }, h("button", { class: "s", type: "button" }, "Apri su Drive")) : null,
           h("button", { class: "s", onclick: async (e) => { e.currentTarget.disabled = true; msg.replaceChildren();
             try { const r = await api("POST", "/gestione/progetti/" + p.id + "/sincronizza"); msg.replaceChildren(r.ok ? avviso("Cartelle aggiornate su Drive.", "ok") : avviso(r.errore, "no")); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); }
@@ -43,6 +45,28 @@ function vistaProgetti() {
   };
   carica();
   return [h("h2", {}, "Progetti"), corpo];
+}
+
+function modificaProgetto(p, ricarica, msgEsterno) {
+  const nome = h("input", { type: "text", value: p.nome, maxlength: 100 });
+  const desc = h("input", { type: "text", value: p.descrizione || "", maxlength: 500 });
+  const alli = h("textarea", { style: "min-height:180px", maxlength: 20000, placeholder: "Cosa stiamo facendo e perche': obiettivi, scelte fatte, priorita'. Tutti gli agenti del progetto lo ricevono sempre." });
+  alli.value = p.allineamento || "";
+  const msg = h("div");
+  const chiudi = apriPannello("Modifica progetto", [
+    h("label", {}, "Nome", nome, h("p", { class: "aiuto" }, "Se cambi il nome, rinomino anche la cartella su Drive.")),
+    h("label", {}, "Descrizione", desc),
+    h("label", {}, "Documento di allineamento", h("p", { class: "aiuto" }, "Cosa stiamo facendo e perché. Lo ricevono sempre tutti gli agenti assegnati al progetto." + (p.allineamento_il ? " Ultimo aggiornamento: " + new Date(p.allineamento_il).toLocaleString("it-IT") : "")), alli),
+    msg,
+    h("div", { class: "azioni" },
+      h("button", { class: "p", onclick: async () => {
+        try {
+          const r = await api("PUT", "/gestione/progetti/" + p.id, { nome: nome.value, descrizione: desc.value, allineamento: alli.value });
+          chiudi(); await ricarica();
+          if (r.drive && !r.drive.ok) msgEsterno.replaceChildren(avviso(r.drive.errore, "avv"));
+        } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+      } }, "Salva"),
+      h("button", { class: "s", onclick: () => chiudi() }, "Annulla"))]);
 }
 
 function vistaCollegamenti() {
@@ -93,8 +117,9 @@ function vistaCollegamenti() {
           h("p", { class: "aiuto" }, "1. Su console.cloud.google.com crea un progetto e abilita le API Google Drive, Gmail e Google Calendar. 2. Schermata consenso OAuth: tipo «Esterno», aggiungi le tue email come utenti di test, poi pubblica l'app («In produzione»): in modalità test Google fa scadere il collegamento ogni 7 giorni. 3. Credenziali → ID client OAuth → «Applicazione web», con questo URI di reindirizzamento autorizzato: " + s.redirect + " 4. Incolla qui ID e segreto: il segreto viene cifrato e nessuno lo rivede."),
           h("label", {}, "ID client", cid), h("label", {}, "Segreto client", sec),
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("PUT", "/gestione/google/client", { client_id: cid.value.trim(), client_secret: sec.value.trim() || null }); carica(); } catch (x) { mostra(x.message, "no"); } } }, "Salva credenziali"))),
+        bloccoPosta(),
         h("h3", {}, "Altri servizi"),
-        h("div", { class: "carta" }, h("div", { class: "sotto" }, "Prossimi: Brevo (email marketing) e altri tramite chiave API, GitHub, Canva, Excel.")),
+        h("div", { class: "carta" }, h("div", { class: "sotto" }, "Prossimi: Brevo (email marketing), Canva, Plaud e altri tramite chiave API.")),
       ]);
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };

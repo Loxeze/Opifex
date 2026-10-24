@@ -45,7 +45,7 @@ with TestClient(app) as c:
     scout = next(a for a in ag if a["nome"] == "Scout")
     ok("Scout ha accesso al web di default", scout["accesso_web"] is True)
     op = c.get("/gestione/opzioni", headers=H).json()
-    ok("opzioni: 5 modelli, 4 divisioni, 3 fornitori", (len(op["modelli"]), len(op["divisioni"]), len(op["fornitori"])) == (5, 4, 3))
+    ok("opzioni: 8 modelli, 4 divisioni, 3 fornitori", (len(op["modelli"]), len(op["divisioni"]), len(op["fornitori"])) == (8, 4, 3))
 
     nuovo = dict(nome="Canvas", ruolo="Grafico", divisione_id=2, superiore_id=7, livello="operativo", modello="claude-haiku-5-5",
                  istruzioni="Prepari bozze grafiche.", fascia_dati_max="pubblico", max_token_risposta=700, budget_token_mensile=500,

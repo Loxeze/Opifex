@@ -132,3 +132,22 @@ def leggi_documento(conn, a: dict, nome: str, parte: int = 1) -> str:
     if parte > len(parti):
         return f"ERRORE: il documento ha solo {len(parti)} parti"
     return f"«{d['nome']}» parte {parte} di {len(parti)}:\n\n{parti[parte - 1]}"
+
+
+def contesto_allineamento(conn, agente: dict) -> str:
+    """Documenti di allineamento delle imprese e dei progetti a cui l'agente partecipa (solo se i dati interni possono uscire)."""
+    ok, _ = puo_uscire("interno", agente["fascia_dati_max"], agente["fascia_fornitore"],
+                       agente["non_conservazione_attiva"], agente["dpa_firmato"])
+    if not ok:
+        return ""
+    parti = []
+    for r in conn.execute("""SELECT z.nome, z.allineamento FROM aziende z JOIN agenti_aziende x ON x.azienda_id = z.id
+                             WHERE x.agente_id = %s AND z.attiva AND z.allineamento <> '' ORDER BY z.id""", (agente["id"],)).fetchall():
+        parti.append(f"Impresa «{r['nome']}»:\n{r['allineamento'][:3000]}")
+    for r in conn.execute("""SELECT p.nome, p.allineamento FROM progetti p JOIN progetti_agenti x ON x.progetto_id = p.id
+                             WHERE x.agente_id = %s AND NOT p.archiviato AND p.allineamento <> '' ORDER BY p.id""", (agente["id"],)).fetchall():
+        parti.append(f"Progetto «{r['nome']}»:\n{r['allineamento'][:3000]}")
+    if not parti:
+        return ""
+    return ("DOCUMENTI DI ALLINEAMENTO (cosa stiamo facendo e perche'; valgono per tutti quelli che lavorano a queste imprese/progetti):\n\n"
+            + "\n\n".join(parti))

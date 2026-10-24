@@ -27,6 +27,8 @@ from .rotte_gestione import router as router_gestione
 from .rotte_task import router as router_task
 from .rotte_percorsi import router as router_percorsi
 from .rotte_social import router as router_social
+from .rotte_fornitori import router as router_fornitori
+from .rotte_posta import router as router_posta
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
 
@@ -110,6 +112,8 @@ app.include_router(router_canali)
 app.include_router(router_task)
 app.include_router(router_percorsi)
 app.include_router(router_social)
+app.include_router(router_fornitori)
+app.include_router(router_posta)
 
 
 @app.get("/", include_in_schema=False)

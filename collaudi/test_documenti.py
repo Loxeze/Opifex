@@ -25,6 +25,11 @@ visto = {}
 def finto(fornitore, modello, istruzioni, messaggio, max_token=1500, web=None):
     visto["messaggio"] = messaggio; return Risposta("ok", 10, 5)
 esecuzione.chiama_modello = finto
+from app import agente_browser
+def finta_api(corpo):  # con le garanzie attive l'agente passa dal ciclo con strumenti (puo' leggere i documenti)
+    visto["messaggio"] = corpo["messages"][0]["content"]
+    return {"stop_reason": "end_turn", "usage": {"input_tokens": 10, "output_tokens": 5}, "content": [{"type": "text", "text": "ok"}]}
+agente_browser._chiama_api = finta_api
 
 def docx(testo):
     b = io.BytesIO()
@@ -64,7 +69,7 @@ with TestClient(app) as c:
     ok("il testo del PDF e' nel messaggio inviato al modello", "sessanta per cento" in " ".join(visto["messaggio"].split()) and "=== Richiesta ===" in visto["messaggio"])
     ok("anche il documento 'per tutti' viene usato", "citare sempre la fonte" in visto["messaggio"] or True)
     r = c.post(f"/agenti/{scout}/chat", headers=H, json={"messaggio": "Quali sono i criteri di valutazione con partner universitari?", "fascia_dati": "pubblico"})
-    ok("documento interno escluso senza garanzie del fornitore", r.status_code == 200 and "Criteri interni" in r.json()["documenti_esclusi_per_riservatezza"] and "=== Richiesta ===" not in visto["messaggio"], r.text)
+    ok("documento interno escluso senza garanzie del fornitore", r.status_code == 200 and "Criteri interni" in r.json()["documenti_esclusi_per_riservatezza"] and "Criteri interni" not in visto["messaggio"] and "partner universitari" not in visto["messaggio"].split("=== Richiesta ===")[0], r.text)
     r = c.put("/gestione/fornitori/anthropic", headers=H, json={"non_conservazione_attiva": True, "dpa_firmato": True})
     ok("titolare dichiara le garanzie del fornitore", r.status_code == 200)
     ok("collaboratore non puo' dichiararle (403)", c.put("/gestione/fornitori/anthropic", headers=HS, json={"non_conservazione_attiva": True, "dpa_firmato": True}).status_code == 403)

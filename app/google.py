@@ -169,6 +169,10 @@ def cartella(tok: str, nome: str, genitore: str, esistente: str | None = None) -
                  json={"name": nome, "mimeType": "application/vnd.google-apps.folder", "parents": [genitore]})["id"]
 
 
+def rinomina_cartella(tok: str, cartella_id: str, nome: str):
+    _http("PATCH", f"{_DRIVE}/{cartella_id}", params={"fields": "id"}, headers={"Authorization": "Bearer " + tok}, json={"name": nome})
+
+
 def radice_valida(conn, tok: str) -> str:
     """Id della cartella «Opifex». Se quella salvata non esiste per l'account collegato (es. era di un altro account),
     ne trova una chiamata Opifex nel Drive dell'account oppure la crea, e la salva."""

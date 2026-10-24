@@ -142,6 +142,11 @@ with TestClient(app) as c:
     ok("l'errore e' annotato sull'account", "invalid_grant" in sql("SELECT ultimo_errore FROM account_google WHERE id=%s", (ida,))[0][0])
     guasto["token"] = False
     ok("progetto inesistente -> 404", c.post("/gestione/progetti/99999/sincronizza", headers=H).status_code == 404)
+    sql("UPDATE impostazioni_sistema SET valore='RADICE-DI-UN-ALTRO-ACCOUNT' WHERE chiave='drive_radice_id'")
+    r = c.post(f"/gestione/progetti/{pid}/sincronizza", headers=H).json()
+    nuova = sql("SELECT valore FROM impostazioni_sistema WHERE chiave='drive_radice_id'")[0][0]
+    ok("radice Drive inesistente per l'account (404): ne crea una Opifex nel suo Drive e sincronizza", r["ok"] is True and nuova != "RADICE-DI-UN-ALTRO-ACCOUNT"
+       and cartelle[nuova]["name"] == "Opifex" and cartelle[nuova]["parents"] == ["root"], str(r))
     ok("scollegare l'account Drive azzera la scelta", c.delete(f"/gestione/google/account/{ida}", headers=H).status_code == 200 and c.get("/gestione/google", headers=H).json()["drive_account_id"] is None)
     r = c.post("/gestione/progetti", headers=H, json={"nome": "Senza Drive"})
     ok("senza account Drive il progetto nasce comunque, con avviso", r.status_code == 201 and r.json()["drive"]["ok"] is False and sql("SELECT drive_stato FROM progetti WHERE nome='Senza Drive'")[0][0] == "da_sincronizzare")

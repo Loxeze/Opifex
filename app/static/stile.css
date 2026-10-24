@@ -144,3 +144,6 @@ h3.scadute{color:#f87171}
 .dashboard .task-riga .nome{font-size:13px}
 .dashboard .scena .legenda{left:auto;right:12px;bottom:12px}
 .pannello input[type=date]{display:block;width:100%}
+
+.chat-doppia{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.chat-doppia{grid-template-columns:minmax(0,1fr)}}

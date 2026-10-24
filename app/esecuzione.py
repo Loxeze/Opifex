@@ -8,7 +8,7 @@ import json
 
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
-from . import agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail
+from . import agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
@@ -144,6 +144,9 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             st = memoria.storia_chat(conn, a_f, utente_id)
             if st:
                 prefisso.append("Conversazione precedente con questo utente (continua da qui, non farti ripetere cio' che ha gia' detto):\n" + st)
+        al_ctx = memoria.contesto_allineamento(conn, a_f)
+        if al_ctx:
+            prefisso.append(al_ctx)
         if doc_ctx:
             prefisso.append(doc_ctx)
         if avvisi:
@@ -165,8 +168,12 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             gmail_tool = bool(a["fornitore"] == "anthropic" and strumenti_gmail.account_valido(conn, a["gmail_account_id"])
                               and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
                                              a["non_conservazione_attiva"], a["dpa_firmato"])[0])
+            posta_c = (strumenti_posta.casella_agente(conn, agente_id)
+                       if a["fornitore"] == "anthropic" and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
+                                                                        a["non_conservazione_attiva"], a["dpa_firmato"])[0] else None)
+            posta_tool = posta_c is not None
             social_tool = bool(a["fornitore"] == "anthropic" and a["social_attivo"] and buffer_social.collegato(conn))
-            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool:
+            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -222,6 +229,13 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     gm = strumenti_gmail.gestore(conn, a["gmail_account_id"], agente_id)
                     for s_ in strumenti_gmail.STRUMENTI:
                         gestori[s_["name"]] = gm
+
+                if posta_tool:
+                    extra.extend(strumenti_posta.STRUMENTI)
+                    avviso_extra += strumenti_posta.AVVISO
+                    gp = strumenti_posta.gestore(conn, posta_c, agente_id)
+                    for s_ in strumenti_posta.STRUMENTI:
+                        gestori[s_["name"]] = gp
 
                 def gestore(nome, dati):
                     f = gestori.get(nome)

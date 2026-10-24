@@ -349,6 +349,8 @@ function formAzienda(z, tutte, dopo) {
   const crit = h("textarea", {}); crit.value = d.criteri_interesse || "";
   const col = h("input", { type: "color", value: d.colore });
   const att = h("input", { type: "checkbox" }); att.checked = d.attiva;
+  const alli = h("textarea", { style: "min-height:140px", maxlength: 20000, placeholder: "Cosa stiamo facendo e perche': obiettivi, priorita', cosa e' deciso. Tutti gli agenti di questa azienda lo ricevono sempre." });
+  alli.value = d.allineamento || "";
   const msg = h("div");
   const corpo = () => ({ nome: nome.value.trim(), territorio: terr.value.trim() || null, profilo: prof.value.trim() || null,
     criteri_interesse: crit.value.trim() || null, colore: col.value, attiva: att.checked });
@@ -357,9 +359,12 @@ function formAzienda(z, tutte, dopo) {
     h("label", {}, "Nome", nome), h("label", {}, "Territorio", terr),
     h("label", {}, "Profilo", h("p", { class: "aiuto" }, "Cosa fa l'azienda: gli agenti dei bandi lo usano per valutare la coerenza."), prof),
     h("label", {}, "Criteri di interesse", crit),
+    h("label", {}, "Documento di allineamento", h("p", { class: "aiuto" }, "Cosa stiamo facendo e perché: gli agenti di questa azienda lo ricevono sempre." + (d.allineamento_il ? " Ultimo aggiornamento: " + new Date(d.allineamento_il).toLocaleString("it-IT") : "")), alli),
     h("label", {}, "Colore nel grafico", col), msg,
     h("div", { class: "azioni" },
-      h("button", { class: "p", onclick: async () => { try { await api(z ? "PUT" : "POST", z ? "/gestione/aziende/" + z.id : "/gestione/aziende", corpo()); chiudi(); await ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva"),
+      h("button", { class: "p", onclick: async () => { try { const r = await api(z ? "PUT" : "POST", z ? "/gestione/aziende/" + z.id : "/gestione/aziende", corpo());
+        if (alli.value.trim() !== (d.allineamento || "").trim()) await api("PUT", "/gestione/aziende/" + (z ? z.id : r.id) + "/allineamento", { testo: alli.value });
+        chiudi(); await ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva"),
       z ? h("button", { class: "r", onclick: async () => { if (!confirm("Eliminare l'azienda?")) return; try { await api("DELETE", "/gestione/aziende/" + z.id); chiudi(); await ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Elimina") : null,
       h("button", { class: "s", onclick: () => chiudi() }, "Annulla"))]);
 }

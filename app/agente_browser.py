@@ -6,7 +6,7 @@ Il contenuto delle pagine e' DATO, mai istruzioni: viene racchiuso in un riquadr
 import httpx
 
 from .config import impostazioni
-from .fornitori import ErroreFornitore, Risposta
+from .fornitori import ErroreFornitore, Risposta, chiave as fornitori_chiave
 from .navigatore import ErroreNavigazione, Navigatore
 
 MAX_PASSI = 14
@@ -27,10 +27,11 @@ AVVISO = ("\n\nNAVIGAZIONE: hai tre strumenti per leggere i siti collegati (apri
 
 
 def _chiama_api(corpo: dict) -> dict:
-    if not impostazioni.chiave_anthropic:
+    k = fornitori_chiave("anthropic")
+    if not k:
         raise ErroreFornitore("Chiave Anthropic non configurata")
     r = httpx.post("https://api.anthropic.com/v1/messages",
-                   headers={"x-api-key": impostazioni.chiave_anthropic, "anthropic-version": "2023-06-01",
+                   headers={"x-api-key": k, "anthropic-version": "2023-06-01",
                             "content-type": "application/json"}, json=corpo, timeout=180)
     if r.status_code != 200:
         raise ErroreFornitore(f"Anthropic: {r.status_code} {r.text[:200]}")

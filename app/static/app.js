@@ -73,7 +73,7 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["dialoghi", "Dialoghi"], ["chat", "Chat"], ["percorsi", "Percorsi"], ["social", "Social"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["percorsi", "Percorsi"], ["social", "Social"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
 const VISTE_COLLABORATORE = [["task", "Task"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Account Google"], ["connessioni", "Connessioni a siti e app"],
   ["canali", "Canali (Telegram)"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"]];
@@ -119,10 +119,11 @@ async function ricarica() {
 }
 
 function disegna() {
+  if (stato.vista === "dialoghi") stato.vista = "chat";
   if (stato.timer) { clearInterval(stato.timer); stato.timer = null; }
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaDialoghi, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
 
@@ -459,7 +460,7 @@ function vistaRichieste() {
 }
 
 // ---------- Dialoghi ----------
-function vistaDialoghi() {
+function vistaDialoghi(senzaTitoli) {
   const colonnaFeed = h("div", { class: "carta", style: "max-height:70vh;overflow:auto" }, h("p", { class: "sotto" }, "Caricamento…"));
   const colonnaConv = h("div");
   const dettaglio = h("div");
@@ -537,11 +538,10 @@ function vistaDialoghi() {
   api("GET", "/gestione/dialoghi/limiti").then(l => { for (const k of Object.keys(lim)) lim[k].value = l[k]; modelloLim.value = l.modello_dialogo_predefinito; }).catch(() => {});
 
   return [
-    h("h2", {}, "Dialoghi tra agenti"),
+    h("h3", {}, "Dialoghi tra agenti"),
     h("p", { class: "sotto" }, "Il feed si aggiorna da solo. Gli agenti dialogano con un modello economico; il modello di lavoro resta per pensare e svolgere i compiti."),
-    h("div", { class: "riga", style: "align-items:flex-start" },
-      h("div", { style: "flex:2 1 380px" }, h("h3", {}, "Feed generale"), colonnaFeed),
-      h("div", { style: "flex:1 1 280px" }, h("h3", {}, "Conversazioni"), colonnaConv)),
+    h("h4", {}, "Feed generale"), colonnaFeed,
+    h("h4", {}, "Conversazioni"), colonnaConv,
     dettaglio,
     h("h3", {}, "Avvia un dialogo"),
     h("div", { class: "carta" },
@@ -553,8 +553,27 @@ function vistaDialoghi() {
   ];
 }
 
-// ---------- Chat ----------
+// ---------- Chat (pagina unica: chat con l'agente + dialoghi tra agenti) ----------
 function vistaChat() {
+  const riep = h("div", { class: "riga", style: "margin-bottom:12px" });
+  const num = (v, et) => h("div", { class: "carta", style: "text-align:center" }, h("div", { class: "nome" }, String(v)), h("div", { class: "sotto" }, et));
+  const lavoro = h("div");
+  const aggiorna = async () => {
+    try {
+      const r = await api("GET", "/gestione/dialoghi/riepilogo");
+      riempi(riep, [num(r.conversazioni + " (" + r.aperte + " aperte)", "conversazioni"), num(r.messaggi + " (" + r.messaggi_oggi + " oggi)", "messaggi tra agenti"),
+        num(r.token_oggi.toLocaleString("it-IT") + " / " + r.budget_token.toLocaleString("it-IT"), "token dialoghi oggi / budget"),
+        num(r.secondi_medi_tra_messaggi === null ? "–" : r.secondi_medi_tra_messaggi + " s", "tempo medio tra messaggi (7 giorni)")]);
+      const l = await api("GET", "/gestione/richieste/lavoro");
+      riempi(lavoro, l.length ? l.map(x => avviso(x.agente + " sta lavorando… (" + x.da_secondi + " s) · " + x.motivo, "ok")) : []);
+    } catch (e) { /* riprova */ }
+  };
+  aggiorna(); stato.timer2 = setInterval(aggiorna, 6000);
+  return [h("h2", {}, "Chat"), riep, lavoro,
+    h("div", { class: "chat-doppia" }, h("div", { class: "chat-sx" }, vistaChatSolo()), h("div", { class: "chat-dx" }, vistaDialoghi(true)))];
+}
+
+function vistaChatSolo() {
   const attivi = stato.agenti.filter(a => a.attivo);
   const scelta = h("select", {}, attivi.map(a => h("option", { value: a.id }, a.nome + " — " + a.ruolo)));
   if (stato.chatAgente && attivi.some(a => a.id === stato.chatAgente)) scelta.value = stato.chatAgente;
@@ -602,7 +621,7 @@ function vistaChat() {
   const vocale = Voce.supportoDettatura || Voce.supportoLettura;
   if (Voce.viva && vocale && !Voce.inAscolto() && !(Voce.supportoLettura && speechSynthesis.speaking)) setTimeout(ascolta, 300);
   return [
-    h("h2", {}, "Chat con gli agenti"),
+    h("h3", {}, "Chat con gli agenti"),
     h("div", { class: "carta" },
       h("div", { class: "riga" }, h("label", {}, "Agente", scelta),
         h("label", {}, "Tipo di dati nel messaggio", f)),
@@ -697,6 +716,7 @@ function vistaSicurezza() {
         h("label", { class: "spunta" }, dpa, "DPA firmato"),
         msg, h("div", { class: "azioni" }, h("button", { class: "p", onclick: salva }, "Salva")));
     })),
+    blocchiFornitori(),
   ];
 }
 

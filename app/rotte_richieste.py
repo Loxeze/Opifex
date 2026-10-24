@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from . import ripresa
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -29,13 +30,19 @@ class Risposta(BaseModel):
 
 
 @router.post("/{rid}/risposta")
-def rispondi(rid: int, d: Risposta, _: dict = Depends(solo_titolare)):
+def rispondi(rid: int, d: Risposta, u: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        r = conn.execute("UPDATE richieste_informazioni SET stato='risposta', risposta=%s, risposta_il=NOW() WHERE id=%s AND stato='aperta' RETURNING id",
+        r = conn.execute("UPDATE richieste_informazioni SET stato='risposta', risposta=%s, risposta_il=NOW() WHERE id=%s AND stato='aperta' RETURNING agente_id",
                          (d.risposta.strip(), rid)).fetchone()
         if r is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Richiesta inesistente o gia' chiusa")
-    return {"stato": "ok"}
+    ripresa.riprendi(r["agente_id"], u["id"])
+    return {"stato": "ok", "ripreso": True}
+
+
+@router.get("/lavoro")
+def lavoro(_: dict = Depends(solo_titolare)):
+    return ripresa.stato_lavoro()
 
 
 @router.post("/{rid}/annulla")

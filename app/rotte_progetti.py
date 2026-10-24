@@ -101,7 +101,7 @@ def scelte_drive(d: ScelteDrive, _: dict = Depends(solo_titolare)):
 
 # ---------- Progetti ----------
 def _elenco(conn):
-    righe = conn.execute("""SELECT p.id, p.nome, p.descrizione, p.archiviato, p.drive_cartella_id, p.drive_stato, p.drive_errore, p.creato_il,
+    righe = conn.execute("""SELECT p.id, p.nome, p.descrizione, p.allineamento, p.allineamento_il, p.archiviato, p.drive_cartella_id, p.drive_stato, p.drive_errore, p.creato_il,
                                    COALESCE((SELECT array_agg(agente_id ORDER BY agente_id) FROM progetti_agenti WHERE progetto_id=p.id), '{}') AS agenti
                             FROM progetti p ORDER BY p.archiviato, p.id""").fetchall()
     for r in righe:
@@ -145,6 +145,41 @@ def crea(d: NuovoProgetto, _: dict = Depends(solo_titolare)):
         esito = google.sincronizza_progetto(conn, pid) if google._leggi(conn, "drive_account_id") else \
             {"ok": False, "errore": "Cartelle Drive non ancora create: collega un account Google con Drive nella scheda Collegamenti"}
     return {"id": pid, "drive": esito}
+
+
+class ModificaProgetto(BaseModel):
+    nome: str = Field(min_length=1, max_length=100)
+    descrizione: str = Field(default="", max_length=500)
+    allineamento: str = Field(default="", max_length=20000)
+
+
+@router.put("/gestione/progetti/{pid}")
+def modifica(pid: int, d: ModificaProgetto, _: dict = Depends(solo_titolare)):
+    """Cambia nome, descrizione e documento di allineamento. Se il nome cambia, rinomina anche la cartella su Drive."""
+    nome = " ".join(d.nome.split())
+    if "/" in nome or "\\" in nome:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Il nome non puo' contenere / o \\")
+    with connessione() as conn:
+        p = conn.execute("SELECT * FROM progetti WHERE id=%s", (pid,)).fetchone()
+        if p is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Progetto non trovato")
+        if conn.execute("SELECT 1 FROM progetti WHERE lower(nome)=lower(%s) AND id<>%s", (nome, pid)).fetchone():
+            raise HTTPException(status.HTTP_409_CONFLICT, "Esiste gia' un progetto con questo nome")
+        cambia_al = d.allineamento.strip() != (p["allineamento"] or "")
+        conn.execute("""UPDATE progetti SET nome=%s, descrizione=%s, allineamento=%s,
+                        allineamento_il = CASE WHEN %s THEN NOW() ELSE allineamento_il END WHERE id=%s""",
+                     (nome, d.descrizione.strip(), d.allineamento.strip(), cambia_al, pid))
+        drive = None
+        if nome != p["nome"] and p["drive_cartella_id"]:
+            try:
+                account = int(google._leggi(conn, "drive_account_id") or 0)
+                if not account:
+                    raise google.ErroreGoogle("nessun account Drive collegato")
+                google.rinomina_cartella(google.token_accesso(conn, account), p["drive_cartella_id"], nome)
+                drive = {"ok": True}
+            except google.ErroreGoogle as e:
+                drive = {"ok": False, "errore": "Progetto rinominato qui, ma la cartella su Drive non e' stata rinominata: " + str(e)}
+    return {"ok": True, "drive": drive}
 
 
 @router.post("/gestione/progetti/{pid}/sincronizza")

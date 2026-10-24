@@ -35,7 +35,7 @@ def finto_telegram(token, metodo, attesa_http=15, **p):
     return {}
 telegram._chiama = finto_telegram
 copia = []
-def finto_esegui(agente_id, messaggio, fascia, utente_id=None):
+def finto_esegui(agente_id, messaggio, fascia, utente_id=None, **kw):
     copia.append((agente_id, messaggio, fascia, utente_id)); return {"risposta": "Risposta di Aurora: ricevuto."}
 telegram.esegui_agente = finto_esegui
 n = [0]
@@ -103,6 +103,7 @@ with TestClient(app) as c:
     prima = len(copia)
     coda.append(msg(555, "/richieste")); telegram.giro(1)
     ok("/richieste elenca le domande (senza usare l'AI)", "ATECO" in ultimo() and "BLOCCANTE" in ultimo() and len(copia) == prima)
+    from app import ripresa; ripresa.riprendi = lambda *a, **k: None   # la ripresa in background ha il suo collaudo
     coda.append(msg(555, f"/rispondi {rid} 62.01.00")); telegram.giro(1)
     ok("/rispondi registra la risposta", sql("SELECT stato, risposta FROM richieste_informazioni")[0] == ("risposta", "62.01.00"))
     coda.append(msg(555, "/rispondi 9999 x")); telegram.giro(1)

@@ -112,6 +112,16 @@ with TestClient(app) as c:
     # --- con garanzie attive: ciclo completo
     c.put("/gestione/fornitori/anthropic", headers=H, json={"non_conservazione_attiva": True, "dpa_firmato": True})
     sql("UPDATE agenti SET fascia_dati_max='interno' WHERE id=%s", (scout,))
+    sql("UPDATE connessioni SET stato='da_configurare' WHERE id=%s", (cid,))
+    c.put("/gestione/fornitori/anthropic", headers=H, json={"non_conservazione_attiva": True, "dpa_firmato": True})
+    sql("UPDATE agenti SET fascia_dati_max='interno' WHERE id=%s", (scout,))
+    from app import esecuzione as _es
+    from app.fornitori import Risposta as _R
+    _es.chiama_modello = lambda *a, **k: _R("Il collegamento non e' attivo.", 10, 5)
+    ricevuti.clear()
+    r = c.post(f"/agenti/{scout}/chat", headers=H, json={"messaggio": "leggi il sito dei bandi", "fascia_dati": "pubblico"})
+    ok("collegamento con credenziali ma non attivo: l'utente riceve l'avviso e l'agente non chiede credenziali",
+       r.status_code == 200 and any("Prova accesso" in a for a in r.json().get("avvisi", [])), r.text)
     c.post(f"/gestione/connessioni/{cid}/prova-accesso", headers=H)
     copione[:] = [chiama("apri_pagina", {"url": BASE + "/area"}, "a"), chiama("compila_ricerca", {"testo": "borghi"}, "b"),
                   chiama("segui_link", {"numero": 0}, "c"), fine("Trovato: Bando Alfa Borghi, contributo fino a 150000 euro, scadenza 30 novembre.")]
@@ -119,6 +129,9 @@ with TestClient(app) as c:
     r = c.post(f"/agenti/{scout}/chat", headers=H, json={"messaggio": "Trova bandi sui borghi nell'area riservata", "fascia_dati": "pubblico"})
     ok("ciclo con accesso, ricerca e apertura bando riuscito", r.status_code == 200 and "150000" in r.json()["risposta"], r.text)
     ok("token sommati su tutti i passaggi (4 chiamate)", r.json()["token_input"] == 400 and r.json()["token_output"] == 80, r.text)
+    sist = ricevuti[0]["system"]
+    ok("l'agente sa quali siti ha e che il login e' automatico (non deve chiedere credenziali)", "SITI COLLEGATI" in sist and "NON servono" in sist and "Non chiedere mai" in sist and BASE.split("//")[1].split(":")[0] in sist)
+    ok("nessuna credenziale nel prompt", "segreto-sito" not in sist and "segreto-sito" not in str(ricevuti[0]["messages"]))
     r2 = str(ricevuti[1]); r3 = str(ricevuti[2]); r4 = str(ricevuti[3])
     ok("dopo il login il modello riceve il testo dell'area riservata", "Area bandi riservata" in r2)
     ok("la ricerca ha funzionato e portato ai risultati", "Risultati per borghi" in r3)

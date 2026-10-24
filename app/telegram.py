@@ -16,6 +16,7 @@ import httpx
 
 from . import cassaforte, richieste as modulo_richieste
 from .db import connessione
+from . import ripresa
 from .esecuzione import EsecuzioneBloccata, esegui_agente
 from .fornitori import ErroreFornitore
 from .navigatore import ErroreNavigazione
@@ -98,7 +99,9 @@ def invia(token: str, chat_id: int, testo: str):
 
 
 # ---------- elaborazione dei messaggi ricevuti ----------
-AIUTO = ("Sono il canale di Aurora. Scrivimi normalmente e ti risponde Aurora.\n"
+AIUTO = ("Scrivimi normalmente: ti risponde l'agente con cui stai parlando (all'inizio Aurora).\n"
+         "@Nome messaggio - parla con quell'agente (poi resti con lui)\n/agente Nome - cambia interlocutore\n"
+         "/agenti - elenco degli agenti\n/aurora - torna ad Aurora\n"
          "/richieste - cosa serve agli agenti\n/rispondi NUMERO testo - rispondi a una richiesta\n"
          "/briefing - l'ultimo briefing\n/stato - situazione in breve\n"
          "/fascia pubblico|interno|riservato - che dati possono uscire verso l'AI in questa chat")
@@ -129,8 +132,25 @@ def _comando(conn, testo: str, r: dict) -> str | None:
         if len(parti) < 3 or not parti[1].lstrip("#").isdigit():
             return "Uso: /rispondi NUMERO la tua risposta"
         n = conn.execute("UPDATE richieste_informazioni SET stato='risposta', risposta=%s, risposta_il=NOW() "
-                         "WHERE id=%s AND stato='aperta' RETURNING id", (parti[2].strip()[:4000], int(parti[1].lstrip("#")))).fetchone()
-        return "Risposta registrata: l'agente la riceve al prossimo lavoro." if n else "Richiesta non trovata o gia' chiusa."
+                         "WHERE id=%s AND stato='aperta' RETURNING agente_id", (parti[2].strip()[:4000], int(parti[1].lstrip("#")))).fetchone()
+        if not n:
+            return "Richiesta non trovata o gia' chiusa."
+        ripresa.riprendi(n["agente_id"], _titolare_id(conn))
+        return "Risposta registrata: l'agente riprende subito il lavoro e ti avviso quando ha finito."
+    if cmd == "/agenti":
+        righe = conn.execute("SELECT nome FROM agenti WHERE attivo ORDER BY nome LIMIT 60").fetchall()
+        return "Agenti attivi: " + ", ".join(x["nome"] for x in righe) + "\nScrivi @Nome messaggio per parlare con uno di loro."
+    if cmd == "/aurora":
+        conn.execute("UPDATE canale_telegram SET agente_corrente_id = NULL WHERE id = 1")
+        return "Torni a parlare con Aurora."
+    if cmd == "/agente":
+        if len(parti) < 2:
+            return "Uso: /agente Nome"
+        a, errore = trova_agente(conn, " ".join(parti[1:]))
+        if a is None:
+            return errore
+        conn.execute("UPDATE canale_telegram SET agente_corrente_id = %s WHERE id = 1", (a["id"],))
+        return f"Ora parli con {a['nome']}. /aurora per tornare ad Aurora."
     if cmd == "/briefing":
         b = conn.execute("SELECT contenuto, creato_il FROM briefing ORDER BY id DESC LIMIT 1").fetchone()
         return b["contenuto"] if b else "Nessun briefing ancora."
@@ -150,16 +170,38 @@ def _comando(conn, testo: str, r: dict) -> str | None:
     return "Comando non riconosciuto. /aiuto"
 
 
-def _verso_aurora(conn, testo: str, fascia: str) -> str:
-    aurora = conn.execute("SELECT id FROM agenti WHERE nome = 'Aurora' AND tipo = 'sistema'").fetchone()
-    if aurora is None:
+def trova_agente(conn, nome: str):
+    """(agente, errore): corrispondenza esatta, altrimenti per inizio del nome se univoca."""
+    nome = nome.strip().lstrip("@").strip()
+    if not nome:
+        return None, "Indica il nome dell'agente."
+    esatti = conn.execute("SELECT id, nome FROM agenti WHERE attivo AND lower(nome) = lower(%s)", (nome,)).fetchall()
+    if len(esatti) == 1:
+        return esatti[0], None
+    parziali = conn.execute("SELECT id, nome FROM agenti WHERE attivo AND lower(nome) LIKE lower(%s) ORDER BY nome LIMIT 5",
+                            (nome.replace("%", "").replace("_", "") + "%",)).fetchall()
+    if len(parziali) == 1:
+        return parziali[0], None
+    if not parziali:
+        return None, f"Non trovo l'agente «{nome}». /agenti per l'elenco."
+    return None, "Ho trovato piu' agenti: " + ", ".join(x["nome"] for x in parziali) + ". Scrivi il nome completo."
+
+
+def _verso_agente(conn, testo: str, fascia: str) -> str:
+    r = _riga(conn)
+    ag = None
+    if r.get("agente_corrente_id"):
+        ag = conn.execute("SELECT id, nome FROM agenti WHERE id = %s AND attivo", (r["agente_corrente_id"],)).fetchone()
+    if ag is None:
+        ag = conn.execute("SELECT id, nome FROM agenti WHERE nome = 'Aurora' AND tipo = 'sistema'").fetchone()
+    if ag is None:
         return "Aurora non c'e' tra gli agenti."
     uid = _titolare_id(conn)
     conn.commit()
     try:
-        return esegui_agente(aurora["id"], testo, fascia, uid, memorizza=True)["risposta"]
+        return f"[{ag['nome']}] " + esegui_agente(ag["id"], testo, fascia, uid, memorizza=True)["risposta"]
     except EsecuzioneBloccata as e:
-        return "Aurora non puo' rispondere: " + str(e)
+        return f"{ag['nome']} non puo' rispondere: " + str(e)
     except (ErroreFornitore, cassaforte.CassaforteNonConfigurata, ErroreNavigazione) as e:
         return "Errore nel contattare l'AI: " + str(e)[:200]
 
@@ -199,7 +241,18 @@ def gestisci_messaggio(conn, token: str, upd: dict):
     if risp is None:
         try: _chiama(token, "sendChatAction", chat_id=cid, action="typing")
         except ErroreTelegram: pass
-        risp = _verso_aurora(conn, testo, r["fascia_dati"])
+        if testo.startswith("@"):
+            nome, _, resto = testo[1:].partition(" ")
+            a, errore = trova_agente(conn, nome)
+            if a is None:
+                invia(token, cid, errore)
+                return
+            conn.execute("UPDATE canale_telegram SET agente_corrente_id = %s WHERE id = 1", (a["id"],))
+            if not resto.strip():
+                invia(token, cid, f"Ora parli con {a['nome']}. /aurora per tornare ad Aurora.")
+                return
+            testo = resto.strip()
+        risp = _verso_agente(conn, testo, r["fascia_dati"])
     invia(token, cid, risp)
 
 

@@ -25,6 +25,24 @@ def feed(dopo_id: int | None = Query(default=None, ge=0), limite: int = Query(de
         return conn.execute(base + "WHERE m.id > %s ORDER BY m.id ASC LIMIT %s", (dopo_id, limite)).fetchall()
 
 
+@router.get("/riepilogo")
+def riepilogo(_: dict = Depends(solo_titolare)):
+    """Numeri d'insieme per la pagina Chat: conversazioni, messaggi, token del giorno, tempi di risposta."""
+    with connessione() as conn:
+        c = conn.execute("""SELECT (SELECT count(*) FROM conversazioni) AS conversazioni,
+                                   (SELECT count(*) FROM conversazioni WHERE stato = 'aperta') AS aperte,
+                                   (SELECT count(*) FROM messaggi_agenti) AS messaggi,
+                                   (SELECT count(*) FROM messaggi_agenti WHERE creato_il >= date_trunc('day', NOW())) AS messaggi_oggi""").fetchone()
+        t = conn.execute("""SELECT COALESCE(SUM(COALESCE(token_input,0) + COALESCE(token_output,0)),0) AS n
+                            FROM costi_api WHERE tipo = 'dialogo' AND creato_il >= date_trunc('day', NOW())""").fetchone()
+        r = conn.execute("""SELECT AVG(extract(epoch FROM (creato_il - prec)))::float AS medio FROM (
+                              SELECT creato_il, LAG(creato_il) OVER (PARTITION BY conversazione_id ORDER BY id) AS prec
+                              FROM messaggi_agenti WHERE creato_il >= NOW() - interval '7 days') x WHERE prec IS NOT NULL""").fetchone()
+        budget = int(dialoghi.impostazione(conn, "dialoghi_budget_token_giornaliero", "200000"))
+    return {**c, "token_oggi": int(t["n"]), "budget_token": budget,
+            "secondi_medi_tra_messaggi": round(r["medio"], 1) if r["medio"] is not None else None}
+
+
 @router.get("")
 def elenco(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
