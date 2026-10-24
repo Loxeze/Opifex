@@ -111,4 +111,5 @@ with TestClient(app) as c:
     sql("UPDATE percorsi_lavoro SET stato='in_elaborazione' WHERE id=%s", (pid3,))
     percorsi.recupera_interrotti()
     ok("dopo un riavvio i percorsi 'in elaborazione' diventano 'errore' e si possono riprovare", sql("SELECT stato FROM percorsi_lavoro WHERE id=%s", (pid3,))[0][0] == "errore")
+    ok("registro decisioni: approvazioni e modifiche dei percorsi registrate con la persona", sql("SELECT count(*) FROM registro_decisioni WHERE tipo='fase_percorso' AND utente_nome='L'")[0][0] >= 2)
 print(f"TOTALE {sum(ris)}/{len(ris)}")

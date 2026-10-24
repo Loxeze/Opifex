@@ -6,6 +6,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from . import registro
 from .db import connessione
 from .permessi import divisioni_visibili, utente_corrente
 
@@ -247,6 +248,10 @@ def modifica(tid: int, d: ModificaTask, u: dict = Depends(utente_corrente)):
         val = [campi[n] for n in nomi if not (n == "completata_il" and campi[n] == "adesso")]
         conn.execute("UPDATE task SET " + set_ + " WHERE id = %s", val + [tid])   # nomi di colonna dal modello, mai dall'input
         _log(conn, "task_modificata", u, {"task_id": tid, "campi": sorted(campi)})
+        if campi.get("stato") and campi["stato"] != t["stato"]:
+            registro.registra(conn, u, "task", f"stato: {t['stato']} → {campi['stato']}", t["titolo"], "task", tid)
+        if nuovi and any(campi.get(k) != t.get(k) for k in ("assegnato_utente_id", "assegnato_agente_id")):
+            registro.registra(conn, u, "task", "riassegnata", t["titolo"], "task", tid, dettagli=nuovi)
     return {"stato": "ok"}
 
 

@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from . import registro
 from .db import connessione
 from .esecuzione import EsecuzioneBloccata, esegui_agente
 from .cassaforte import CassaforteNonConfigurata
@@ -80,7 +81,7 @@ def decidi_proposta(proposta_id: int, d: Decisione, utente: dict = Depends(solo_
     if d.decisione not in ("approvata", "respinta"):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Decisione non valida")
     with connessione() as conn:
-        riga = conn.execute("SELECT stato FROM proposte_sviluppo WHERE id = %s", (proposta_id,)).fetchone()
+        riga = conn.execute("SELECT stato, titolo FROM proposte_sviluppo WHERE id = %s", (proposta_id,)).fetchone()
         if riga is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Proposta inesistente")
         if riga["stato"] not in ("proposta", "in_discussione", "da_approvare"):
@@ -89,4 +90,5 @@ def decidi_proposta(proposta_id: int, d: Decisione, utente: dict = Depends(solo_
             "UPDATE proposte_sviluppo SET stato = %s, note_lorenzo = %s, decisa_da = %s, decisa_il = NOW() WHERE id = %s",
             (d.decisione, d.note, utente["id"], proposta_id),
         )
+        registro.registra(conn, utente, "proposta_sviluppo", d.decisione, riga.get("titolo") or f"Proposta {proposta_id}", "proposta", proposta_id, d.note or "")
     return {"stato": d.decisione}

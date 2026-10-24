@@ -29,6 +29,8 @@ from .rotte_percorsi import router as router_percorsi
 from .rotte_social import router as router_social
 from .rotte_fornitori import router as router_fornitori
 from .rotte_posta import router as router_posta
+from .rotte_registro import router as router_registro
+from .rotte_sistema import router as router_sistema
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
 
@@ -63,6 +65,25 @@ async def _canale_telegram():
             await asyncio.sleep(15)
 
 
+async def _manutenzione():
+    """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Gli errori non fermano il servizio."""
+    import asyncio
+    from . import allarmi, backup
+
+    def giro():
+        with connessione() as conn:
+            if backup.da_fare(conn):
+                backup.esegui(conn)
+            allarmi.controlla(conn)
+    await asyncio.sleep(90)
+    while True:
+        try:
+            await asyncio.to_thread(giro)
+        except Exception:
+            pass
+        await asyncio.sleep(600)
+
+
 @asynccontextmanager
 async def ciclo_vita(app: FastAPI):
     import asyncio
@@ -72,7 +93,7 @@ async def ciclo_vita(app: FastAPI):
         percorsi.recupera_interrotti()
     except Exception:
         pass
-    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram())]
+    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione())]
     yield
     for c in compiti:
         c.cancel()
@@ -114,6 +135,8 @@ app.include_router(router_percorsi)
 app.include_router(router_social)
 app.include_router(router_fornitori)
 app.include_router(router_posta)
+app.include_router(router_registro)
+app.include_router(router_sistema)
 
 
 @app.get("/", include_in_schema=False)

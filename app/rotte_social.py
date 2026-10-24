@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from . import buffer, cassaforte
+from . import registro
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -44,6 +45,7 @@ def collega(d: Chiave, utente: dict = Depends(solo_titolare)):
             buffer.scollega(conn)   # una chiave che non funziona non resta salvata
             conn.commit()
             raise _err(e)
+        registro.registra(conn, utente, "collegamento", "Buffer collegato", "Buffer", "buffer", "buffer")
         conn.execute("INSERT INTO registro_azioni (azione, dettagli, utente_id) VALUES ('buffer_collegato', '{}'::jsonb, %s)", (utente["id"],))
     return {"collegato": True, "canali": canali}
 
@@ -52,6 +54,7 @@ def collega(d: Chiave, utente: dict = Depends(solo_titolare)):
 def scollega(utente: dict = Depends(solo_titolare)):
     with connessione() as conn:
         buffer.scollega(conn)
+        registro.registra(conn, utente, "collegamento", "Buffer scollegato", "Buffer", "buffer", "buffer")
         conn.execute("INSERT INTO registro_azioni (azione, dettagli, utente_id) VALUES ('buffer_scollegato', '{}'::jsonb, %s)", (utente["id"],))
     return {"collegato": False}
 
@@ -112,6 +115,8 @@ def decisione(pid: int, d: Decisione, utente: dict = Depends(solo_titolare)):
                              "WHERE id=%s AND stato IN ('da_approvare','errore') RETURNING id", (d.nota or None, utente["id"], pid)).fetchone()
             if r is None:
                 raise HTTPException(status.HTTP_409_CONFLICT, "Il post non e' piu' in attesa")
+            q = conn.execute("SELECT testo, canale_nome FROM post_social WHERE id=%s", (pid,)).fetchone()
+            registro.registra(conn, utente, "post_social", "rifiutato", (q["testo"] or "")[:200], "post_social", pid, d.nota, {"canale": q["canale_nome"]})
             return {"stato": "rifiutato"}
         p = conn.execute("SELECT * FROM post_social WHERE id = %s AND stato IN ('da_approvare','errore') FOR UPDATE", (pid,)).fetchone()
         if p is None:
@@ -126,6 +131,8 @@ def decisione(pid: int, d: Decisione, utente: dict = Depends(solo_titolare)):
             raise _err(e)
         conn.execute("UPDATE post_social SET stato='inviato', buffer_post_id=%s, errore=NULL, nota=%s, approvato_da_utente_id=%s, aggiornato_il=NOW() WHERE id=%s",
                      (bid, d.nota or None, utente["id"], pid))
+        registro.registra(conn, utente, "post_social", "approvato e inviato a Buffer", (p["testo"] or "")[:200], "post_social", pid, d.nota,
+                          {"canale": p["canale_nome"], "programmato_il": p["programmato_il"]})
         conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s,'post_social_approvato',%s::jsonb,%s)",
                      (p["agente_id"], '{"post": %d, "canale": "%s"}' % (pid, p["canale_nome"].replace('"', "'")), utente["id"]))
     return {"stato": "inviato", "buffer_post_id": bid}

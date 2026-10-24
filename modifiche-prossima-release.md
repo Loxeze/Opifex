@@ -77,3 +77,6 @@
 ## FATTO in 1.8.0 (25/10): ripresa immediata dopo risposta; @Nome/​/agente su Telegram; Chat unificata + riepilogo; modifica progetti e allineamento (progetti+imprese); chiavi fornitori da app, modelli GPT, Stato sistemi; posta IMAP (Aruba)
 ## PER 1.9.0: Canva, Brevo, Plaud (import riunioni -> task), strumenti agenti anche su OpenAI, task fase 2/3 (coda agenti, Calendar), vista controllo documenti, riordino menu
 - (25/10) Prompt degli agenti: limite raddoppiato 8000 -> 16000 caratteri (gia nel codice, esce con 1.9.0)
+
+## FATTO in 1.9.0 (25/10): Registro decisioni (chi ha approvato cosa, immodificabile, CSV); backup cifrato giornaliero (server + Drive, chiave a parte, ripristino); tetto di spesa giorno/mese con avviso 80% e blocco 100%; allarmi Telegram (disco, errori fornitori, backup); prompt agenti fino a 16000 caratteri.
+## PER 1.10.0: Canva, Brevo, Plaud (riunioni -> task), strumenti agenti anche su OpenAI, task fase 2/3 (coda agenti, Calendar, ricorrenze), riordino menu, ricerca semantica documenti, fonti/verifica scadenze. (La vista di controllo dei documenti esiste gia: pagina Documenti.)

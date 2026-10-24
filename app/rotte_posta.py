@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from . import cassaforte, strumenti_posta
+from . import cassaforte, registro, strumenti_posta
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -40,6 +40,7 @@ def collega(d: NuovaCasella, u: dict = Depends(solo_titolare)):
         r = conn.execute("""INSERT INTO caselle_posta (etichetta, email, host, porta, utente, password_cifrata)
                             VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""",
                          (d.etichetta.strip(), d.email.strip(), d.host.strip().lower(), d.porta, (d.utente or d.email).strip(), cifrata)).fetchone()
+        registro.registra(conn, u, "collegamento", "casella di posta collegata", d.email.strip(), "posta", r["id"])
         conn.execute("INSERT INTO registro_azioni (azione, dettagli, utente_id) VALUES ('posta_collegata', '{}'::jsonb, %s)", (u["id"],))
         esito = _prova(conn, r)
     return {"id": r["id"], **esito}
@@ -88,5 +89,6 @@ def scollega(cid: int, u: dict = Depends(solo_titolare)):
     with connessione() as conn:
         if conn.execute("DELETE FROM caselle_posta WHERE id=%s RETURNING 1", (cid,)).fetchone() is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Casella inesistente")
+        registro.registra(conn, u, "collegamento", "casella di posta scollegata", f"casella {cid}", "posta", cid)
         conn.execute("INSERT INTO registro_azioni (azione, dettagli, utente_id) VALUES ('posta_scollegata', '{}'::jsonb, %s)", (u["id"],))
     return {"stato": "ok"}

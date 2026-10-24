@@ -8,6 +8,7 @@ import json
 
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
+from . import spesa
 from . import agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
@@ -81,6 +82,10 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             raise EsecuzioneBloccata("Agente spento")
         if _sospeso(conn, agente_id):
             raise EsecuzioneBloccata("Agente sospeso dal Guardiano della sicurezza")
+        blocco_spesa = spesa.controlla(conn)
+        if blocco_spesa:
+            conn.commit()
+            raise EsecuzioneBloccata(blocco_spesa)
         if a["budget_token_mensile"] is not None and _token_del_mese(conn, agente_id) >= a["budget_token_mensile"]:
             raise EsecuzioneBloccata("Budget mensile di token esaurito per questo agente")
         if a["fornitore"] is None:

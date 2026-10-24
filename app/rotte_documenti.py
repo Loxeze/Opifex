@@ -4,6 +4,7 @@ import json
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
+from . import registro
 from .db import connessione
 from .documenti import ESTENSIONI, MAX_BYTE, FileNonLeggibile, dividi_in_pezzi, estrai_testo
 from .permessi import solo_titolare
@@ -157,6 +158,8 @@ def garanzie(nome: str, g: Garanzie, utente: dict = Depends(solo_titolare)):
             (g.non_conservazione_attiva, g.dpa_firmato, nome)).fetchone()
         if r is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Fornitore inesistente")
+        registro.registra(conn, utente, "garanzie_fornitore", "dichiarate", nome, "fornitore", nome,
+                          dettagli={"non_conservazione_attiva": g.non_conservazione_attiva, "dpa_firmato": g.dpa_firmato})
         conn.execute("INSERT INTO registro_azioni (azione, dettagli, utente_id) VALUES ('garanzie_fornitore_modificate', %s::jsonb, %s)",
                      (json.dumps({"fornitore": nome, **g.model_dump()}), utente["id"]))
     return {"stato": "ok"}

@@ -118,4 +118,5 @@ with TestClient(app) as c:
     ricevuti.clear(); copione[:] = [fine("ok")]
     c.post(f"/agenti/{scout}/chat", headers=H, json={"messaggio": "ciao", "fascia_dati": "interno"})
     ok("senza Buffer l'agente non ha strumenti social", not ricevuti or not any(t["name"].startswith("social_") for t in ricevuti[0].get("tools", [])))
+    ok("registro decisioni: post approvato e rifiutato registrati", sql("SELECT count(*) FROM registro_decisioni WHERE tipo='post_social' AND utente_nome='L'")[0][0] >= 2)
 print(f"TOTALE {sum(ris)}/{len(ris)}")

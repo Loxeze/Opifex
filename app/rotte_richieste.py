@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from . import ripresa
+from . import registro, ripresa
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -32,10 +32,13 @@ class Risposta(BaseModel):
 @router.post("/{rid}/risposta")
 def rispondi(rid: int, d: Risposta, u: dict = Depends(solo_titolare)):
     with connessione() as conn:
+        dom = conn.execute("SELECT r.domanda, a.nome FROM richieste_informazioni r JOIN agenti a ON a.id=r.agente_id WHERE r.id=%s", (rid,)).fetchone()
         r = conn.execute("UPDATE richieste_informazioni SET stato='risposta', risposta=%s, risposta_il=NOW() WHERE id=%s AND stato='aperta' RETURNING agente_id",
                          (d.risposta.strip(), rid)).fetchone()
         if r is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Richiesta inesistente o gia' chiusa")
+        registro.registra(conn, u, "richiesta_info", "risposta data", (dom["domanda"] if dom else "")[:200], "richiesta", rid,
+                          d.risposta.strip()[:500], {"agente": dom["nome"] if dom else None})
     ripresa.riprendi(r["agente_id"], u["id"])
     return {"stato": "ok", "ripreso": True}
 
@@ -46,9 +49,10 @@ def lavoro(_: dict = Depends(solo_titolare)):
 
 
 @router.post("/{rid}/annulla")
-def annulla(rid: int, _: dict = Depends(solo_titolare)):
+def annulla(rid: int, u: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        r = conn.execute("UPDATE richieste_informazioni SET stato='annullata' WHERE id=%s AND stato='aperta' RETURNING id", (rid,)).fetchone()
+        r = conn.execute("UPDATE richieste_informazioni SET stato='annullata' WHERE id=%s AND stato='aperta' RETURNING domanda", (rid,)).fetchone()
         if r is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Richiesta inesistente o gia' chiusa")
+        registro.registra(conn, u, "richiesta_info", "annullata", r["domanda"][:200], "richiesta", rid)
     return {"stato": "ok"}

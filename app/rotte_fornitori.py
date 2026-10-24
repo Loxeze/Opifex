@@ -4,7 +4,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from . import cassaforte, fornitori
+from . import cassaforte, fornitori, registro
 from .config import impostazioni
 from .db import connessione
 from .permessi import solo_titolare
@@ -48,6 +48,7 @@ def imposta_chiave(nome: str, d: Chiave, u: dict = Depends(solo_titolare)):
                 raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None
             conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore",
                          (f"chiave_{nome}_cifrata", cifrata))
+        registro.registra(conn, u, "chiave_fornitore", "impostata" if k else "rimossa", nome, "fornitore", nome)
         conn.execute("INSERT INTO registro_azioni (azione, dettagli, utente_id) VALUES (%s, '{}'::jsonb, %s)",
                      (f"chiave_{nome}_{'impostata' if k else 'rimossa'}", u["id"]))
         return {"origine": _origine(conn, nome)}

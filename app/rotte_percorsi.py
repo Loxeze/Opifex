@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from . import percorsi
+from . import registro
 from .db import connessione
 from .esecuzione import EsecuzioneBloccata
 from .permessi import divisioni_visibili, utente_corrente
@@ -97,9 +98,12 @@ def decisione(pid: int, d: Decisione, utente: dict = Depends(utente_corrente)):
     if d.azione == "modifiche" and not d.nota.strip():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Scrivi cosa vuoi cambiare")
     with connessione() as conn:
-        _carica(conn, pid, utente)
+        p = _carica(conn, pid, utente)
         try:
             nuovo = percorsi.decidi(conn, pid, d.azione, d.nota.strip(), utente["id"])
         except EsecuzioneBloccata as e:
             raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+        registro.registra(conn, utente, "fase_percorso", {"approva": "approvata", "modifiche": "modifiche richieste", "annulla": "percorso annullato",
+                                                          "riprova": "ripetuta dopo errore"}[d.azione],
+                          p.get("titolo") or f"Percorso {pid}", "percorso", pid, d.nota.strip(), {"fase": p.get("fase_corrente"), "stato_dopo": nuovo})
     return {"stato": nuovo}
