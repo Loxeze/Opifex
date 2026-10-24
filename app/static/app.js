@@ -73,12 +73,12 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["dialoghi", "Dialoghi"], ["chat", "Chat"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
-const VISTE_COLLABORATORE = [["task", "Task"], ["chat", "Chat"], ["account", "Il mio account"]];
+const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["dialoghi", "Dialoghi"], ["chat", "Chat"], ["percorsi", "Percorsi"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE_COLLABORATORE = [["task", "Task"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Account Google"], ["connessioni", "Connessioni a siti e app"],
   ["canali", "Canali (Telegram)"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"]];
 
-function vai(vista, sezione) { if (vista !== "chat") Voce.fermaTutto(); stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
+function vai(vista, sezione) { if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
 function cornice(contenuto) {
   radice.replaceChildren(
@@ -122,7 +122,7 @@ function disegna() {
   if (stato.timer) { clearInterval(stato.timer); stato.timer = null; }
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaDialoghi, chat: vistaChat, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaDialoghi, chat: vistaChat, percorsi: vistaPercorsi, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
 
@@ -206,6 +206,32 @@ function modulo(a) {
     const cb = h("input", { type: "checkbox", value: z.id }); cb.checked = (d.aziende || []).includes(z.id);
     return [z, cb];
   });
+  // --- fasi di lavoro (facoltative): se ci sono, il lavoro viene svolto una fase alla volta nell'ordine indicato
+  const fasi = (d.fasi || []).map(f => ({ titolo: f.titolo, istruzioni: f.istruzioni || "", approvazione: f.approvazione !== false, parere_superiore: !!f.parere_superiore }));
+  const contFasi = h("div");
+  const disegnaFasi = () => {
+    riempi(contFasi, [
+      fasi.length ? null : h("p", { class: "aiuto" }, "Nessuna fase: l'agente lavora liberamente, seguendo solo il prompt."),
+      fasi.map((f, i) => {
+        const t = h("input", { type: "text", maxlength: 120, value: f.titolo, placeholder: "Titolo della fase, es. Proposte generali" });
+        t.addEventListener("input", () => { f.titolo = t.value; });
+        const ist = h("textarea", { style: "min-height:90px", placeholder: "Cosa deve fare in questa fase e cosa deve consegnare" }); ist.value = f.istruzioni;
+        ist.addEventListener("input", () => { f.istruzioni = ist.value; });
+        const ap = h("input", { type: "checkbox" }); ap.checked = f.approvazione; ap.addEventListener("change", () => { f.approvazione = ap.checked; });
+        const pa = h("input", { type: "checkbox" }); pa.checked = f.parere_superiore; pa.addEventListener("change", () => { f.parere_superiore = pa.checked; });
+        const muovi = (dx) => { const j = i + dx; if (j < 0 || j >= fasi.length) return; [fasi[i], fasi[j]] = [fasi[j], fasi[i]]; disegnaFasi(); };
+        return h("div", { class: "carta", style: "margin-top:10px" },
+          h("div", { class: "riga", style: "align-items:center" }, h("div", { class: "nome", style: "flex:0 0 auto" }, "Fase " + (i + 1)),
+            h("div", { style: "text-align:right;flex:1" },
+              h("button", { class: "s", type: "button", onclick: () => muovi(-1) }, "↑"), " ", h("button", { class: "s", type: "button", onclick: () => muovi(1) }, "↓"), " ",
+              h("button", { class: "s", type: "button", onclick: () => { fasi.splice(i, 1); disegnaFasi(); } }, "Elimina"))),
+          h("label", {}, "Titolo", t), h("label", {}, "Istruzioni della fase", ist),
+          h("div", { class: "interruttore" }, ap, h("span", {}, "A fine fase si ferma e attende la mia decisione (approva, chiede modifiche, sceglie tra le proposte)")),
+          h("div", { class: "interruttore" }, pa, h("span", {}, "Prima della decisione il suo superiore scrive un parere sul risultato")));
+      }),
+      h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => { fasi.push({ titolo: "", istruzioni: "", approvazione: true, parere_superiore: false }); disegnaFasi(); } }, "+ Aggiungi fase"))]);
+  };
+  disegnaFasi();
   const msg = h("div");
 
   const salva = async () => {
@@ -217,6 +243,7 @@ function modulo(a) {
       max_token_risposta: Number(tetto.value), budget_token_mensile: budget.value ? Number(budget.value) : null,
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,
+      fasi: fasi.filter(f => f.titolo.trim()).map(f => ({ ...f, titolo: f.titolo.trim() })),
       modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null,
       connessioni: conn.filter(([, cb]) => cb.checked).map(([c]) => c.id),
     };
@@ -276,7 +303,10 @@ function modulo(a) {
       h("div", { class: "interruttore" }, attivo, h("span", {}, "Agente attivo (se spento non risponde e non lavora)")),
       h("label", {}, "Nome", nome),
       h("label", {}, "Ruolo", ruolo),
-      h("label", {}, "Cosa deve fare", h("p", { class: "aiuto" }, "Istruzioni in italiano, come le daresti a un collaboratore: compiti, tono, cosa non deve fare."), istr),
+      h("h3", {}, "Prompt"),
+      h("label", {}, "Cosa deve fare", h("p", { class: "aiuto" }, "In italiano, come lo spiegheresti a un collaboratore: i suoi compiti, le sue relazioni con gli altri agenti, cosa deve guardare e cosa scaricare, il tono, cosa non deve fare."), istr),
+      h("h3", {}, "Fasi di lavoro"),
+      h("p", { class: "aiuto" }, "Facoltative. Se le lasci vuote l'agente non ha percorsi da seguire. Se le scrivi, per un lavoro avviato dalla pagina «Percorsi» l'agente le svolge una alla volta, nell'ordine, senza saltarne né anticiparne: a fine fase mostra il risultato e (se lo chiedi) aspetta la tua decisione."), contFasi,
       h("div", { class: "riga" }, h("label", {}, "Dipartimento", div), h("label", {}, "Risponde a", sup)),
       h("label", {}, "Aziende per cui lavora", h("p", { class: "aiuto" }, "Una o più. Se non ne scegli nessuna lavora per tutte (agente trasversale)."),
         azCb.length ? azCb.map(([z, cb]) => h("label", { class: "spunta" }, cb, z.nome)) : h("p", { class: "aiuto" }, "Nessuna azienda: creale nella scheda Struttura.")),

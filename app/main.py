@@ -25,6 +25,7 @@ from .rotte_canali import router as router_canali
 from .rotte_documenti import router as router_documenti
 from .rotte_gestione import router as router_gestione
 from .rotte_task import router as router_task
+from .rotte_percorsi import router as router_percorsi
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
 
@@ -63,6 +64,11 @@ async def _canale_telegram():
 async def ciclo_vita(app: FastAPI):
     import asyncio
     apri_pool()
+    try:
+        from . import percorsi
+        percorsi.recupera_interrotti()
+    except Exception:
+        pass
     compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram())]
     yield
     for c in compiti:
@@ -101,6 +107,7 @@ app.include_router(router_organizzazione)
 app.include_router(router_aggiornamenti)
 app.include_router(router_canali)
 app.include_router(router_task)
+app.include_router(router_percorsi)
 
 
 @app.get("/", include_in_schema=False)

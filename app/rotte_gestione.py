@@ -23,6 +23,22 @@ def _pulisci_siti(siti: list[str]) -> list[str]:
     return out
 
 
+class Fase(BaseModel):
+    titolo: str = Field(min_length=1, max_length=120)
+    istruzioni: str = Field(default="", max_length=4000)
+    approvazione: bool = True
+    parere_superiore: bool = False
+
+
+def _scrivi_fasi(conn, agente_id: int, fasi: list[dict]):
+    if len(fasi) > 12:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Al massimo 12 fasi")
+    conn.execute("DELETE FROM fasi_agente WHERE agente_id = %s", (agente_id,))
+    for i, f in enumerate(fasi, 1):
+        conn.execute("INSERT INTO fasi_agente (agente_id, posizione, titolo, istruzioni, approvazione, parere_superiore) VALUES (%s,%s,%s,%s,%s,%s)",
+                     (agente_id, i, f["titolo"].strip(), (f.get("istruzioni") or "").strip(), f.get("approvazione", True), f.get("parere_superiore", False)))
+
+
 class DatiAgente(BaseModel):
     nome: str = Field(min_length=1, max_length=60)
     ruolo: str = Field(min_length=1, max_length=120)
@@ -44,6 +60,7 @@ class DatiAgente(BaseModel):
     vede_tutto: bool = False
     drive_attivo: bool = False
     gmail_account_id: int | None = None
+    fasi: list[Fase] = []
     connessioni: list[int] = []
 
 
@@ -69,6 +86,7 @@ class ModificaAgente(BaseModel):
     vede_tutto: bool | None = None
     drive_attivo: bool | None = None
     gmail_account_id: int | None = None
+    fasi: list[Fase] | None = None
     connessioni: list[int] | None = None
 
 
@@ -126,6 +144,9 @@ SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divis
        CASE WHEN a.sentinella THEN 'sentinella' WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' ELSE a.livello END AS categoria,
        a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.budget_token_mensile,
        a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id,
+       COALESCE((SELECT json_agg(json_build_object('titolo', f.titolo, 'istruzioni', f.istruzioni, 'approvazione', f.approvazione,
+                                                    'parere_superiore', f.parere_superiore) ORDER BY f.posizione)
+                 FROM fasi_agente f WHERE f.agente_id = a.id), '[]'::json) AS fasi,
        COALESCE((SELECT array_agg(x.azienda_id ORDER BY x.azienda_id) FROM agenti_aziende x WHERE x.agente_id = a.id), '{}') AS aziende,
        COALESCE((SELECT array_agg(ac.connessione_id ORDER BY ac.connessione_id)
                  FROM agenti_connessioni ac WHERE ac.agente_id = a.id), '{}') AS connessioni,
@@ -181,6 +202,8 @@ def crea(d: DatiAgente, utente: dict = Depends(solo_titolare)):
              d.max_ricerche, d.attivo, d.modello_dialogo or None, d.dialoghi_attivi, bool(dati.get("sentinella")), d.vede_tutto, d.drive_attivo, d.gmail_account_id),
         ).fetchone()
         _scrivi_connessioni(conn, riga["id"], d.connessioni)
+        if d.fasi:
+            _scrivi_fasi(conn, riga["id"], [f.model_dump() for f in d.fasi])
         _registra(conn, riga["id"], "agente_creato", utente["id"], {"nome": d.nome})
     return {"id": riga["id"]}
 
@@ -215,6 +238,7 @@ def modifica(agente_id: int, d: ModificaAgente, utente: dict = Depends(solo_tito
                 "SELECT 1 FROM agenti WHERE lower(nome) = lower(%s) AND id <> %s", (campi["nome"], agente_id)).fetchone():
             raise HTTPException(status.HTTP_409_CONFLICT, "Esiste gia' un agente con questo nome")
         ids = campi.pop("connessioni", None)
+        fasi = campi.pop("fasi", None)
         if "divisione_id" in campi:
             campi["tipo"] = "divisione" if campi["divisione_id"] else "sistema"
         if campi:
@@ -225,8 +249,10 @@ def modifica(agente_id: int, d: ModificaAgente, utente: dict = Depends(solo_tito
             )
         if ids is not None:
             _scrivi_connessioni(conn, agente_id, ids)
+        if fasi is not None:
+            _scrivi_fasi(conn, agente_id, fasi)
         _registra(conn, agente_id, "agente_modificato", utente["id"],
-                  {"campi": sorted(list(campi) + (["connessioni"] if ids is not None else []))})
+                  {"campi": sorted(list(campi) + (["connessioni"] if ids is not None else []) + (["fasi"] if fasi is not None else []))})
     return {"stato": "ok"}
 
 

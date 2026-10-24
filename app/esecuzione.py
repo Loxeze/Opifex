@@ -13,6 +13,11 @@ from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
 
 
+def percorsi_blocco(conn, agente_id: int) -> str:
+    from . import percorsi  # import tardivo: percorsi usa questo modulo
+    return percorsi.blocco_istruzioni(percorsi.fasi_dell_agente(conn, agente_id))
+
+
 class EsecuzioneBloccata(Exception):
     pass
 
@@ -63,12 +68,14 @@ def _costo(a: dict, t_in: int, t_out: int) -> float:
 
 
 def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
-                  utente_id: int | None = None, memorizza: bool = False) -> dict:
+                  utente_id: int | None = None, memorizza: bool = False, max_token: int | None = None) -> dict:
     """memorizza=True: lo scambio entra nella cronologia della chat con questo utente (e l'agente la rivede alla volta dopo)."""
     with connessione() as conn:
         a = _carica_agente(conn, agente_id)
 
-        a["istruzioni"] = a["istruzioni"] + richieste.REGOLA
+        a["istruzioni"] = a["istruzioni"] + richieste.REGOLA + percorsi_blocco(conn, agente_id)
+        if max_token:
+            a["max_token_risposta"] = max_token
         if not a["attivo"]:
             raise EsecuzioneBloccata("Agente spento")
         if _sospeso(conn, agente_id):
