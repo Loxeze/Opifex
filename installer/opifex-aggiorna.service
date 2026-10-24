@@ -1,0 +1,6 @@
+[Unit]
+Description=Opifex: installa l'aggiornamento
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/opifex-aggiorna
+TimeoutStartSec=1500

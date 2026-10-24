@@ -1,0 +1,109 @@
+#!/bin/bash
+# Eseguito DA ROOT da systemd (opifex-aggiorna.path) quando l'app deposita una richiesta di aggiornamento.
+# Questo script sta in /usr/local/sbin, fuori dalla portata dell'app. Controlla, fa il backup, installa,
+# verifica che il servizio riparta e, se qualcosa non va, torna alla versione precedente.
+set -uo pipefail
+DIR="${OPIFEX_DIR:-/opt/agenti}"
+AGG="$DIR/aggiornamenti"
+SC="${OPIFEX_SYSTEMCTL:-systemctl}"
+SALUTE="${OPIFEX_SALUTE:-http://127.0.0.1:8000/salute}"
+BACKUP="${OPIFEX_BACKUP:-/var/backups/agenti}"
+UTENTE="${OPIFEX_UTENTE:-agenti}"
+PROVA="${OPIFEX_PROVA:-}"   # solo nei collaudi: salta database, pip e cambio proprietario
+
+esito() {  # stato versione messaggio
+  local m; m=$(printf '%s' "$3" | tr -d '"\\\n' | cut -c1-300)
+  printf '{"stato":"%s","versione":"%s","messaggio":"%s","quando":"%s"}\n' "$1" "$2" "$m" "$(date -Is)" > "$AGG/esito.json.tmp"
+  chmod 644 "$AGG/esito.json.tmp"; mv -f "$AGG/esito.json.tmp" "$AGG/esito.json"
+}
+
+exec 9>"${OPIFEX_LOCK:-/var/lock/opifex-aggiorna.lock}"
+flock -n 9 || exit 0
+[ -f "$AGG/richiesta" ] || exit 0
+VER=$(tr -cd '0-9.' < "$AGG/richiesta" | cut -c1-20)
+rm -f "$AGG/richiesta"
+[ -n "$VER" ] || { esito errore "" "Richiesta non valida"; exit 1; }
+esito in_corso "$VER" "Aggiornamento in corso"
+
+PAC="$AGG/pacchetto.tgz"
+[ -f "$PAC" ] && [ -f "$AGG/pacchetto.sha256" ] || { esito errore "$VER" "Pacchetto mancante"; exit 1; }
+
+# 1) integrita': l'impronta SHA-256 deve coincidere
+ATTESA=$(cut -d' ' -f1 "$AGG/pacchetto.sha256" | tr -cd '0-9a-f')
+REALE=$(sha256sum "$PAC" | cut -d' ' -f1)
+[ -n "$ATTESA" ] && [ "$ATTESA" = "$REALE" ] || { esito errore "$VER" "Impronta del pacchetto non corrispondente: aggiornamento rifiutato"; exit 1; }
+
+# 2) sicurezza: solo percorsi relativi e consentiti, niente collegamenti
+ELENCO=$(tar tzf "$PAC" 2>/dev/null) || { esito errore "$VER" "Pacchetto illeggibile"; exit 1; }
+if tar tvzf "$PAC" | grep -qE '^[lhcbp]'; then esito errore "$VER" "Il pacchetto contiene collegamenti o file speciali: rifiutato"; exit 1; fi
+while IFS= read -r voce; do
+  v="${voce#./}"
+  case "$v" in
+    /*|*..*) esito errore "$VER" "Percorso non consentito nel pacchetto: rifiutato"; exit 1;;
+    app|app/*|sql|sql/*|requirements.txt|VERSIONE|crea_titolare.py|crea_briefing.py|.env.example|"") ;;
+    *) esito errore "$VER" "Contenuto non previsto nel pacchetto: rifiutato"; exit 1;;
+  esac
+done <<< "$ELENCO"
+
+# 3) il pacchetto deve davvero portare la versione richiesta e non essere piu' vecchio
+STAGE="$AGG/staging"; rm -rf "$STAGE"; mkdir -p "$STAGE"
+tar xzf "$PAC" -C "$STAGE" --no-same-owner --no-same-permissions || { esito errore "$VER" "Estrazione non riuscita"; exit 1; }
+[ "$(tr -d '[:space:]' < "$STAGE/VERSIONE" 2>/dev/null)" = "$VER" ] || { esito errore "$VER" "La versione dentro il pacchetto non corrisponde"; rm -rf "$STAGE"; exit 1; }
+[ -d "$STAGE/app" ] && [ -d "$STAGE/sql" ] || { esito errore "$VER" "Pacchetto incompleto"; rm -rf "$STAGE"; exit 1; }
+VECCHIA=$(tr -d '[:space:]' < "$DIR/VERSIONE" 2>/dev/null || echo 0.0.0)
+if [ "$(printf '%s\n%s\n' "$VECCHIA" "$VER" | sort -V | tail -1)" != "$VER" ] || [ "$VECCHIA" = "$VER" ]; then
+  esito errore "$VER" "Versione non piu' recente di quella installata ($VECCHIA)"; rm -rf "$STAGE"; exit 1
+fi
+
+# 4) copia di sicurezza del database
+mkdir -p "$BACKUP"; chmod 700 "$BACKUP"
+if [ -z "$PROVA" ]; then
+  if ! runuser -u postgres -- pg_dump agenti | gzip > "$BACKUP/prima-di-$VER-$(date +%F-%H%M).sql.gz"; then
+    esito errore "$VER" "Backup del database non riuscito: nulla e' stato modificato"; rm -rf "$STAGE"; exit 1
+  fi
+fi
+
+# 5) copia della versione attuale per il ritorno indietro
+PREC="$DIR/precedente"; rm -rf "$PREC"; mkdir -p "$PREC"
+for f in app sql requirements.txt VERSIONE crea_titolare.py crea_briefing.py; do [ -e "$DIR/$f" ] && cp -a "$DIR/$f" "$PREC/"; done
+
+ritorna() {
+  rm -rf "$DIR/app" "$DIR/sql"
+  for f in app sql requirements.txt VERSIONE crea_titolare.py crea_briefing.py; do [ -e "$PREC/$f" ] && { rm -rf "${DIR:?}/$f"; cp -a "$PREC/$f" "$DIR/"; }; done
+  [ -z "$PROVA" ] && chown -R "$UTENTE:$UTENTE" "$DIR/app" "$DIR/sql" 2>/dev/null
+  $SC restart agenti >/dev/null 2>&1
+  esito annullato "$VER" "$1 Ho rimesso la versione $VECCHIA."
+}
+
+# 6) installazione dei file
+for f in app sql; do rm -rf "${DIR:?}/$f"; cp -a "$STAGE/$f" "$DIR/$f"; done
+for f in requirements.txt VERSIONE crea_titolare.py crea_briefing.py .env.example; do [ -e "$STAGE/$f" ] && cp -f "$STAGE/$f" "$DIR/$f"; done
+[ -z "$PROVA" ] && chown -R "$UTENTE:$UTENTE" "$DIR/app" "$DIR/sql" "$DIR/requirements.txt" "$DIR/VERSIONE" "$DIR"/crea_*.py
+
+if [ -z "$PROVA" ]; then
+  if ! runuser -u "$UTENTE" -- "$DIR/venv/bin/pip" install -q -r "$DIR/requirements.txt" >/dev/null 2>&1; then ritorna "Installazione delle librerie non riuscita."; exit 1; fi
+  PLAYWRIGHT_BROWSERS_PATH="$DIR/browsers" timeout 600 "$DIR/venv/bin/playwright" install chromium >/dev/null 2>&1 || true
+  chown -R "$UTENTE:$UTENTE" "$DIR/browsers" 2>/dev/null
+  URL=$(grep '^DATABASE_URL=' "$DIR/.env" | cut -d= -f2-)
+  q() { psql "$URL" -q -At -v ON_ERROR_STOP=1 "$@"; }
+  q -c "CREATE TABLE IF NOT EXISTS schema_migrazioni (nome TEXT PRIMARY KEY, applicata_il TIMESTAMPTZ DEFAULT NOW())" >/dev/null
+  for f in "$DIR"/sql/[0-9]*.sql; do
+    n=$(basename "$f")
+    if [ "$(q -c "SELECT count(*) FROM schema_migrazioni WHERE nome='$n'")" = "0" ]; then
+      if psql "$URL" -q -1 -v ON_ERROR_STOP=1 < "$f" >/dev/null 2>&1; then q -c "INSERT INTO schema_migrazioni (nome) VALUES ('$n')" >/dev/null
+      else ritorna "Aggiornamento del database $n non riuscito (il database e' rimasto com'era, salvo le migrazioni precedenti, compatibili)."; exit 1; fi
+    fi
+  done
+fi
+
+# 7) riavvio e verifica
+$SC restart agenti >/dev/null 2>&1
+OK=""
+for i in $(seq 1 30); do
+  if R=$(curl -s --max-time 3 "$SALUTE") && printf '%s' "$R" | grep -q "\"versione\":\"$VER\""; then OK=1; break; fi
+  sleep 1
+done
+[ -n "$OK" ] || { ritorna "Il servizio non e' ripartito correttamente con la nuova versione."; exit 1; }
+rm -rf "$STAGE" "$PAC" "$AGG/pacchetto.sha256"
+esito riuscito "$VER" "Aggiornato dalla versione $VECCHIA alla $VER. Backup del database in $BACKUP."
+exit 0

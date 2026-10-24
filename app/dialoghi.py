@@ -1,0 +1,199 @@
+"""Dialoghi tra agenti: modello economico dedicato, regole di chiarezza, limiti e registro (feed).
+
+Chi puo' parlare con chi: vedi colleghi(). Ogni dialogo ha una fascia di riservatezza decisa da chi lo avvia.
+"""
+import json
+
+from .db import connessione
+from .fornitori import ErroreFornitore, chiama_modello
+from . import richieste
+from .riservatezza import anonimizza, puo_uscire
+
+REGOLE = """Stai dialogando con un collega della stessa organizzazione di Lorenzo Zeppa (un altro agente AI).
+Regole del dialogo:
+1. Prima di rispondere verifica di aver capito. Se mancano informazioni necessarie NON indovinare: fai domande di chiarimento
+   precise e spiega perche' ti servono.
+2. Quando scrivi, fatti capire senza altri messaggi: dici chi sei, cosa stai facendo, a che punto sei e cosa ti serve esattamente.
+3. Quando rispondi, spiega anche il ragionamento e le ipotesi, non solo il risultato. Niente risposte secche o domande generiche.
+4. Non inventare dati: se non lo sai, dillo.
+5. Se la questione e' completamente chiarita scrivi alla fine [CHIARITO].
+Rispondi in italiano, in modo completo ma senza giri di parole."""
+
+MAX_TOKEN_DIALOGO = 700
+
+
+class DialogoBloccato(Exception):
+    pass
+
+
+def impostazione(conn, chiave: str, default: str) -> str:
+    r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = %s", (chiave,)).fetchone()
+    return r["valore"] if r else default
+
+
+def colleghi(conn, agente_id: int) -> list[dict]:
+    """Agenti con cui questo agente puo' parlare.
+
+    Tutti: il proprio superiore e i subordinati diretti. Manager e referente: anche tutti i propri sottoposti (a qualunque
+    livello) e gli altri manager/referente. Supervisori esterni (agenti di sistema): qualunque agente attivo.
+    """
+    a = conn.execute("SELECT id, livello, tipo, superiore_id FROM agenti WHERE id = %s", (agente_id,)).fetchone()
+    if a is None:
+        return []
+    return conn.execute(
+        """WITH RECURSIVE sotto AS (
+               SELECT id FROM agenti WHERE superiore_id = %(id)s
+               UNION SELECT x.id FROM agenti x JOIN sotto s ON x.superiore_id = s.id)
+           SELECT id, nome, ruolo FROM agenti
+           WHERE attivo AND id <> %(id)s AND (
+                 id = %(sup)s
+              OR superiore_id = %(id)s
+              OR (%(gest)s AND (id IN (SELECT id FROM sotto) OR livello IN ('manager', 'referente')))
+              OR %(vigila)s)
+           ORDER BY id""",
+        {"id": agente_id, "sup": a["superiore_id"], "gest": a["livello"] in ("manager", "referente"),
+         "vigila": a["tipo"] == "sistema" and a["livello"] != "referente"}).fetchall()
+
+
+def _modello_dialogo(conn, agente_id: int) -> dict:
+    """Modello usato per PARLARE (non per lavorare): quello scelto per l'agente o il predefinito economico."""
+    riga = conn.execute(
+        """SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.attivo, a.fascia_dati_max,
+                  COALESCE(NULLIF(a.modello_dialogo, ''), %(pred)s) AS modello_nome
+           FROM agenti a WHERE a.id = %(id)s""",
+        {"id": agente_id, "pred": impostazione(conn, "modello_dialogo_predefinito", "claude-haiku-5-5")}).fetchone()
+    if riga is None:
+        raise DialogoBloccato("Agente inesistente")
+    m = conn.execute(
+        """SELECT m.id AS modello_id, m.costo_input_per_milione AS c_in, m.costo_output_per_milione AS c_out,
+                  f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
+                  f.non_conservazione_attiva, f.dpa_firmato
+           FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE m.nome = %s""",
+        (riga["modello_nome"],)).fetchone()
+    if m is None:
+        raise DialogoBloccato(f"Modello per i dialoghi '{riga['modello_nome']}' non registrato")
+    return {**riga, **m}
+
+
+def _token_dialoghi_oggi(conn) -> int:
+    r = conn.execute(
+        """SELECT COALESCE(SUM(COALESCE(token_input,0) + COALESCE(token_output,0)), 0) AS t
+           FROM costi_api WHERE tipo = 'dialogo' AND creato_il >= date_trunc('day', NOW())""").fetchone()
+    return int(r["t"])
+
+
+def _storia(conn, conv_id: int) -> str:
+    righe = conn.execute(
+        """SELECT m.testo, da.nome AS da FROM messaggi_agenti m LEFT JOIN agenti da ON da.id = m.da_agente_id
+           WHERE m.conversazione_id = %s ORDER BY m.id DESC LIMIT 10""", (conv_id,)).fetchall()
+    return "\n\n".join(f"{r['da']}: {r['testo']}" for r in reversed(righe))
+
+
+def _salva_messaggio(conn, conv_id, da_id, a_id, testo, modello=None, t_in=None, t_out=None):
+    conn.execute(
+        """INSERT INTO messaggi_agenti (conversazione_id, da_agente_id, a_agente_id, testo, modello, token_input, token_output)
+           VALUES (%s,%s,%s,%s,%s,%s,%s)""", (conv_id, da_id, a_id, testo, modello, t_in, t_out))
+    conn.execute("UPDATE conversazioni SET ultimo_messaggio_il = NOW() WHERE id = %s", (conv_id,))
+
+
+def _fai_parlare(conn, parlante_id: int, destinatario_id: int, conv_id: int, istruzione: str, fascia: str,
+                 utente_id: int | None) -> str:
+    """Il parlante scrive il suo messaggio con il proprio modello per i dialoghi. Registra costi e messaggio."""
+    p = _modello_dialogo(conn, parlante_id)
+    if not p["attivo"]:
+        raise DialogoBloccato(f"{p['nome']} e' spento")
+    if conn.execute("SELECT 1 FROM sospensioni_agenti WHERE agente_id = %s AND riattivato_il IS NULL", (parlante_id,)).fetchone():
+        raise DialogoBloccato(f"{p['nome']} e' sospeso")
+    ok, motivo = puo_uscire(fascia, p["fascia_dati_max"], p["fascia_fornitore"], p["non_conservazione_attiva"], p["dpa_firmato"])
+    if not ok:
+        conn.execute(
+            """INSERT INTO registro_uscite (agente_id, fornitore_id, modello_id, fascia_dati, anonimizzato, bloccato, motivo_blocco)
+               VALUES (%s,%s,%s,%s,FALSE,TRUE,%s)""", (parlante_id, p["fornitore_id"], p["modello_id"], fascia, "Dialogo: " + motivo))
+        conn.commit()
+        raise DialogoBloccato(motivo)
+    sistema = p["istruzioni"] + "\n\n" + REGOLE + richieste.REGOLA
+    contenuto = anonimizza(_storia(conn, conv_id) + "\n\n=== Tocca a te ===\n" + istruzione)
+    try:
+        r = chiama_modello(p["fornitore"], p["modello_nome"], sistema, contenuto, MAX_TOKEN_DIALOGO)
+    except ErroreFornitore as e:
+        conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s,'errore_modello',%s::jsonb,%s)",
+                     (parlante_id, json.dumps({"errore": str(e)[:200], "dialogo": True}), utente_id))
+        conn.commit()
+        raise
+    costo = round(r.token_input / 1e6 * float(p["c_in"] or 0) + r.token_output / 1e6 * float(p["c_out"] or 0), 4)
+    conn.execute("INSERT INTO costi_api (agente_id, modello, token_input, token_output, costo_stimato, tipo) VALUES (%s,%s,%s,%s,%s,'dialogo')",
+                 (parlante_id, p["modello_nome"], r.token_input, r.token_output, costo))
+    conn.execute("INSERT INTO registro_uscite (agente_id, fornitore_id, modello_id, fascia_dati, anonimizzato, token_input, bloccato) VALUES (%s,%s,%s,%s,TRUE,%s,FALSE)",
+                 (parlante_id, p["fornitore_id"], p["modello_id"], fascia, r.token_input))
+    _salva_messaggio(conn, conv_id, parlante_id, destinatario_id, r.testo, p["modello_nome"], r.token_input, r.token_output)
+    richieste.estrai_e_salva(conn, parlante_id, r.testo)
+    return r.testo
+
+
+def _controlli_generali(conn, conv_id: int | None):
+    if _token_dialoghi_oggi(conn) >= int(impostazione(conn, "dialoghi_budget_token_giornaliero", "200000")):
+        raise DialogoBloccato("Budget giornaliero dei dialoghi esaurito")
+    if conv_id is not None:
+        n = conn.execute("SELECT count(*) AS n FROM messaggi_agenti WHERE conversazione_id = %s", (conv_id,)).fetchone()["n"]
+        if n >= int(impostazione(conn, "dialoghi_max_messaggi", "8")):
+            raise DialogoBloccato("Questa conversazione ha raggiunto il numero massimo di messaggi")
+
+
+def domanda_a_collega(da_id: int, nome_dest: str, domanda: str, conv_id: int | None, fascia: str,
+                      utente_id: int | None) -> tuple[str, int]:
+    """Un agente fa una domanda a un collega durante il suo lavoro. Restituisce (risposta, id conversazione)."""
+    with connessione() as conn:
+        permessi = {c["nome"].lower(): c for c in colleghi(conn, da_id)}
+        dest = permessi.get(nome_dest.strip().lower())
+        if dest is None:
+            raise DialogoBloccato("Puoi parlare solo con: " + (", ".join(c["nome"] for c in permessi.values()) or "nessuno"))
+        _controlli_generali(conn, conv_id)
+        if conv_id is None:
+            conv_id = conn.execute(
+                "INSERT INTO conversazioni (titolo, fascia_dati, iniziata_da_agente) VALUES (%s,%s,%s) RETURNING id",
+                (domanda.strip().splitlines()[0][:90] or "Domanda", fascia, da_id)).fetchone()["id"]
+        else:
+            if conn.execute("SELECT 1 FROM conversazioni WHERE id = %s", (conv_id,)).fetchone() is None:
+                raise DialogoBloccato("Conversazione inesistente")
+        _salva_messaggio(conn, conv_id, da_id, dest["id"], domanda)
+        conn.commit()
+        risposta = _fai_parlare(conn, dest["id"], da_id, conv_id,
+                                "Rispondi al messaggio precedente. Se non e' chiaro, chiedi chiarimenti precisi.", fascia, utente_id)
+    return risposta, conv_id
+
+
+def dialogo_avviato_da_utente(da_id: int, a_id: int, argomento: str, messaggi: int, fascia: str, utente_id: int) -> int:
+    """Lorenzo fa dialogare due agenti su un argomento. Si ferma al limite di messaggi o con [CHIARITO]."""
+    with connessione() as conn:
+        if a_id not in {c["id"] for c in colleghi(conn, da_id)}:
+            raise DialogoBloccato("Questi due agenti non possono dialogare tra loro (solo superiore, subordinati e manager tra loro)")
+        massimo = int(impostazione(conn, "dialoghi_max_messaggi", "8"))
+        messaggi = max(2, min(messaggi, massimo))
+        conv_id = conn.execute(
+            "INSERT INTO conversazioni (titolo, fascia_dati, iniziata_da_utente) VALUES (%s,%s,%s) RETURNING id",
+            (argomento.strip().splitlines()[0][:90], fascia, utente_id)).fetchone()["id"]
+        conn.commit()
+        parlante, altro = da_id, a_id
+        try:
+            _scambia(conn, conv_id, parlante, altro, argomento, messaggi, fascia, utente_id)
+        except (DialogoBloccato, ErroreFornitore):
+            if conn.execute("SELECT count(*) AS n FROM messaggi_agenti WHERE conversazione_id = %s", (conv_id,)).fetchone()["n"] == 0:
+                conn.execute("DELETE FROM conversazioni WHERE id = %s", (conv_id,))  # nessun messaggio: non lascio conversazioni vuote
+                conn.commit()
+            raise
+        conn.execute("UPDATE conversazioni SET stato = 'chiusa' WHERE id = %s", (conv_id,))
+    return conv_id
+
+
+def _scambia(conn, conv_id, parlante, altro, argomento, messaggi, fascia, utente_id):
+    if True:
+        for i in range(messaggi):
+            _controlli_generali(conn, conv_id)
+            istruzione = (f"Argomento proposto da Lorenzo: {argomento}\n"
+                          + ("Apri tu il dialogo con il collega: spiega il contesto e cosa ti serve." if i == 0
+                             else "Rispondi al collega. Se non e' chiaro chiedi chiarimenti precisi."))
+            testo = _fai_parlare(conn, parlante, altro, conv_id, istruzione, fascia, utente_id)
+            conn.commit()
+            if "[CHIARITO]" in testo:
+                break
+            parlante, altro = altro, parlante

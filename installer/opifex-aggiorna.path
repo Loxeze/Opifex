@@ -1,0 +1,7 @@
+[Unit]
+Description=Opifex: richiesta di aggiornamento
+[Path]
+PathExists=/opt/agenti/aggiornamenti/richiesta
+Unit=opifex-aggiorna.service
+[Install]
+WantedBy=multi-user.target
