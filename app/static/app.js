@@ -175,7 +175,7 @@ function modulo(a) {
   livello.value = d.livello;
   const modello = h("select", {}, stato.opzioni.modelli.map(m => h("option", { value: m.nome }, m.nome + " — " + m.fornitore)));
   modello.value = d.modello;
-  const fascia = h("select", {}, Object.entries(ETICHETTA_FASCIA).map(([v, t]) => h("option", { value: v }, t)));
+  const fascia = h("select", {}, Object.entries({ pubblico: "Solo dati pubblici", interno: "Dati pubblici e interni", riservato: "Tutti i dati (anche riservati)" }).map(([v, t]) => h("option", { value: v }, t)));
   fascia.value = d.fascia_dati_max;
   const tetto = h("input", { type: "number", min: 100, max: 8000, value: d.max_token_risposta });
   const budget = h("input", { type: "number", min: 1, value: d.budget_token_mensile ?? "", placeholder: "Nessun limite" });

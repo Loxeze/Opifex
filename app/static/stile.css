@@ -67,3 +67,6 @@ html{color-scheme:dark}
 .puntino{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
 input[type=color]{width:60px;height:36px;padding:2px;border:1px solid var(--bordo);border-radius:8px;background:var(--carta)}
 @media (max-width:600px){.scena .comandi{width:140px}.scena .legenda{display:none}}
+
+/* il pulsante Salva resta sempre visibile in fondo ai moduli lunghi */
+.pannello .azioni{position:sticky;bottom:-16px;background:var(--sfondo);padding:14px 0 16px;margin-bottom:-16px;border-top:1px solid #1f2937;z-index:2}
