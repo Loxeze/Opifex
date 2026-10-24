@@ -194,6 +194,9 @@ function modulo(a) {
   modDialogo.value = d.modello_dialogo || "";
   const dialoga = h("input", { type: "checkbox" }); dialoga.checked = !!d.dialoghi_attivi;
   const vedeTutto = h("input", { type: "checkbox" }); vedeTutto.checked = !!d.vede_tutto;
+  const gmailSel = h("select", {}, h("option", { value: "" }, "Nessuna casella"),
+    (stato.opzioni.account_gmail || []).map(g => h("option", { value: g.id }, g.etichetta + " — " + g.email)));
+  gmailSel.value = d.gmail_account_id || "";
   const driveAttivo = h("input", { type: "checkbox" }); driveAttivo.checked = !!d.drive_attivo;
   const conn = stato.connessioni.map(c => {
     const cb = h("input", { type: "checkbox", value: c.id }); cb.checked = d.connessioni.includes(c.id);
@@ -214,7 +217,7 @@ function modulo(a) {
       max_token_risposta: Number(tetto.value), budget_token_mensile: budget.value ? Number(budget.value) : null,
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,
-      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked,
+      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null,
       connessioni: conn.filter(([, cb]) => cb.checked).map(([c]) => c.id),
     };
     try {
@@ -286,6 +289,7 @@ function modulo(a) {
       h("h3", {}, "Dialoghi con gli altri agenti"),
       h("div", { class: "interruttore" }, dialoga, h("span", {}, "Può fare domande a superiore, subordinati e altri manager mentre lavora")),
       h("div", { class: "interruttore" }, vedeTutto, h("span", {}, "Vede cosa fai e cosa ti dicono gli altri agenti (sintesi recente, nei limiti di riservatezza)")),
+      h("label", {}, "Casella di posta che gestisce (legge e prepara bozze, non invia)", gmailSel),
       h("div", { class: "interruttore" }, driveAttivo, h("span", {}, "Può creare e modificare fogli e documenti Google nella cartella Opifex (non può cancellare)")),
       h("label", {}, "Modello per i dialoghi", h("p", { class: "aiuto" }, "Per parlare con i colleghi basta un modello semplice ed economico: il modello di lavoro sopra resta per pensare e svolgere i compiti."), modDialogo),
       h("h3", {}, "Accesso al web"),

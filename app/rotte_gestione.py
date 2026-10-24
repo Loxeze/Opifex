@@ -43,6 +43,7 @@ class DatiAgente(BaseModel):
     dialoghi_attivi: bool = False
     vede_tutto: bool = False
     drive_attivo: bool = False
+    gmail_account_id: int | None = None
     connessioni: list[int] = []
 
 
@@ -67,10 +68,14 @@ class ModificaAgente(BaseModel):
     dialoghi_attivi: bool | None = None
     vede_tutto: bool | None = None
     drive_attivo: bool | None = None
+    gmail_account_id: int | None = None
     connessioni: list[int] | None = None
 
 
 def _valida(conn, d: dict):
+    if d.get("gmail_account_id") and not conn.execute(
+            "SELECT 1 FROM account_google WHERE id = %s AND 'gmail' = ANY(servizi)", (d["gmail_account_id"],)).fetchone():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "L'account scelto non ha il permesso Gmail")
     if d.get("fascia_dati_max") is not None and d["fascia_dati_max"] not in FASCE:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Livello di riservatezza non valido")
     if d.get("livello") is not None and d["livello"] not in ("referente", "manager", "operativo"):
@@ -120,7 +125,7 @@ SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divis
        a.sentinella,
        CASE WHEN a.sentinella THEN 'sentinella' WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' ELSE a.livello END AS categoria,
        a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.budget_token_mensile,
-       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo,
+       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id,
        COALESCE((SELECT array_agg(x.azienda_id ORDER BY x.azienda_id) FROM agenti_aziende x WHERE x.agente_id = a.id), '{}') AS aziende,
        COALESCE((SELECT array_agg(ac.connessione_id ORDER BY ac.connessione_id)
                  FROM agenti_connessioni ac WHERE ac.agente_id = a.id), '{}') AS connessioni,
@@ -149,6 +154,7 @@ def opzioni(_: dict = Depends(solo_titolare)):
                    JOIN fornitori_ai f ON f.id = m.fornitore_id ORDER BY f.nome, m.nome""").fetchall(),
             "divisioni": conn.execute("SELECT id, nome FROM divisioni WHERE attiva ORDER BY id").fetchall(),
             "aziende": conn.execute("SELECT id, nome FROM aziende WHERE attiva ORDER BY id").fetchall(),
+            "account_gmail": conn.execute("SELECT id, etichetta, email FROM account_google WHERE 'gmail'=ANY(servizi) ORDER BY etichetta").fetchall(),
             "fornitori": conn.execute(
                 """SELECT nome, non_conservazione_attiva, dpa_firmato, fascia_dati_max
                    FROM fornitori_ai ORDER BY nome""").fetchall(),
@@ -167,12 +173,12 @@ def crea(d: DatiAgente, utente: dict = Depends(solo_titolare)):
         riga = conn.execute(
             """INSERT INTO agenti (divisione_id, superiore_id, nome, ruolo, livello, tipo, modello, fascia_dati_max,
                    istruzioni, max_token_risposta, budget_token_mensile, accesso_web, siti_consentiti,
-                   max_ricerche, attivo, modello_dialogo, dialoghi_attivi, sentinella, vede_tutto, drive_attivo)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                   max_ricerche, attivo, modello_dialogo, dialoghi_attivi, sentinella, vede_tutto, drive_attivo, gmail_account_id)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (dati["divisione_id"], dati["superiore_id"], d.nome, d.ruolo, dati["livello"],
              "divisione" if dati["divisione_id"] else "sistema", d.modello, d.fascia_dati_max, d.istruzioni,
              d.max_token_risposta, d.budget_token_mensile, d.accesso_web, dati["siti_consentiti"],
-             d.max_ricerche, d.attivo, d.modello_dialogo or None, d.dialoghi_attivi, bool(dati.get("sentinella")), d.vede_tutto, d.drive_attivo),
+             d.max_ricerche, d.attivo, d.modello_dialogo or None, d.dialoghi_attivi, bool(dati.get("sentinella")), d.vede_tutto, d.drive_attivo, d.gmail_account_id),
         ).fetchone()
         _scrivi_connessioni(conn, riga["id"], d.connessioni)
         _registra(conn, riga["id"], "agente_creato", utente["id"], {"nome": d.nome})
