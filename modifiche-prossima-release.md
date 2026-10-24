@@ -76,3 +76,4 @@
 
 ## FATTO in 1.8.0 (25/10): ripresa immediata dopo risposta; @Nome/​/agente su Telegram; Chat unificata + riepilogo; modifica progetti e allineamento (progetti+imprese); chiavi fornitori da app, modelli GPT, Stato sistemi; posta IMAP (Aruba)
 ## PER 1.9.0: Canva, Brevo, Plaud (import riunioni -> task), strumenti agenti anche su OpenAI, task fase 2/3 (coda agenti, Calendar), vista controllo documenti, riordino menu
+- (25/10) Prompt degli agenti: limite raddoppiato 8000 -> 16000 caratteri (gia nel codice, esce con 1.9.0)

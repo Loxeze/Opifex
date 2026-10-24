@@ -47,7 +47,7 @@ class DatiAgente(BaseModel):
     livello: str = "operativo"
     sentinella: bool = False
     modello: str
-    istruzioni: str = Field(min_length=1, max_length=8000)
+    istruzioni: str = Field(min_length=1, max_length=16000)
     fascia_dati_max: str = "pubblico"
     max_token_risposta: int = Field(default=1500, ge=100, le=8000)
     budget_token_mensile: int | None = Field(default=None, gt=0)
@@ -74,7 +74,7 @@ class ModificaAgente(BaseModel):
     livello: str | None = None
     sentinella: bool | None = None
     modello: str | None = None
-    istruzioni: str | None = Field(default=None, min_length=1, max_length=8000)
+    istruzioni: str | None = Field(default=None, min_length=1, max_length=16000)
     fascia_dati_max: str | None = None
     max_token_risposta: int | None = Field(default=None, ge=100, le=8000)
     budget_token_mensile: int | None = Field(default=None, gt=0)
