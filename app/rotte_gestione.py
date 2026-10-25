@@ -52,7 +52,7 @@ class DatiAgente(BaseModel):
     fascia_dati_max: str = "pubblico"
     max_token_risposta: int = Field(default=3000, ge=100, le=8000)
     budget_token_mensile: int | None = Field(default=None, gt=0)
-    accesso_web: bool = False
+    accesso_web: bool = True
     siti_consentiti: list[str] = []
     max_ricerche: int = Field(default=3, ge=1, le=10)
     attivo: bool = True

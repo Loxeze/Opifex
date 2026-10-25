@@ -190,6 +190,9 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
         testo_uscente = anonimizza(messaggio)
         try:
             web = {"siti": a["siti_consentiti"], "max_ricerche": a["max_ricerche"]} if a["accesso_web"] else None
+            if not web:
+                a["istruzioni"] = a["istruzioni"] + ("\n\nNON HAI LA RICERCA WEB (scelta di Lorenzo per te): non cercare in rete e non chiedergli di attivarla. "
+                                                     "Se ti serve un'informazione dal web chiedila a un collega che ce l'ha (ad es. Scout, Radar, Tendenze).")
             if web and a["fornitore"] == "anthropic":   # l'agente deve sapere di avere il web, altrimenti ne chiede l'accesso
                 a["istruzioni"] = (a["istruzioni"] + "\n\nHAI LA RICERCA WEB (strumento web_search" + (": solo sui siti " + ", ".join(web["siti"]) if web["siti"] else "")
                                    + "). Usala direttamente e cita le fonti: non chiedere a Lorenzo di darti l'accesso al web. "

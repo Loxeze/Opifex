@@ -156,7 +156,7 @@ function carta(a) {
     h("div", {},
       h("span", { class: "etichetta " + (a.attivo ? "ok" : "no") }, a.attivo ? "Attivo" : "Spento"),
       h("span", { class: "etichetta" }, a.modello),
-      a.accesso_web ? h("span", { class: "etichetta avv" }, "Web") : null,
+      a.accesso_web ? null : h("span", { class: "etichetta avv" }, "Senza web"),
       a.connessioni.length ? h("span", { class: "etichetta" }, a.connessioni.length + " conn.") : null),
     h("div", { class: "sotto" }, "Questo mese: " + a.token_mese.toLocaleString("it-IT") + " token"));
 }
@@ -180,7 +180,7 @@ function modulo(a) {
   const nuovo = a === null;
   const d = a || { nome: "", ruolo: "", divisione_id: null, superiore_id: null, livello: "operativo",
     modello: stato.opzioni.modelli[0]?.nome, istruzioni: "", fascia_dati_max: "pubblico", max_token_risposta: 3000,
-    budget_token_mensile: null, accesso_web: false, siti_consentiti: [], max_ricerche: 3, attivo: true, connessioni: [], aziende: [] };
+    budget_token_mensile: null, accesso_web: true, siti_consentiti: [], max_ricerche: 3, attivo: true, connessioni: [], aziende: [] };
 
   const nome = h("input", { type: "text", value: d.nome, maxlength: 60 });
   const ruolo = h("input", { type: "text", value: d.ruolo, maxlength: 120, placeholder: "Es. Cerca nuovi bandi" });
@@ -359,7 +359,7 @@ function modulo(a) {
       h("div", { class: "interruttore" }, driveAttivo, h("span", {}, "Può creare e modificare fogli e documenti Google nella cartella Opifex (non può cancellare)")),
       h("label", {}, "Modello per i dialoghi", h("p", { class: "aiuto" }, "Per parlare con i colleghi basta un modello semplice ed economico: il modello di lavoro sopra resta per pensare e svolgere i compiti."), modDialogo),
       h("h3", {}, "Accesso al web"),
-      h("div", { class: "interruttore" }, web, h("span", {}, "Può cercare sul web (solo modelli Claude per ora)")),
+      h("div", { class: "interruttore" }, web, h("span", {}, "Può cercare sul web (attivo per tutti; spegni per bloccarlo a questo agente — solo modelli Claude per ora)")),
       h("label", {}, "Siti consentiti", h("p", { class: "aiuto" }, "Un sito per riga. Se lasci vuoto può cercare su qualsiasi sito."), siti),
       h("label", {}, "Ricerche massime per risposta", ricerche),
       h("h3", {}, "Documento di riferimento"), sezioneDoc,
