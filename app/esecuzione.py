@@ -10,7 +10,7 @@ from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
-from . import casati, cerimoniere, spesa
+from . import casati, cerimoniere, spesa, consegne
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
@@ -296,6 +296,11 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                         with connessione() as c2:
                             return iniziative.apri(c2, _aid, dati)
                     gestori["iniziativa_apri"] = _iniz
+                    extra.append(consegne.STRUMENTO)
+                    avviso_extra += consegne.AVVISO
+                    with connessione() as c3:
+                        avviso_extra += consegne.regole_per(c3, agente_id)
+                    gestori["passa_a"] = consegne.strumento(agente_id)
                 if mem_tool:
                     extra.append(memoria_lavoro.STRUMENTO)
                     avviso_extra += ("\n\nMEMORIA: se durante il lavoro emerge una decisione, un fatto o una preferenza di Lorenzo che servira' in futuro, "

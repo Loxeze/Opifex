@@ -213,6 +213,13 @@ def crea(d: NuovaTask, u: dict = Depends(utente_corrente)):
                    %(assegnato_utente_id)s,%(assegnato_agente_id)s,%(supporto_agente_id)s,%(me)s, CASE WHEN %(stato)s = 'completata' THEN NOW() END) RETURNING id""",
             {**dati, "me": u["id"]}).fetchone()
         _log(conn, "task_creata", u, {"task_id": r["id"], "titolo": dati["titolo"][:80]})
+    if dati.get("assegnato_agente_id"):
+        try:
+            from . import trigger
+            trigger.emetti("task_assegnato", dati["titolo"] + " " + (dati.get("descrizione") or "")[:300], agente_id=dati["assegnato_agente_id"],
+                           contesto=f"Task #{r['id']} assegnata: {dati['titolo'][:150]}.")
+        except Exception:
+            pass
     if dati.get("supporto_agente_id"):
         consigli_task.richiedi(r["id"], u["id"])
     return {"id": r["id"]}

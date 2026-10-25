@@ -65,6 +65,11 @@ async def carica(file: UploadFile = File(...), nome: str = Form(""), fascia_dati
             pass
         conn.execute("INSERT INTO registro_azioni (azione, dettagli, utente_id) VALUES ('documento_caricato', %s::jsonb, %s)",
                      (json.dumps({"documento_id": riga["id"], "file": nome_file, "fascia": fascia_dati}), utente["id"]))
+    try:
+        from . import trigger
+        trigger.emetti("documento_caricato", (nome.strip() or nome_file), contesto=f"Documento caricato: {(nome.strip() or nome_file)[:150]} (fascia {fascia_dati}).")
+    except Exception:
+        pass
     return {"id": riga["id"], "pezzi": len(pezzi), "caratteri": len(testo)}
 
 

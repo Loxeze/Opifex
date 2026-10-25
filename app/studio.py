@@ -165,6 +165,11 @@ def _lavora(studio_id: int):
                      (scheda, r["token_input"] + r["token_output"], mid, studio_id))
         conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
                      (f"Padre Casati ha concluso lo studio «{s['tema'][:100]}»: la scheda e la voce di dossier da approvare sono in Impostazioni → Studi.",))
+        try:
+            from . import trigger
+            trigger.emetti("studio_concluso", s["tema"], contesto=f"Padre Casati ha concluso lo studio «{s['tema'][:150]}».")
+        except Exception:
+            pass
 
 
 def strumento(agente_id: int, dati: dict) -> str:

@@ -96,6 +96,8 @@ def esito(conn, dati: dict) -> str:
 
 
 STRUMENTI = [
+    {"name": "proponi_regola", "description": "Proponi una regola di smistamento (es. i bandi di cultura vanno al manager di Renovatio). La approva Lorenzo prima che valga.",
+     "input_schema": {"type": "object", "properties": {"quando": {"type": "string"}, "destinatario": {"type": "string"}}, "required": ["quando", "destinatario"]}},
     {"name": "mappa_organizzazione", "description": "Legge l'organizzazione dal vivo: ogni agente con dipartimento, azienda, compito, cosa non fa e a chi risponde, piu' gli ultimi instradamenti e le schede da completare. "
                                                    "filtro (facoltativo): parola da cercare nelle schede.",
      "input_schema": {"type": "object", "properties": {"filtro": {"type": "string"}}}},
@@ -121,6 +123,12 @@ def gestore(cerimoniere_id: int, connessione):
                     return mappa(conn, str(dati.get("filtro") or ""), cerimoniere_id)
                 if nome == "presenta_a_manager":
                     return presenta(conn, cerimoniere_id, dati)
+                if nome == "proponi_regola":
+                    from . import consegne
+                    try:
+                        return consegne.proponi_regola(conn, cerimoniere_id, dati)
+                    except consegne.ErroreConsegna as e:
+                        return "ERRORE: " + str(e)
                 if nome == "proponi_ruolo":
                     return proponi_ruolo(conn, cerimoniere_id, dati)
                 if nome == "esito_instradamento":

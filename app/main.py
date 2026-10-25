@@ -40,6 +40,7 @@ from .rotte_iniziative import router as router_iniziative
 from .rotte_biblioteca import router as router_biblioteca
 from .rotte_cerimoniere import router as router_cerimoniere
 from .rotte_studi import router as router_studi
+from .rotte_trigger import router as router_quando
 from .rotte_dossier import router as router_dossier
 from .rotte_crm import router as router_crm
 from .rotte_voce_el import router as router_voce_el
@@ -103,6 +104,23 @@ async def _manutenzione():
         await asyncio.sleep(600)
 
 
+async def _trigger_orari():
+    """Ogni minuto controlla i trigger a orario accesi e li avvia."""
+    import asyncio
+    from . import trigger
+
+    def giro():
+        with connessione() as conn:
+            trigger.tick(conn)
+    await asyncio.sleep(45)
+    while True:
+        try:
+            await asyncio.to_thread(giro)
+        except Exception:
+            pass
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def ciclo_vita(app: FastAPI):
     import asyncio
@@ -112,7 +130,7 @@ async def ciclo_vita(app: FastAPI):
         percorsi.recupera_interrotti()
     except Exception:
         pass
-    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione())]
+    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari())]
     yield
     for c in compiti:
         c.cancel()
@@ -164,6 +182,7 @@ app.include_router(router_iniziative)
 app.include_router(router_biblioteca)
 app.include_router(router_cerimoniere)
 app.include_router(router_studi)
+app.include_router(router_quando)
 app.include_router(router_dossier)
 app.include_router(router_crm)
 app.include_router(router_voce_el)
