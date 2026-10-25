@@ -152,6 +152,8 @@ async def intestazioni_sicure(richiesta, call_next):
     risposta.headers["X-Content-Type-Options"] = "nosniff"
     risposta.headers["Referrer-Policy"] = "no-referrer"
     risposta.headers["Permissions-Policy"] = "microphone=(self), camera=(), geolocation=()"
+    if richiesta.url.path.startswith("/app"):
+        risposta.headers["Cache-Control"] = "no-cache"   # il browser controlla sempre se c'e' una versione nuova (ETag): niente grafica vecchia dopo un aggiornamento
     return risposta
 
 
