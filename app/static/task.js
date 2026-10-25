@@ -34,7 +34,8 @@ function chipTask(t) {
     t.priorita !== "normale" ? h("span", { class: "etichetta " + COL_PRIO[t.priorita] }, PRIORITA_TASK.find(p => p[0] === t.priorita)[1]) : null,
     t.scadenza ? h("span", { class: "etichetta " + (t.scaduta ? "no" : "") }, (t.scaduta ? "Scaduta · " : "") + dataBreve(t.scadenza)) : null,
     (t.utente || t.agente) ? h("span", { class: "etichetta" }, (t.agente ? "🤖 " : "") + (t.agente || t.utente)) : null,
-    t.progetto ? h("span", { class: "etichetta" }, t.progetto) : null,
+    t.azienda ? h("span", { class: "etichetta", style: "border-left:4px solid " + (t.azienda_colore || "#7d8a99") }, t.azienda) : null,
+    t.progetto ? h("span", { class: "etichetta", style: "border-left:4px solid " + (t.progetto_colore || "#7d8a99") }, t.progetto) : null,
     t.sottotask ? h("span", { class: "etichetta" }, t.sottotask_fatte + "/" + t.sottotask + " sottotask") : null,
     t.commenti ? h("span", { class: "etichetta" }, t.commenti + " 💬") : null);
 }
@@ -48,6 +49,22 @@ function rigaTask(t, dopo) {
     cb,
     h("div", { class: "task-corpo", tabindex: 0, role: "button", onclick: () => schedaTask(t.id, null, dopo), onkeydown: (e) => { if (e.key === "Enter") schedaTask(t.id, null, dopo); } },
       h("div", { class: "nome" }, (t.padre_titolo ? t.padre_titolo + " › " : "") + t.titolo), chipTask(t)));
+}
+
+// Task a livelli: un blocco per progetto (con il colore dell'impresa e del progetto), poi le task senza progetto
+function taskPerProgetto(el, carica, chiusi) {
+  const gr = new Map();
+  el.forEach(t => { const k = t.progetto_id || 0; if (!gr.has(k)) gr.set(k, { t }); (gr.get(k).el = gr.get(k).el || []).push(t); });
+  const ordine = [...gr].sort((a, b) => (a[0] === 0) - (b[0] === 0) || String(a[1].t.azienda || "").localeCompare(String(b[1].t.azienda || "")) || String(a[1].t.progetto || "").localeCompare(String(b[1].t.progetto || "")));
+  return ordine.map(([k, g]) => {
+    const t0 = g.t, colP = t0.progetto_colore || "#7d8a99", colA = t0.azienda_colore || "#7d8a99";
+    const d = h("details", { class: "livello", style: "border-left:5px solid " + (k ? colP : "var(--bordo)"), open: !chiusi.has(k) },
+      h("summary", {}, k ? [h("span", { class: "punto-col", style: "background:" + colA }), (t0.azienda || "") + " › ", h("span", { class: "punto-col", style: "background:" + colP }), t0.progetto] : "Senza progetto",
+        h("span", { class: "sotto" }, "  (" + g.el.length + ")")),
+      g.el.map(t => rigaTask(t, carica)));
+    d.addEventListener("toggle", () => { d.open ? chiusi.delete(k) : chiusi.add(k); });
+    return d;
+  });
 }
 
 // ---------- Vista completa ----------
@@ -71,6 +88,7 @@ function vistaTask() {
               : h("p", { class: "sotto" }, "Nessuna task")); })));
         return;
       }
+      if (modo === "progetti") { riempi(corpo, el.length ? taskPerProgetto(el, carica, stato.taskChiusi = stato.taskChiusi || new Set()) : h("p", { class: "sotto" }, "Nessuna task.")); return; }
       const gruppi = [[], [], [], [], [], []];
       el.forEach(t => gruppi[gruppoTask(t)].push(t));
       riempi(corpo, el.length ? gruppi.map((g, i) => g.length ? h("div", {}, h("h3", { class: i === 0 ? "scadute" : "" }, NOMI_GRUPPO[i] + " (" + g.length + ")"), g.map(t => rigaTask(t, carica))) : null)
@@ -80,7 +98,7 @@ function vistaTask() {
   const segm = (valore, corrente, etichetta, imposta) => h("button", { class: corrente === valore ? "p" : "s", onclick: () => { imposta(valore); disegnaBarra(); carica(); } }, etichetta);
   const disegnaBarra = () => riempi(barra, [
     h("div", { class: "gruppo-bottoni" }, segm("mie", chi, "Le mie", v => { chi = stato.taskChi = v; }), segm("tutte", chi, "Tutte", v => { chi = stato.taskChi = v; })),
-    h("div", { class: "gruppo-bottoni" }, segm("lista", modo, "Lista", v => { modo = stato.taskModo = v; }), segm("bacheca", modo, "Bacheca", v => { modo = stato.taskModo = v; })),
+    h("div", { class: "gruppo-bottoni" }, segm("lista", modo, "Lista", v => { modo = stato.taskModo = v; }), segm("bacheca", modo, "Bacheca", v => { modo = stato.taskModo = v; }), segm("progetti", modo, "Per progetto", v => { modo = stato.taskModo = v; })),
     h("label", { class: "spunta" }, (() => { const c = h("input", { type: "checkbox" }); c.checked = aperte; c.addEventListener("change", () => { aperte = stato.taskAperte = c.checked; carica(); }); return c; })(), "Solo da completare"),
     h("button", { class: "p", style: "margin-left:auto", onclick: () => schedaTask(null, null, carica) }, "+ Nuova task")]);
   disegnaBarra(); carica();
@@ -180,8 +198,8 @@ function pannelloDaFare() {
   const carica = async () => {
     try {
       const el = await api("GET", "/task?chi=mie&aperte=true");
-      riempi(box, el.length ? [el.slice(0, 7).map(t => rigaTask(t, carica)),
-        el.length > 7 ? h("button", { class: "s", onclick: () => vai("task") }, "Vedi tutte (" + el.length + ")") : null]
+      riempi(box, el.length ? [el.some(t => t.progetto_id) ? taskPerProgetto(el.slice(0, 12), carica, stato.taskChiusi = stato.taskChiusi || new Set()) : el.slice(0, 7).map(t => rigaTask(t, carica)),
+        el.length > (el.some(t => t.progetto_id) ? 12 : 7) ? h("button", { class: "s", onclick: () => vai("task") }, "Vedi tutte (" + el.length + ")") : null]
         : h("p", { class: "sotto" }, "Nessuna task da fare. Quando te ne assegnano una la trovi qui, in ordine di scadenza."));
     } catch (e) { box.replaceChildren(avviso(e.message, "no")); }
   };

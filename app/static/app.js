@@ -73,12 +73,12 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["iniziative", "Iniziative"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["percorsi", "Percorsi"], ["social", "Social"], ["email", "Email"], ["crm", "Contatti"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["iniziative", "Iniziative"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["email", "Email"], ["crm", "Contatti"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
 const VISTE_COLLABORATORE = [["task", "Task"], ["iniziative", "Iniziative"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Account Google"], ["connessioni", "Connessioni a siti e app"],
-  ["canali", "Canali (Telegram)"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["voce", "Voce"], ["sistema", "Backup e costi"]];
+  ["canali", "Canali (Telegram)"], ["social", "Social"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["voce", "Voce"], ["sistema", "Backup e costi"]];
 
-function vai(vista, sezione) { if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
+function vai(vista, sezione) { if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "social")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
 function cornice(contenuto) {
   radice.replaceChildren(

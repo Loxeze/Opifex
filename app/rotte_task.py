@@ -136,11 +136,12 @@ def _valida_enum(d: dict):
 ELENCO = """
 SELECT t.id, t.titolo, t.stato, t.priorita, t.scadenza, t.padre_id, t.progetto_id, t.azienda_id,
        t.assegnato_utente_id, t.assegnato_agente_id, t.supporto_agente_id, t.creata_il, t.completata_il,
-       p.titolo AS padre_titolo, pr.nome AS progetto, u.nome AS utente, a.nome AS agente,
+       p.titolo AS padre_titolo, pr.nome AS progetto, COALESCE(pr.colore, az.colore) AS progetto_colore, az.nome AS azienda, az.colore AS azienda_colore, u.nome AS utente, a.nome AS agente,
        (SELECT count(*) FROM task s WHERE s.padre_id = t.id) AS sottotask,
        (SELECT count(*) FROM task s WHERE s.padre_id = t.id AND s.stato = 'completata') AS sottotask_fatte,
        (SELECT count(*) FROM task_commenti c WHERE c.task_id = t.id) AS commenti
 FROM task t LEFT JOIN task p ON p.id = t.padre_id LEFT JOIN progetti pr ON pr.id = t.progetto_id
+LEFT JOIN aziende az ON az.id = COALESCE(pr.azienda_id, t.azienda_id)
 LEFT JOIN utenti u ON u.id = t.assegnato_utente_id LEFT JOIN agenti a ON a.id = t.assegnato_agente_id
 """
 ORDINE = " ORDER BY (t.stato = 'completata'), t.scadenza NULLS LAST, array_position(ARRAY['urgente','alta','normale','bassa'], t.priorita), t.id"
@@ -182,7 +183,7 @@ def opzioni(u: dict = Depends(utente_corrente)):
             f"SELECT a.id, a.nome, a.ruolo, {etichetta.sql()} AS etichetta FROM agenti a WHERE a.attivo AND NOT {SENTINELLA} AND a.id = ANY(%s) ORDER BY a.nome",
             ([r["id"] for r in conn.execute("SELECT id FROM agenti").fetchall()] if ass is None else ass or [0],)).fetchall()
         return {"utenti": conn.execute("SELECT id, nome FROM utenti WHERE attivo ORDER BY nome").fetchall(), "agenti": agenti,
-                "progetti": conn.execute("SELECT id, nome FROM progetti WHERE NOT archiviato ORDER BY nome").fetchall(),
+                "progetti": conn.execute("SELECT p.id, p.nome, p.azienda_id, COALESCE(p.colore, z.colore) AS colore FROM progetti p LEFT JOIN aziende z ON z.id = p.azienda_id WHERE NOT p.archiviato ORDER BY p.nome").fetchall(),
                 "aziende": conn.execute("SELECT id, nome FROM aziende WHERE attiva ORDER BY nome").fetchall(),
                 "manager": conn.execute(
                     f"""SELECT a.id, a.nome, a.ruolo, {etichetta.sql()} AS etichetta, d.nome AS dipartimento FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id

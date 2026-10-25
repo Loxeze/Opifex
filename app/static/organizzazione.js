@@ -2,7 +2,7 @@
 // Organigramma 3D (canvas, nessuna libreria esterna) e gestione di aziende e dipartimenti.
 // I dati arrivano dall'API: nessun testo viene inserito come HTML.
 
-const COL_STATO = { sereno: "#34d399", pressione: "#fbbf24", difficolta: "#f87171" };
+const COL_STATO = { sereno: "#3fd3c0", pressione: "#f3b54a", difficolta: "#e8795a" };
 const TXT_STATO = { sereno: "Sereno", pressione: "Sotto pressione", difficolta: "In difficoltà" };
 
 function apriPannello(titolo, figli) {
@@ -50,7 +50,7 @@ function calcolaLayout(dati) {   // piani per azienda
   const gap = 1.35;
   const piani = [];
   if (trasv) piani.push({ id: 0, nome: "Trasversali", colore: "#94a3b8" });
-  aziendeAttive.forEach(z => piani.push({ id: z.id, nome: z.nome, colore: z.colore || "#22d3ee" }));
+  aziendeAttive.forEach(z => piani.push({ id: z.id, nome: z.nome, colore: z.colore || "#f3b54a" }));
   piani.forEach((pi, k) => { pi.y = (k - (piani.length - 1) / 2) * gap; });
   const yPiano = (id) => (piani.find(pi => pi.id === id) || {}).y;
   const sentinelle = nodi.filter(n => n.esterno && !n.superiore_id);
@@ -85,7 +85,7 @@ function vistaOrganigramma(incorniciata) {
   const cx = cv.getContext("2d");
   const stelle = Array.from({ length: 120 }, () => ({ x: (Math.random() * 2 - 1) * 9, y: (Math.random() * 2 - 1) * 9, z: (Math.random() * 2 - 1) * 9 }));
 
-  const colore = (n) => n.centro ? "#22d3ee" : !n.attivo ? "#4b5563" : n.esterno ? "#a78bfa" : COL_STATO[n.stato] || "#34d399";
+  const colore = (n) => n.centro ? "#f3b54a" : !n.attivo ? "#4b5563" : n.esterno ? "#9a7bd8" : COL_STATO[n.stato] || "#3fd3c0";
   const aziendaNome = (id) => dati.aziende.find(z => z.id === id);
   const visibile = (n) => (!azienda || n.centro || !n.aziende.length || n.aziende.includes(Number(azienda))) && (!progetto || n.centro || (n.progetti || []).includes(Number(progetto)));
 
@@ -110,15 +110,15 @@ function vistaOrganigramma(incorniciata) {
 
   const disegnaScena = () => {
     cx.clearRect(0, 0, W, H);   // lo sfondo digitale e' nel CSS (.scena)
-    cx.fillStyle = "rgba(120,220,255,0.38)";
+    cx.fillStyle = "rgba(243,181,74,0.38)";
     for (const s of stelle) { const p = proietta(s.x, s.y, s.z); cx.fillRect(p.px, p.py, 1.2, 1.2); }
     if (!layout) {
-      cx.fillStyle = "#7d8a99"; cx.font = "13px monospace"; cx.textAlign = "center"; cx.fillText("Caricamento…", W / 2, H / 2); return;
+      cx.fillStyle = "#7d8a99"; cx.font = "13px Inter, system-ui, sans-serif"; cx.textAlign = "center"; cx.fillText("Caricamento…", W / 2, H / 2); return;
     }
     // asse verticale di Lorenzo che attraversa tutti i piani
     if (layout.piani.length) {
       const a0 = proietta(0, layout.piani[0].y - 0.8, 0), a1 = proietta(0, layout.piani[layout.piani.length - 1].y + 0.8, 0);
-      cx.strokeStyle = "rgba(34,211,238,0.35)"; cx.lineWidth = 1.5; cx.beginPath(); cx.moveTo(a0.px, a0.py); cx.lineTo(a1.px, a1.py); cx.stroke();
+      cx.strokeStyle = "rgba(243,181,74,0.35)"; cx.lineWidth = 1.5; cx.beginPath(); cx.moveTo(a0.px, a0.py); cx.lineTo(a1.px, a1.py); cx.stroke();
     }
     const cerchio = (R, y) => { cx.beginPath(); for (let t = 0; t <= 72; t++) { const an = t / 72 * Math.PI * 2; const p = proietta(R * Math.cos(an), y, R * Math.sin(an)); t ? cx.lineTo(p.px, p.py) : cx.moveTo(p.px, p.py); } };
     // i piani, dal piu' lontano al piu' vicino
@@ -130,20 +130,20 @@ function vistaOrganigramma(incorniciata) {
       cx.strokeStyle = pi.colore + "33"; cx.lineWidth = 1;
       for (const r of layout.raggi) { cerchio(r, pi.y); cx.stroke(); }
       const lp = proietta(-layout.rMax, pi.y, 0);
-      cx.fillStyle = pi.colore; cx.font = "bold 11px monospace"; cx.textAlign = "right"; cx.fillText(pi.nome, lp.px - 6, lp.py + 4);
+      cx.fillStyle = pi.colore; cx.font = "bold 11px Inter, system-ui, sans-serif"; cx.textAlign = "right"; cx.fillText(pi.nome, lp.px - 6, lp.py + 4);
     }
     cx.globalAlpha = 1;
     // anello delle sentinelle
     if (layout.nodi.some(n => n.esterno && !n.superiore_id)) {
       const re = layout.nodi.find(n => n.esterno && !n.superiore_id).r;
-      cx.setLineDash([5, 6]); cx.strokeStyle = "rgba(167,139,250,0.4)"; cerchio(re, 0); cx.stroke(); cx.setLineDash([]);
+      cx.setLineDash([5, 6]); cx.strokeStyle = "rgba(154,123,216,0.4)"; cerchio(re, 0); cx.stroke(); cx.setLineDash([]);
     }
     for (const n of layout.nodi) n.p = proietta(n.x, n.y, n.z);
     for (const n of layout.nodi) {
       if (n.centro) continue;
       const s = layout.per.get(n.superiore_id ?? 0) || layout.nodi[0];
       cx.globalAlpha = visibile(n) ? 1 : 0.15;
-      cx.strokeStyle = n.esterno && !n.superiore_id ? "rgba(167,139,250,0.35)" : n.attivo ? "rgba(34,211,238,0.35)" : "rgba(75,85,99,0.35)";
+      cx.strokeStyle = n.esterno && !n.superiore_id ? "rgba(154,123,216,0.35)" : n.attivo ? "rgba(243,181,74,0.35)" : "rgba(75,85,99,0.35)";
       cx.beginPath(); cx.moveTo(s.p.px, s.p.py); cx.lineTo(n.p.px, n.p.py); cx.stroke();
     }
     cx.globalAlpha = 1;
@@ -161,7 +161,7 @@ function vistaOrganigramma(incorniciata) {
       cx.fillStyle = "rgba(230,237,243," + Math.min(1, 0.5 + n.p.f * 0.5) + ")";
       cx.font = Math.round(10 + n.p.f * 3) + "px monospace"; cx.textAlign = "center";
       cx.fillText(n.nome, n.p.px, n.p.py - r - 8);
-      if (n.richieste) { cx.fillStyle = n.bloccanti ? "#f87171" : "#fbbf24"; cx.beginPath(); cx.arc(n.p.px + r, n.p.py - r, 5, 0, Math.PI * 2); cx.fill(); }
+      if (n.richieste) { cx.fillStyle = n.bloccanti ? "#e8795a" : "#f3b54a"; cx.beginPath(); cx.arc(n.p.px + r, n.p.py - r, 5, 0, Math.PI * 2); cx.fill(); }
     }
     cx.globalAlpha = 1;
   };
@@ -201,11 +201,11 @@ function vistaOrganigramma(incorniciata) {
   const chiudiScheda = () => { scelto = null; scheda.style.display = "none"; };
 
   const disegnaLegenda = () => riempi(legenda, [
-    h("div", {}, h("i", { style: "background:#22d3ee" }), "Lorenzo (centro)"),
-    h("div", {}, h("i", { style: "background:#a78bfa" }), "Sentinelle (osservano, non intervengono)"),
-    h("div", {}, h("i", { style: "background:#34d399" }), "Sereno"),
-    h("div", {}, h("i", { style: "background:#fbbf24" }), "Sotto pressione"),
-    h("div", {}, h("i", { style: "background:#f87171" }), "In difficoltà"),
+    h("div", {}, h("i", { style: "background:#f3b54a" }), "Lorenzo (centro)"),
+    h("div", {}, h("i", { style: "background:#9a7bd8" }), "Sentinelle (osservano, non intervengono)"),
+    h("div", {}, h("i", { style: "background:#3fd3c0" }), "Sereno"),
+    h("div", {}, h("i", { style: "background:#f3b54a" }), "Sotto pressione"),
+    h("div", {}, h("i", { style: "background:#e8795a" }), "In difficoltà"),
     h("div", {}, h("i", { style: "background:#4b5563" }), "Spento"),
     dati ? dati.aziende.filter(z => z.attiva).map(z => h("div", {}, h("i", { style: "background:transparent;border:2px solid " + z.colore }), z.nome)) : null,
     h("div", { style: "color:#7d8a99" }, "I raggi di luce mostrano i messaggi in tempo reale"),
@@ -220,7 +220,7 @@ function vistaOrganigramma(incorniciata) {
     for (const i of impulsi) {
       const A = layout.per.get(i.da), B = layout.per.get(i.a);
       if (!A || !B || !A.p || !B.p) continue;
-      const colore_ = i.tipo === "richiesta" ? "251,191,36" : i.tipo === "chat" ? "34,211,238" : "167,139,250";
+      const colore_ = i.tipo === "richiesta" ? "251,191,36" : i.tipo === "chat" ? "243,181,74" : "154,123,216";
       const t = ora - i.t0;
       if (t < 0) continue;
       const fade = Math.max(0, 1 - t / CODA);
@@ -342,7 +342,7 @@ function vistaStruttura() {
 }
 
 function formAzienda(z, tutte, dopo) {
-  const d = z || { nome: "", territorio: "", profilo: "", criteri_interesse: "", colore: "#22d3ee", attiva: true };
+  const d = z || { nome: "", territorio: "", profilo: "", criteri_interesse: "", colore: "#f3b54a", attiva: true };
   const nome = h("input", { type: "text", value: d.nome, maxlength: 80 });
   const terr = h("input", { type: "text", value: d.territorio || "", maxlength: 200 });
   const prof = h("textarea", {}); prof.value = d.profilo || "";
@@ -370,7 +370,7 @@ function formAzienda(z, tutte, dopo) {
 }
 
 function formDivisione(d0, aziende, dopo) {
-  const d = d0 || { nome: "", descrizione: "", azienda_id: null, colore: "#a78bfa", attiva: true, gestisce_posta: false };
+  const d = d0 || { nome: "", descrizione: "", azienda_id: null, colore: "#9a7bd8", attiva: true, gestisce_posta: false };
   const nome = h("input", { type: "text", value: d.nome, maxlength: 80 });
   const desc = h("input", { type: "text", value: d.descrizione || "", maxlength: 500 });
   const attuali = d.aziende || (d.azienda_id ? [d.azienda_id] : []);

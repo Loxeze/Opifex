@@ -28,7 +28,7 @@ function vistaPercorsi() {
         if (lista.some(x => x.stato === "in_elaborazione")) stato.timer = setInterval(async () => {
           try {
             const l2 = await api("GET", "/percorsi");
-            if (!l2.some(x => x.stato === "in_elaborazione")) { clearInterval(stato.timer); stato.timer = null; if (stato.vista === "percorsi" && !stato.percorsoAperto) disegna(); }
+            if (!l2.some(x => x.stato === "in_elaborazione")) { clearInterval(stato.timer); stato.timer = null; if ((stato.vista === "percorsi" || (stato.vista === "impostazioni" && stato.sezione === "percorsi")) && !stato.percorsoAperto) disegna(); }
           } catch (e) { /* ignora */ }
         }, 4000);
       }

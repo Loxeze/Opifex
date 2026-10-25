@@ -9,36 +9,50 @@ function vistaProgetti() {
       const d = await api("GET", "/gestione/progetti");
       const nome = h("input", { type: "text", maxlength: 100, placeholder: "Es. Bando Interreg 2027" });
       const desc = h("input", { type: "text", maxlength: 500, placeholder: "Di cosa si tratta (facoltativo)" });
+      const azi = h("select", {}, h("option", { value: "" }, "— scegli l'impresa —"), d.aziende.map(z => h("option", { value: z.id }, z.nome)));
+      const col = h("input", { type: "color", value: "#f3b54a", "aria-label": "Colore del progetto", style: "width:60px;height:44px;padding:2px" });
+      azi.addEventListener("change", () => { const z = d.aziende.find(x => x.id === Number(azi.value)); if (z && z.colore) col.value = z.colore; });
       const tutti = h("input", { type: "checkbox" }); tutti.checked = true;
       const scelte = d.agenti.map(a => ({ a, c: h("input", { type: "checkbox" }) }));
       const lista = h("div", { class: "riga", style: "display:none" }, scelte.map(({ a, c }) => h("label", { style: "flex:0 0 auto;margin-right:12px" }, c, " " + a.nome)));
       tutti.addEventListener("change", () => { lista.style.display = tutti.checked ? "none" : ""; });
-      const attivi = d.progetti.filter(p => !p.archiviato), archiviati = d.progetti.filter(p => p.archiviato);
-      const scheda = (p) => h("div", { class: "carta", style: "margin-bottom:12px" },
-        h("div", { class: "nome" }, p.nome),
+      const eliminati = d.progetti.filter(p => p.eliminato_il), attivi = d.progetti.filter(p => !p.archiviato && !p.eliminato_il), archiviati = d.progetti.filter(p => p.archiviato && !p.eliminato_il);
+      const scheda = (p) => h("div", { class: "carta", style: "margin-bottom:12px;border-left:5px solid " + (p.colore || "#f3b54a") },
+        h("div", { class: "nome" }, h("span", { class: "punto-col", style: "background:" + (p.colore || "#f3b54a") }), p.nome),
+        h("div", { class: "sotto" }, "Impresa: " + (p.azienda || "—") + " · task: " + p.n_task),
         p.descrizione ? h("div", { class: "sotto" }, p.descrizione) : null,
         h("div", { class: "sotto" }, "Agenti coinvolti: " + p.agenti.length + " · Drive: " + ({ ok: "cartelle create", da_sincronizzare: "da creare", errore: "errore" })[p.drive_stato]),
         p.drive_errore && p.drive_stato === "errore" ? avviso(p.drive_errore, "no") : null,
         p.allineamento ? h("div", { class: "sotto", style: "margin-top:6px;white-space:pre-wrap" }, "Allineamento" + (p.allineamento_il ? " (" + new Date(p.allineamento_il).toLocaleDateString("it-IT") + ")" : "") + ": " + p.allineamento.slice(0, 300) + (p.allineamento.length > 300 ? "…" : "")) : null,
         h("div", { class: "azioni" },
-          h("button", { class: "s", onclick: () => modificaProgetto(p, carica, msg) }, "Modifica"),
+          h("button", { class: "s", onclick: () => modificaProgetto(p, carica, msg, d.aziende) }, "Modifica"),
           p.drive_url ? h("a", { href: p.drive_url, target: "_blank", rel: "noopener noreferrer" }, h("button", { class: "s", type: "button" }, "Apri su Drive")) : null,
           h("button", { class: "s", onclick: async (e) => { e.currentTarget.disabled = true; msg.replaceChildren();
             try { const r = await api("POST", "/gestione/progetti/" + p.id + "/sincronizza"); msg.replaceChildren(r.ok ? avviso("Cartelle aggiornate su Drive.", "ok") : avviso(r.errore, "no")); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); }
             carica(); } }, "Crea/aggiorna cartelle su Drive"),
-          h("button", { class: "s", onclick: async () => { try { await api("PUT", "/gestione/progetti/" + p.id + "/archivia", { archiviato: !p.archiviato }); carica(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, p.archiviato ? "Riattiva" : "Archivia")));
+          h("button", { class: "s", onclick: async () => { try { await api("PUT", "/gestione/progetti/" + p.id + "/archivia", { archiviato: !p.archiviato }); carica(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, p.archiviato ? "Riattiva" : "Archivia"),
+          h("button", { class: "r", onclick: async () => { if (!confirm("Eliminare «" + p.nome + "»?\n\nSparisce dalla vista ma non si perde nulla: " + p.n_task + " task, " + p.agenti.length + " agenti e le cartelle su Drive restano dove sono. Lo ritrovi in «Eliminati».")) return;
+            try { await api("DELETE", "/gestione/progetti/" + p.id); carica(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Elimina")));
+      const perImpresa = (lista) => { const g = new Map(); lista.forEach(p => { const k = p.azienda || "Senza impresa"; if (!g.has(k)) g.set(k, { colore: p.azienda_colore, el: [] }); g.get(k).el.push(p); });
+        return [...g].map(([nomeAz, x]) => h("div", {}, h("h3", { style: "border-bottom:2px solid " + (x.colore || "var(--bordo)") + ";padding-bottom:4px" }, h("span", { class: "punto-col", style: "background:" + (x.colore || "#7d8a99") }), nomeAz + " (" + x.el.length + ")"), x.el.map(scheda))); };
+      const schedaEliminato = (p) => h("div", { class: "carta", style: "margin-bottom:8px;opacity:.85" }, h("div", { class: "nome" }, p.nome),
+        h("div", { class: "sotto" }, "Impresa: " + (p.azienda || "—") + " · eliminato il " + new Date(p.eliminato_il).toLocaleDateString("it-IT") + " · " + p.n_task + " task conservate"),
+        h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("POST", "/gestione/progetti/" + p.id + "/recupera"); carica(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Recupera")));
       riempi(corpo, [
+        d.aziende.length ? null : avviso("Prima di creare un progetto serve almeno un'impresa: creala in Impostazioni → Aziende e dipartimenti.", "avv"),
         d.drive_pronto ? null : avviso("Per creare le cartelle su Drive collega prima un account Google con Drive nella scheda Collegamenti: i progetti si creano comunque e le cartelle si generano dopo.", "avv"),
-        attivi.length ? attivi.map(scheda) : h("p", { class: "sotto" }, "Nessun progetto."),
+        attivi.length ? perImpresa(attivi) : h("p", { class: "sotto" }, "Nessun progetto."),
         archiviati.length ? [h("h3", {}, "Archiviati"), archiviati.map(scheda)] : null,
+        eliminati.length ? h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer;margin-top:12px" }, "Eliminati (" + eliminati.length + ") — recuperabili"), eliminati.map(schedaEliminato)) : null,
         msg,
         h("h3", {}, "Nuovo progetto"),
         h("div", { class: "carta" }, h("label", {}, "Nome", nome), h("label", {}, "Descrizione", desc),
+          h("div", { class: "riga" }, h("label", {}, "Impresa (obbligatoria)", azi), h("label", { style: "flex:0 0 auto" }, "Colore", col)),
           h("label", {}, tutti, " Coinvolgi tutti gli agenti attivi"), lista,
           h("p", { class: "aiuto" }, "Su Drive nasce Opifex → nome del progetto → agent (una cartella per ogni agente) e repository (documenti per tutta l'organizzazione). Gli output aggiornati stanno nella cartella del progetto. Archiviare un progetto non cancella mai nulla su Drive."),
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: async (e) => {
             msg.replaceChildren(); e.currentTarget.disabled = true;
-            try { const r = await api("POST", "/gestione/progetti", { nome: nome.value, descrizione: desc.value, agenti: tutti.checked ? null : scelte.filter(x => x.c.checked).map(x => x.a.id) });
+            try { const r = await api("POST", "/gestione/progetti", { nome: nome.value, descrizione: desc.value, azienda_id: Number(azi.value) || null, colore: col.value, agenti: tutti.checked ? null : scelte.filter(x => x.c.checked).map(x => x.a.id) });
               await carica(); msg.replaceChildren(r.drive.ok ? avviso("Progetto creato e cartelle pronte su Drive.", "ok") : avviso("Progetto creato. Drive: " + r.drive.errore, "avv")); }
             catch (x) { msg.replaceChildren(avviso(x.message, "no")); e.currentTarget.disabled = false; } } }, "Crea progetto")))]);
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
@@ -47,21 +61,24 @@ function vistaProgetti() {
   return [h("h2", {}, "Progetti"), corpo];
 }
 
-function modificaProgetto(p, ricarica, msgEsterno) {
+function modificaProgetto(p, ricarica, msgEsterno, aziende) {
   const nome = h("input", { type: "text", value: p.nome, maxlength: 100 });
   const desc = h("input", { type: "text", value: p.descrizione || "", maxlength: 500 });
+  const azi = h("select", {}, (aziende || []).map(z => h("option", { value: z.id }, z.nome))); azi.value = p.azienda_id;
+  const col = h("input", { type: "color", value: p.colore || "#f3b54a", "aria-label": "Colore del progetto", style: "width:60px;height:44px;padding:2px" });
   const alli = h("textarea", { style: "min-height:180px", maxlength: 20000, placeholder: "Cosa stiamo facendo e perche': obiettivi, scelte fatte, priorita'. Tutti gli agenti del progetto lo ricevono sempre." });
   alli.value = p.allineamento || "";
   const msg = h("div");
   const chiudi = apriPannello("Modifica progetto", [
     h("label", {}, "Nome", nome, h("p", { class: "aiuto" }, "Se cambi il nome, rinomino anche la cartella su Drive.")),
     h("label", {}, "Descrizione", desc),
+    h("div", { class: "riga" }, h("label", {}, "Impresa", azi), h("label", { style: "flex:0 0 auto" }, "Colore", col)),
     h("label", {}, "Documento di allineamento", h("p", { class: "aiuto" }, "Cosa stiamo facendo e perché. Lo ricevono sempre tutti gli agenti assegnati al progetto." + (p.allineamento_il ? " Ultimo aggiornamento: " + new Date(p.allineamento_il).toLocaleString("it-IT") : "")), alli),
     msg,
     h("div", { class: "azioni" },
       h("button", { class: "p", onclick: async () => {
         try {
-          const r = await api("PUT", "/gestione/progetti/" + p.id, { nome: nome.value, descrizione: desc.value, allineamento: alli.value });
+          const r = await api("PUT", "/gestione/progetti/" + p.id, { nome: nome.value, descrizione: desc.value, allineamento: alli.value, azienda_id: Number(azi.value) || null, colore: col.value });
           chiudi(); await ricarica();
           if (r.drive && !r.drive.ok) msgEsterno.replaceChildren(avviso(r.drive.errore, "avv"));
         } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }

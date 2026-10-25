@@ -1,18 +1,18 @@
-:root{--sfondo:#05070a;--carta:#0d1117;--carta2:#121923;--testo:#e6edf3;--tenue:#7d8a99;--bordo:#1d2733;--primario:#22d3ee;--primario-t:#05070a;--ok:#34d399;--ok-b:#0e2a20;--no:#f87171;--no-b:#2a0f0f;--avv:#fbbf24;--avv-b:#2b2208;--viola:#a78bfa}
+:root{--sfondo:#12141a;--carta:#1d2029;--carta2:#232733;--testo:#ece9e3;--tenue:#9aa0ae;--bordo:#2a2e39;--primario:#f3b54a;--primario-t:#1a1318;--ok:#3fd3c0;--ok-b:#0f2a29;--no:#e8795a;--no-b:#2e1913;--avv:#f3b54a;--avv-b:#2e2410;--viola:#9a7bd8;--rosa:#e58bd0}
 
 *{box-sizing:border-box}
-body{margin:0;background-color:var(--sfondo);background-image:linear-gradient(rgba(34,211,238,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(34,211,238,.05) 1px,transparent 1px),radial-gradient(ellipse at 15% 0%,rgba(34,211,238,.13),transparent 45%),radial-gradient(ellipse at 90% 100%,rgba(167,139,250,.12),transparent 50%);background-size:46px 46px,46px 46px,auto,auto;background-attachment:fixed;color:var(--testo);font:14px/1.5 'SF Mono','Cascadia Code',Consolas,Menlo,monospace}
+body{margin:0;background-color:var(--sfondo);background-image:radial-gradient(1200px 600px at 70% -10%,rgba(86,52,110,.45),transparent 62%),radial-gradient(900px 500px at 0% 100%,rgba(243,181,74,.07),transparent 60%);background-attachment:fixed;color:var(--testo);font:14px/1.5 'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
 header{display:flex;align-items:center;gap:16px;padding:12px 16px;background:var(--carta);border-bottom:1px solid var(--bordo);position:sticky;top:0;z-index:5;flex-wrap:wrap}
 header h1{font-size:15px;margin:0;margin-right:auto;letter-spacing:.12em;text-transform:uppercase;color:var(--primario)}
 header h1 small{color:var(--tenue);font-weight:400;letter-spacing:.05em;text-transform:none}
 nav{display:flex;gap:4px;flex-wrap:wrap}
 nav button{background:none;border:0;padding:8px 14px;border-radius:8px;color:var(--tenue);font:inherit;cursor:pointer}
-nav button.attivo{background:var(--primario);color:var(--primario-t)}
+nav button.attivo{background:linear-gradient(90deg,#f3b54a,#e58bd0);color:var(--primario-t);font-weight:600}
 main{max-width:1100px;margin:0 auto;padding:16px}
 h2{font-size:20px;margin:8px 0 12px}
 h3{font-size:15px;margin:20px 0 8px;color:var(--tenue);text-transform:uppercase;letter-spacing:.04em}
 .griglia{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-.carta{background:var(--carta);border:1px solid var(--bordo);border-radius:12px;padding:14px}
+.carta{background:linear-gradient(180deg,#1d2029,#191c24);border:1px solid var(--bordo);border-radius:18px;padding:16px;box-shadow:0 18px 40px -26px #000}
 .agente{cursor:pointer;display:flex;flex-direction:column;gap:6px}
 .agente:hover{border-color:var(--primario)}
 .agente.spento{opacity:.55}
@@ -22,7 +22,7 @@ h3{font-size:15px;margin:20px 0 8px;color:var(--tenue);text-transform:uppercase;
 .etichetta.ok{background:var(--ok-b);color:var(--ok)}
 .etichetta.no{background:var(--no-b);color:var(--no)}
 .etichetta.avv{background:var(--avv-b);color:var(--avv)}
-button.p{background:var(--primario);color:var(--primario-t);border:0;border-radius:8px;padding:9px 16px;font:inherit;cursor:pointer}
+button.p{background:linear-gradient(90deg,#f3b54a,#e58bd0);font-weight:600;color:var(--primario-t);border:0;border-radius:8px;padding:9px 16px;font:inherit;cursor:pointer}
 button.s{background:var(--carta);color:var(--testo);border:1px solid var(--bordo);border-radius:8px;padding:9px 16px;font:inherit;cursor:pointer}
 button.r{background:var(--no-b);color:var(--no);border:0;border-radius:8px;padding:9px 16px;font:inherit;cursor:pointer}
 button:disabled{opacity:.5;cursor:default}
@@ -50,7 +50,7 @@ td,th{text-align:left;padding:8px;border-bottom:1px solid var(--bordo);vertical-
 
 html{color-scheme:dark}
 .agente:hover,.carta.cliccabile:hover{border-color:var(--primario)}
-.scena{position:relative;height:calc(100vh - 150px);min-height:420px;background:radial-gradient(ellipse at center,rgba(10,22,34,.55),rgba(5,7,10,.25)),linear-gradient(rgba(34,211,238,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(34,211,238,.07) 1px,transparent 1px);background-size:auto,38px 38px,38px 38px;animation:scorri 40s linear infinite;border:1px solid var(--bordo);border-radius:12px;overflow:hidden;touch-action:none}
+.scena{position:relative;height:calc(100vh - 150px);min-height:420px;background:radial-gradient(ellipse at center,rgba(10,22,34,.55),rgba(5,7,10,.25)),linear-gradient(rgba(243,181,74,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(243,181,74,.07) 1px,transparent 1px);background-size:auto,38px 38px,38px 38px;animation:scorri 40s linear infinite;border:1px solid var(--bordo);border-radius:12px;overflow:hidden;touch-action:none}
 .scena canvas{position:absolute;inset:0;display:block;cursor:grab}
 .scena .comandi{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:6px;z-index:2;width:170px}
 .scena .legenda{position:absolute;left:12px;bottom:12px;background:rgba(13,17,23,.88);border:1px solid var(--bordo);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.9;z-index:2}
@@ -152,3 +152,14 @@ details.richiesta{border:1px solid var(--bordo,#ccc);border-radius:8px;padding:8
 details.richiesta.bloccante{border-left:4px solid #c0392b}
 details.richiesta>summary,details.gruppo-richieste>summary{cursor:pointer;font-weight:600}
 details.gruppo-richieste{margin:8px 0}
+
+/* Aurora */
+header h1{font-family:'Sora','Inter',system-ui,sans-serif;letter-spacing:.06em}
+h2{font-family:'Sora','Inter',system-ui,sans-serif;font-weight:600}
+button.p,button.s,button.r{min-height:40px;border-radius:12px}
+input[type=text],input[type=email],input[type=password],input[type=number],select,textarea{border-radius:12px;background:#171a22}
+.punto-col{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:7px;vertical-align:middle;box-shadow:0 0 8px currentColor}
+details.livello{background:linear-gradient(180deg,#1d2029,#191c24);border:1px solid var(--bordo);border-radius:14px;padding:6px 12px;margin:10px 0}
+details.livello>summary{cursor:pointer;font-weight:600;padding:8px 0;list-style:revert}
+.task-riga,.task-scheda{border-radius:12px}
+.pill,.etichetta{border-radius:999px}

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from . import google
+from . import google, registro
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -102,8 +102,10 @@ def scelte_drive(d: ScelteDrive, _: dict = Depends(solo_titolare)):
 # ---------- Progetti ----------
 def _elenco(conn):
     righe = conn.execute("""SELECT p.id, p.nome, p.descrizione, p.allineamento, p.allineamento_il, p.archiviato, p.drive_cartella_id, p.drive_stato, p.drive_errore, p.creato_il,
-                                   COALESCE((SELECT array_agg(agente_id ORDER BY agente_id) FROM progetti_agenti WHERE progetto_id=p.id), '{}') AS agenti
-                            FROM progetti p ORDER BY p.archiviato, p.id""").fetchall()
+                                   p.azienda_id, z.nome AS azienda, z.colore AS azienda_colore, COALESCE(p.colore, z.colore) AS colore, p.colore AS colore_proprio, p.eliminato_il,
+                                   COALESCE((SELECT array_agg(agente_id ORDER BY agente_id) FROM progetti_agenti WHERE progetto_id=p.id), '{}') AS agenti,
+                                   (SELECT count(*) FROM task t WHERE t.progetto_id = p.id) AS n_task
+                            FROM progetti p LEFT JOIN aziende z ON z.id = p.azienda_id ORDER BY p.eliminato_il NULLS FIRST, p.archiviato, z.nome, p.id""").fetchall()
     for r in righe:
         r["drive_url"] = "https://drive.google.com/drive/folders/" + r["drive_cartella_id"] if r["drive_cartella_id"] else None
     return righe
@@ -113,12 +115,15 @@ def _elenco(conn):
 def elenco(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         agenti = conn.execute("SELECT id, nome, ruolo FROM agenti WHERE attivo ORDER BY id").fetchall()
-        return {"progetti": _elenco(conn), "agenti": agenti, "drive_pronto": bool(google._leggi(conn, "drive_account_id"))}
+        return {"progetti": _elenco(conn), "agenti": agenti, "aziende": conn.execute("SELECT id, nome, colore FROM aziende WHERE attiva ORDER BY nome").fetchall(),
+                "drive_pronto": bool(google._leggi(conn, "drive_account_id"))}
 
 
 class NuovoProgetto(BaseModel):
     nome: str = Field(min_length=1, max_length=100)
     descrizione: str = Field(default="", max_length=500)
+    azienda_id: int
+    colore: str | None = Field(default=None, pattern="^#[0-9a-fA-F]{6}$")
     agenti: list[int] | None = None   # vuoto/assente = tutti gli agenti attivi
 
 
@@ -139,8 +144,11 @@ def crea(d: NuovoProgetto, _: dict = Depends(solo_titolare)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Il nome non puo' contenere / o \\")
     with connessione() as conn:
         if conn.execute("SELECT 1 FROM progetti WHERE lower(nome)=lower(%s)", (nome,)).fetchone():
-            raise HTTPException(status.HTTP_409_CONFLICT, "Esiste gia' un progetto con questo nome")
-        pid = conn.execute("INSERT INTO progetti (nome, descrizione) VALUES (%s,%s) RETURNING id", (nome, d.descrizione.strip())).fetchone()["id"]
+            raise HTTPException(status.HTTP_409_CONFLICT, "Esiste gia' un progetto con questo nome (anche tra gli eliminati)")
+        if not conn.execute("SELECT 1 FROM aziende WHERE id=%s AND attiva", (d.azienda_id,)).fetchone():
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Scegli l'impresa a cui appartiene il progetto")
+        pid = conn.execute("INSERT INTO progetti (nome, descrizione, azienda_id, colore) VALUES (%s,%s,%s,%s) RETURNING id",
+                           (nome, d.descrizione.strip(), d.azienda_id, d.colore)).fetchone()["id"]
         _imposta_agenti(conn, pid, d.agenti)
         esito = google.sincronizza_progetto(conn, pid) if google._leggi(conn, "drive_account_id") else \
             {"ok": False, "errore": "Cartelle Drive non ancora create: collega un account Google con Drive nella scheda Collegamenti"}
@@ -151,6 +159,9 @@ class ModificaProgetto(BaseModel):
     nome: str = Field(min_length=1, max_length=100)
     descrizione: str = Field(default="", max_length=500)
     allineamento: str = Field(default="", max_length=20000)
+    azienda_id: int | None = None
+    colore: str | None = Field(default=None, pattern="^#[0-9a-fA-F]{6}$")
+    azzera_colore: bool = False
 
 
 @router.put("/gestione/progetti/{pid}")
@@ -165,6 +176,10 @@ def modifica(pid: int, d: ModificaProgetto, _: dict = Depends(solo_titolare)):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Progetto non trovato")
         if conn.execute("SELECT 1 FROM progetti WHERE lower(nome)=lower(%s) AND id<>%s", (nome, pid)).fetchone():
             raise HTTPException(status.HTTP_409_CONFLICT, "Esiste gia' un progetto con questo nome")
+        if d.azienda_id is not None and not conn.execute("SELECT 1 FROM aziende WHERE id=%s AND attiva", (d.azienda_id,)).fetchone():
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Impresa inesistente o spenta")
+        conn.execute("UPDATE progetti SET azienda_id = COALESCE(%s, azienda_id), colore = CASE WHEN %s THEN NULL ELSE COALESCE(%s, colore) END WHERE id=%s",
+                     (d.azienda_id, d.azzera_colore, d.colore, pid))
         cambia_al = d.allineamento.strip() != (p["allineamento"] or "")
         conn.execute("""UPDATE progetti SET nome=%s, descrizione=%s, allineamento=%s,
                         allineamento_il = CASE WHEN %s THEN NOW() ELSE allineamento_il END WHERE id=%s""",
@@ -212,6 +227,29 @@ class Archivia(BaseModel):
 def archivia(pid: int, d: Archivia, _: dict = Depends(solo_titolare)):
     """Il progetto si archivia soltanto: le cartelle su Drive non vengono mai cancellate dalla piattaforma."""
     with connessione() as conn:
-        if not conn.execute("UPDATE progetti SET archiviato=%s WHERE id=%s RETURNING 1", (d.archiviato, pid)).fetchone():
+        if not conn.execute("UPDATE progetti SET archiviato=%s, eliminato_il = CASE WHEN %s THEN eliminato_il END WHERE id=%s RETURNING 1", (d.archiviato, d.archiviato, pid)).fetchone():
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Progetto non trovato")
+    return {"ok": True}
+
+
+@router.delete("/gestione/progetti/{pid}")
+def elimina(pid: int, u: dict = Depends(solo_titolare)):
+    """«Elimina» toglie il progetto dalla vista e lo archivia: task, memoria, agenti e cartelle su Drive restano dove sono. Si recupera da «Eliminati»."""
+    with connessione() as conn:
+        p = conn.execute("SELECT nome FROM progetti WHERE id=%s AND eliminato_il IS NULL", (pid,)).fetchone()
+        if p is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Progetto non trovato")
+        conn.execute("UPDATE progetti SET archiviato = TRUE, eliminato_il = NOW() WHERE id=%s", (pid,))
+        registro.registra(conn, u, "organizzazione", "progetto eliminato (recuperabile)", p["nome"][:150], "progetto", pid)
+    return {"ok": True}
+
+
+@router.post("/gestione/progetti/{pid}/recupera")
+def recupera(pid: int, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        p = conn.execute("SELECT nome FROM progetti WHERE id=%s AND eliminato_il IS NOT NULL", (pid,)).fetchone()
+        if p is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Questo progetto non e' tra gli eliminati")
+        conn.execute("UPDATE progetti SET archiviato = FALSE, eliminato_il = NULL WHERE id=%s", (pid,))
+        registro.registra(conn, u, "organizzazione", "progetto recuperato", p["nome"][:150], "progetto", pid)
     return {"ok": True}

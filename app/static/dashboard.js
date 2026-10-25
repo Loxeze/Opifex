@@ -36,10 +36,10 @@ function vistaDashboard() {
   const caricaProgetti = async () => {
     try {
       const d = await api("GET", "/gestione/progetti");
-      const att = d.progetti.filter(p => !p.archiviato);
+      const att = d.progetti.filter(p => !p.archiviato && !p.eliminato_il);
       riempi(boxPro, att.length ? att.map(p => h("div", { class: "voce voce-clic", tabindex: 0, role: "button", onclick: () => vai("progetti"), onkeydown: (e) => { if (e.key === "Enter") vai("progetti"); } },
-        h("div", { class: "nome" }, p.nome),
-        h("div", { class: "sotto" }, p.agenti.length + " agenti · Drive: " + ({ ok: "pronto", da_sincronizzare: "da creare", errore: "errore" })[p.drive_stato]))) : h("p", { class: "sotto" }, "Nessun progetto."));
+        h("div", { class: "nome" }, h("span", { class: "punto-col", style: "background:" + (p.colore || "#f3b54a") }), p.nome),
+        h("div", { class: "sotto" }, (p.azienda ? p.azienda + " · " : "") + p.agenti.length + " agenti · Drive: " + ({ ok: "pronto", da_sincronizzare: "da creare", errore: "errore" })[p.drive_stato]))) : h("p", { class: "sotto" }, "Nessun progetto."));
     } catch (e) { boxPro.replaceChildren(avviso(e.message, "no")); }
   };
   // --- chat in tempo reale di tutta l'organizzazione (messaggi tra agenti)
@@ -69,7 +69,7 @@ function vistaDashboard() {
       const x = await api("GET", "/gestione/dashboard/statistiche");
       const grafico = h("canvas", { width: 120, height: 28, class: "mini", "aria-label": "Token negli ultimi 7 giorni" });
       const g = grafico.getContext("2d"), mx = Math.max(1, ...x.giorni.map(d => d.token));
-      g.fillStyle = "#22d3ee"; x.giorni.forEach((d, i) => { const hh = Math.max(1, Math.round(26 * d.token / mx)); g.fillRect(i * 17 + 1, 28 - hh, 13, hh); });
+      g.fillStyle = "#f3b54a"; x.giorni.forEach((d, i) => { const hh = Math.max(1, Math.round(26 * d.token / mx)); g.fillRect(i * 17 + 1, 28 - hh, 13, hh); });
       riempi(barra, [
         tessera("Token oggi", fm(x.token_oggi), "$ " + x.costo_oggi.toFixed(2) + " stimati", grafico),
         tessera("Token del mese", fm(x.token_mese), "$ " + x.costo_mese.toFixed(2) + " · in " + fm(x.input_mese) + " · out " + fm(x.output_mese)),
@@ -95,7 +95,7 @@ function vistaDashboard() {
 }
 
 function vistaImpostazioni() {
-  const mappa = { profilo: vistaAccount, struttura: vistaStruttura, collegamenti: vistaCollegamenti, connessioni: vistaConnessioni, canali: vistaCanali,
+  const mappa = { profilo: vistaAccount, struttura: vistaStruttura, collegamenti: vistaCollegamenti, connessioni: vistaConnessioni, canali: vistaCanali, percorsi: vistaPercorsi, social: vistaSocial,
     utenti: vistaUtenti, aggiornamenti: vistaAggiornamenti, sicurezza: vistaSicurezza, registro: vistaRegistro, sistema: vistaSistema, memoria: vistaMemoria, dossier: vistaDossier, biblioteca: vistaBiblioteca, studi: vistaStudi, cerimoniere: vistaCerimoniere, voce: vistaVoce };
   if (!mappa[stato.sezione]) stato.sezione = "profilo";
   return h("div", { class: "impostazioni" },
