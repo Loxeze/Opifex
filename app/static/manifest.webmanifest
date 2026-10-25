@@ -1,0 +1,17 @@
+{
+  "name": "Opifex",
+  "short_name": "Opifex",
+  "description": "Officina di agenti AI: task, progetti, CRM e chat con i tuoi manager",
+  "lang": "it",
+  "start_url": "/app/",
+  "scope": "/app/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#12141a",
+  "theme_color": "#12141a",
+  "icons": [
+    {"src": "icona-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icona-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icona-maschera-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

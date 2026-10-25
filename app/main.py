@@ -44,6 +44,7 @@ from .rotte_trigger import router as router_quando
 from .rotte_reparti import router as router_reparti
 from .rotte_progetto import router as router_progetto
 from .rotte_crm_schede import router as router_crm_schede
+from .rotte_pwa import router as router_pwa
 from .rotte_dossier import router as router_dossier
 from .rotte_crm import router as router_crm
 from .rotte_voce_el import router as router_voce_el
@@ -111,11 +112,12 @@ async def _manutenzione():
 async def _trigger_orari():
     """Ogni minuto controlla i trigger a orario accesi e li avvia."""
     import asyncio
-    from . import trigger
+    from . import trigger, webpush
 
     def giro():
         with connessione() as conn:
             trigger.tick(conn)
+            webpush.invia_notifiche(conn)
     await asyncio.sleep(45)
     while True:
         try:
@@ -148,6 +150,8 @@ async def ciclo_vita(app: FastAPI):
     chiudi_pool()
 
 
+import mimetypes
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 app = FastAPI(title="Piattaforma agenti AI", lifespan=ciclo_vita)
 app.add_middleware(
     CORSMiddleware,
@@ -199,6 +203,7 @@ app.include_router(router_quando)
 app.include_router(router_reparti)
 app.include_router(router_progetto)
 app.include_router(router_crm_schede)
+app.include_router(router_pwa)
 app.include_router(router_dossier)
 app.include_router(router_crm)
 app.include_router(router_voce_el)

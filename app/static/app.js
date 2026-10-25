@@ -76,7 +76,7 @@ function mostraAccesso(errore) {
 const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["crm", "CRM"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
 const VISTE_COLLABORATORE = [["task", "Task"], ["progetti", "Progetti"], ["iniziative", "Iniziative"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Collegamenti (Google, posta)"], ["connessioni", "Connessioni a siti e app"],
-  ["canali", "Canali (Telegram)"], ["social", "Social"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["iniziative", "Iniziative"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["voce", "Voce"], ["sistema", "Backup e costi"]];
+  ["canali", "Canali (Telegram)"], ["social", "Social"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["iniziative", "Iniziative"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["app", "App su smartphone"], ["voce", "Voce"], ["sistema", "Backup e costi"]];
 
 function vai(vista, sezione) { if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "social" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
@@ -818,4 +818,7 @@ function vistaSicurezza() {
 }
 
 // ---------- Avvio ----------
-if (token) avvia(); else mostraAccesso();
+// Si parte solo a pagina completa: gli script sono caricati uno dopo l'altro e la prima risposta
+// del server potrebbe arrivare prima che l'ultimo sia pronto.
+function parti() { if (token) avvia(); else mostraAccesso(); }
+if (document.readyState === "complete") parti(); else window.addEventListener("load", parti);
