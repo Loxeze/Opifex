@@ -4,6 +4,7 @@ Il testo di base e' costruito dai dati del database, senza AI. Aurora lo rifinis
 di riservatezza lo consentono (dati 'interno' verso un fornitore con non conservazione e DPA attivi);
 altrimenti il briefing resta nella versione semplice e viene salvato comunque.
 """
+from . import briefing_manager
 from .briefing_testo import riepilogo_testuale
 from .db import connessione
 from .esecuzione import EsecuzioneBloccata, esegui_agente
@@ -53,8 +54,16 @@ def raccogli_dati(conn, tipo: str) -> dict:
 def genera_briefing(tipo: str) -> dict:
     if tipo not in ("mattina", "sera"):
         raise ValueError("tipo deve essere 'mattina' o 'sera'")
+    brief_m = []
     with connessione() as conn:
-        base = riepilogo_testuale(tipo, raccogli_dati(conn, tipo))
+        for m in briefing_manager.manager_di_dipartimento(conn):
+            t = briefing_manager.genera(conn, m, tipo)
+            if t:
+                brief_m.append((m, t))
+    with connessione() as conn:
+        dati_b = raccogli_dati(conn, tipo)
+        dati_b["manager"] = [{"nome": m["nome"], "divisione": m["divisione"], "testo": t} for m, t in brief_m]
+        base = riepilogo_testuale(tipo, dati_b)
         aurora = conn.execute("SELECT id FROM agenti WHERE nome = 'Aurora' AND tipo = 'sistema'").fetchone()
 
     testo, da_ai = base, False
@@ -72,5 +81,7 @@ def genera_briefing(tipo: str) -> dict:
     with connessione() as conn:
         riga = conn.execute(
             "INSERT INTO briefing (tipo, contenuto) VALUES (%s, %s) RETURNING id", (tipo, testo)).fetchone()
+        for m, t in brief_m:
+            conn.execute("INSERT INTO briefing_manager (briefing_id, agente_id, contenuto) VALUES (%s,%s,%s)", (riga["id"], m["id"], t[:4000]))
         conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (testo[:3500],))  # arriva anche su Telegram
     return {"id": riga["id"], "tipo": tipo, "contenuto": testo, "rifinito_da_ai": da_ai}

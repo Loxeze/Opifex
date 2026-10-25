@@ -8,8 +8,10 @@ import json
 
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
+
+STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
 from . import spesa
-from . import brevo as brevo_email, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
+from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
@@ -29,7 +31,7 @@ def _carica_agente(conn, agente_id: int) -> dict:
         """
         SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.tipo, a.fascia_dati_max, a.attivo,
                a.modello AS modello_richiesto,
-               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
+               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.crm_attivo, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
                m.id AS modello_id, m.nome AS modello_nome,
                m.costo_input_per_milione, m.costo_output_per_milione,
                f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
@@ -175,25 +177,26 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
         testo_uscente = anonimizza(messaggio)
         try:
             web = {"siti": a["siti_consentiti"], "max_ricerche": a["max_ricerche"]} if a["accesso_web"] else None
-            colleghi_ok = dialoghi.colleghi(conn, agente_id) if (a["dialoghi_attivi"] and a["fornitore"] == "anthropic") else []
-            ok_int = a["fornitore"] == "anthropic" and puo_uscire("interno", a["fascia_dati_max"], a["fascia_fornitore"],
+            colleghi_ok = dialoghi.colleghi(conn, agente_id) if (a["dialoghi_attivi"] and a["fornitore"] in STRUMENTI_FORNITORI) else []
+            ok_int = a["fornitore"] in STRUMENTI_FORNITORI and puo_uscire("interno", a["fascia_dati_max"], a["fascia_fornitore"],
                                                                    a["non_conservazione_attiva"], a["dpa_firmato"])[0]
             doc_tool = bool(ok_int and memoria.documenti_visibili(conn, agente_id))
             drive_tool = bool(ok_int and a["drive_attivo"] and strumenti_google.collegato(conn))
             # la posta contiene dati personali: l'agente la riceve solo se puo' ricevere dati riservati
-            gmail_tool = bool(a["fornitore"] == "anthropic" and strumenti_gmail.account_valido(conn, a["gmail_account_id"])
+            gmail_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and strumenti_gmail.account_valido(conn, a["gmail_account_id"])
                               and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
                                              a["non_conservazione_attiva"], a["dpa_firmato"])[0])
             posta_c = (strumenti_posta.caselle_agente(conn, agente_id)
-                       if a["fornitore"] == "anthropic" and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
+                       if a["fornitore"] in STRUMENTI_FORNITORI and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
                                                                         a["non_conservazione_attiva"], a["dpa_firmato"])[0] else None)
             posta_tool = bool(posta_c)
-            social_tool = bool(a["fornitore"] == "anthropic" and a["social_attivo"] and buffer_social.collegato(conn))
+            social_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["social_attivo"] and buffer_social.collegato(conn))
             mem_tool = bool(ok_int)   # lo strumento di memoria si aggiunge agli agenti che usano comunque degli strumenti
-            email_tool = bool(a["fornitore"] == "anthropic" and a["email_attivo"] and brevo_email.collegato(conn))
+            email_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["email_attivo"] and brevo_email.collegato(conn))
+            crm_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["crm_attivo"])
             iniz_tool = bool(ok_int and colleghi_ok and a["livello"] in ("manager", "referente")
                              and not conn.execute("SELECT sentinella FROM agenti WHERE id = %s", (agente_id,)).fetchone()["sentinella"])
-            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool:
+            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -263,6 +266,10 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     for s_ in strumenti_posta.STRUMENTI:
                         gestori[s_["name"]] = gp
 
+                if crm_tool:
+                    extra.append(crm.STRUMENTO)
+                    avviso_extra += crm.AVVISO
+                    gestori["crm_conta"] = crm.gestore(connessione, agente_id)
                 if iniz_tool:
                     extra.append(iniziative.STRUMENTO)
                     avviso_extra += iniziative.AVVISO
@@ -303,8 +310,12 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                 else:
                     nav = None
                 try:
-                    ris = agente_browser.esegui_con_strumenti(a["modello_nome"], a["istruzioni"], testo_uscente,
-                                                              a["max_token_risposta"], nav, extra or None, gestore, avviso_extra, web)
+                    if a["fornitore"] == "anthropic":
+                        ris = agente_browser.esegui_con_strumenti(a["modello_nome"], a["istruzioni"], testo_uscente,
+                                                                  a["max_token_risposta"], nav, extra or None, gestore, avviso_extra, web)
+                    else:
+                        ris = agente_browser.esegui_con_strumenti_compatibile(a["fornitore"], a["modello_nome"], a["istruzioni"], testo_uscente,
+                                                                              a["max_token_risposta"], extra, gestore, avviso_extra)
                     visitati = list(nav.urls_visitati) if nav else []
                 finally:
                     if nav_cm is not None:

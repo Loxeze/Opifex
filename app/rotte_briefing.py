@@ -11,8 +11,13 @@ router = APIRouter()
 @router.get("/briefing")
 def elenco_briefing(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        return conn.execute(
+        righe = conn.execute(
             "SELECT id, tipo, contenuto, creato_il, letto FROM briefing ORDER BY creato_il DESC LIMIT 20").fetchall()
+        for r in righe:
+            r["manager"] = conn.execute(
+                """SELECT a.nome, d.nome AS divisione, m.contenuto FROM briefing_manager m LEFT JOIN agenti a ON a.id = m.agente_id
+                   LEFT JOIN divisioni d ON d.id = a.divisione_id WHERE m.briefing_id = %s ORDER BY m.id""", (r["id"],)).fetchall()
+        return righe
 
 
 @router.post("/briefing/genera", status_code=201)

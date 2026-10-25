@@ -96,5 +96,59 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
     return Risposta((testo_finale + "\n\n(Interrotto: raggiunto il limite di passaggi di navigazione.)").strip(), t_in, t_out)
 
 
+URL_COMPAT = {"openai": ("https://api.openai.com/v1/chat/completions", "OpenAI"), "xai": ("https://api.x.ai/v1/chat/completions", "xAI")}
+
+
+def _chiama_compat(fornitore: str, corpo: dict) -> dict:
+    url, nome = URL_COMPAT[fornitore]
+    k = fornitori_chiave(fornitore)
+    if not k:
+        raise ErroreFornitore(f"Chiave {nome} non configurata")
+    intest = {"Authorization": f"Bearer {k}", "content-type": "application/json"}
+    r = httpx.post(url, headers=intest, json=corpo, timeout=180)
+    if r.status_code == 400 and "max_completion_tokens" in r.text and "max_tokens" in corpo:
+        corpo = {**corpo, "max_completion_tokens": corpo["max_tokens"]}
+        corpo.pop("max_tokens")
+        r = httpx.post(url, headers=intest, json=corpo, timeout=180)
+    if r.status_code != 200:
+        raise ErroreFornitore(f"{nome}: {r.status_code} {r.text[:200]}")
+    return r.json()
+
+
+def esegui_con_strumenti_compatibile(fornitore: str, modello: str, istruzioni: str, messaggio: str, max_token: int,
+                                     strumenti_extra: list, gestore_extra, avviso_extra: str = "") -> Risposta:
+    """Stesso ciclo di strumenti per i modelli OpenAI e xAI (formato «function calling»). Solo strumenti locali: niente navigazione ne' ricerca web."""
+    import json
+    nomi = {s["name"] for s in strumenti_extra}
+    funzioni = [{"type": "function", "function": {"name": s["name"], "description": s["description"], "parameters": s["input_schema"]}} for s in strumenti_extra]
+    messaggi = [{"role": "system", "content": istruzioni + avviso_extra}, {"role": "user", "content": messaggio}]
+    t_in = t_out = 0
+    testo = ""
+    for _ in range(MAX_PASSI):
+        d = _chiama_compat(fornitore, {"model": modello, "max_tokens": max_token, "messages": messaggi, "tools": funzioni})
+        t_in += d["usage"]["prompt_tokens"]; t_out += d["usage"]["completion_tokens"]
+        m = d["choices"][0]["message"]
+        testo = m.get("content") or ""
+        chiamate = m.get("tool_calls") or []
+        if not chiamate:
+            return Risposta(testo, t_in, t_out)
+        messaggi.append({"role": "assistant", "content": m.get("content"), "tool_calls": chiamate})
+        for c in chiamate:
+            nome = c["function"]["name"]
+            try:
+                dati = json.loads(c["function"].get("arguments") or "{}")
+                if not isinstance(dati, dict):
+                    dati = {}
+            except ValueError:
+                dati = {}
+            try:
+                esito = gestore_extra(nome, dati) if nome in nomi else "ERRORE: strumento sconosciuto"
+            except Exception as e:  # noqa: BLE001 - l'agente deve sapere che lo strumento e' fallito e proseguire
+                esito = "ERRORE: operazione non riuscita (" + type(e).__name__ + ")"
+            contenuto = esito if nome == "chiedi_a_agente" else "<contenuto_non_fidato>\n" + esito + "\n</contenuto_non_fidato>"
+            messaggi.append({"role": "tool", "tool_call_id": c["id"], "content": contenuto})
+    return Risposta((testo + "\n\n(Interrotto: raggiunto il limite di passaggi.)").strip(), t_in, t_out)
+
+
 def esegui_con_browser(modello, istruzioni, messaggio, max_token, nav):
     return esegui_con_strumenti(modello, istruzioni, messaggio, max_token, nav)
