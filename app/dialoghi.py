@@ -16,7 +16,10 @@ Regole del dialogo:
 2. Quando scrivi, fatti capire senza altri messaggi: dici chi sei, cosa stai facendo, a che punto sei e cosa ti serve esattamente.
 3. Quando rispondi, spiega anche il ragionamento e le ipotesi, non solo il risultato. Niente risposte secche o domande generiche.
 4. Non inventare dati: se non lo sai, dillo.
-5. Se la questione e' completamente chiarita scrivi alla fine [CHIARITO].
+5. RISOLVETE TRA VOI: non rimandare a Lorenzo. Se manca un'informazione, chi e' piu' vicino al tema la fornisce o decide; se resta un dubbio
+   non sostanziale, scegliete insieme l'ipotesi piu' ragionevole e dichiaratela. Lorenzo si interpella solo per spese, invii all'esterno a suo nome,
+   azioni irreversibili, credenziali o scelte di strategia che nessuno di voi puo' prendere.
+6. Se la questione e' completamente chiarita scrivi alla fine [CHIARITO], indicando la decisione presa.
 Rispondi in italiano, in modo completo ma senza giri di parole."""
 
 MAX_TOKEN_DIALOGO = 2500
@@ -68,7 +71,7 @@ def colleghi(conn, agente_id: int) -> list[dict]:
 def _modello_dialogo(conn, agente_id: int) -> dict:
     """Modello usato per PARLARE (non per lavorare): quello scelto per l'agente o il predefinito economico."""
     riga = conn.execute(
-        """SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.attivo, a.fascia_dati_max,
+        """SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.attivo, a.fascia_dati_max, a.accesso_web, a.siti_consentiti, a.max_ricerche,
                   COALESCE(NULLIF(a.modello_dialogo, ''), %(pred)s) AS modello_nome
            FROM agenti a WHERE a.id = %(id)s""",
         {"id": agente_id, "pred": impostazione(conn, "modello_dialogo_predefinito", "claude-haiku-5-5")}).fetchone()
@@ -122,11 +125,20 @@ def _fai_parlare(conn, parlante_id: int, destinatario_id: int, conv_id: int, ist
         conn.commit()
         raise DialogoBloccato(motivo)
     sistema = p["istruzioni"] + "\n\n" + REGOLE + richieste.REGOLA
+    if memoria._ok({**p}, "interno"):
+        note = richieste.decisioni_note(conn)
+        if note:
+            sistema += "\n\n" + note
     storia = _storia(conn, conv_id)
     doc_ctx, _u, _e = memoria.contesto_documenti(conn, p, istruzione + "\n" + storia)  # anche nei dialoghi gli agenti vedono i loro documenti
     contenuto = anonimizza((doc_ctx + "\n\n=====\n\n" if doc_ctx else "") + storia + "\n\n=== Tocca a te ===\n" + istruzione)
     try:
-        r = chiama_modello(p["fornitore"], p["modello_nome"], sistema, contenuto, MAX_TOKEN_DIALOGO)
+        # chi ha l'accesso al web lo ha anche quando risponde a un collega (prima nei dialoghi non cercava e diceva di non avere l'accesso)
+        web = ({"siti": p["siti_consentiti"], "max_ricerche": p["max_ricerche"]} if (p["accesso_web"] and p["fornitore"] == "anthropic") else None)
+        if web:
+            sistema += "\n\nHAI LA RICERCA WEB (strumento web_search" + (": solo sui siti " + ", ".join(web["siti"]) if web["siti"] else "") + "). Usala quando serve e cita le fonti: non dire di non avere l'accesso."
+        r = chiama_modello(p["fornitore"], p["modello_nome"], sistema, contenuto, MAX_TOKEN_DIALOGO, web) if web else \
+            chiama_modello(p["fornitore"], p["modello_nome"], sistema, contenuto, MAX_TOKEN_DIALOGO)
     except ErroreFornitore as e:
         conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s,'errore_modello',%s::jsonb,%s)",
                      (parlante_id, json.dumps({"errore": str(e)[:200], "dialogo": True}), utente_id))

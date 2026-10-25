@@ -148,6 +148,9 @@ def nuova_interazione(conn, cid: int, d: dict, utente_id: int | None = None, age
     i = conn.execute("""INSERT INTO crm_interazioni (contatto_id, quando, canale, direzione, da_utente_id, da_agente_id, oggetto, esito, note_cifrate, riunione_id, progetto_id)
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                      (cid, quando, canale, direzione, utente_id, agente_id, (d.get("oggetto") or "").strip()[:200] or None, esito, _c(d.get("note")), d.get("riunione_id"), d.get("progetto_id"))).fetchone()["id"]
+    if hasattr(quando, "astimezone") and getattr(quando, "tzinfo", None):
+        from zoneinfo import ZoneInfo
+        quando = quando.astimezone(ZoneInfo("Europe/Rome"))   # il giorno del contatto e' quello di chi lo vive, non quello UTC
     giorno = quando.date() if hasattr(quando, "date") else quando
     conn.execute("""UPDATE crm_contatti SET ultimo_contatto = GREATEST(COALESCE(ultimo_contatto, %s), %s),
                            relazione = CASE WHEN relazione = 'nessuna' THEN 'contattato' ELSE relazione END WHERE id = %s""", (giorno, giorno, cid))

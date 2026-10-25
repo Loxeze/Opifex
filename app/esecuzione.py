@@ -164,6 +164,10 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
         al_ctx = memoria.contesto_allineamento(conn, a_f)
         if al_ctx:
             prefisso.append(al_ctx)
+        if memoria._ok(a_f, "interno"):
+            note_l = richieste.decisioni_note(conn)
+            if note_l:
+                prefisso.append(note_l)
         mem_ctx = memoria_lavoro.contesto(conn, a_f, messaggio)
         if mem_ctx:
             prefisso.append(mem_ctx)
@@ -186,6 +190,10 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
         testo_uscente = anonimizza(messaggio)
         try:
             web = {"siti": a["siti_consentiti"], "max_ricerche": a["max_ricerche"]} if a["accesso_web"] else None
+            if web and a["fornitore"] == "anthropic":   # l'agente deve sapere di avere il web, altrimenti ne chiede l'accesso
+                a["istruzioni"] = (a["istruzioni"] + "\n\nHAI LA RICERCA WEB (strumento web_search" + (": solo sui siti " + ", ".join(web["siti"]) if web["siti"] else "")
+                                   + "). Usala direttamente e cita le fonti: non chiedere a Lorenzo di darti l'accesso al web. "
+                                   "Solo i portali con login (area riservata) richiedono un collegamento con credenziali in Impostazioni → Collegamenti.")
             colleghi_ok = dialoghi.colleghi(conn, agente_id) if (a["dialoghi_attivi"] and a["fornitore"] in STRUMENTI_FORNITORI) else []
             ok_int = a["fornitore"] in STRUMENTI_FORNITORI and puo_uscire("interno", a["fascia_dati_max"], a["fascia_fornitore"],
                                                                    a["non_conservazione_attiva"], a["dpa_firmato"])[0]
