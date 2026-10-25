@@ -103,7 +103,7 @@ async function schedaTask(id, padreId, dopo) {
   const sc = h("input", { type: "date" }); sc.value = d.scadenza ? String(d.scadenza).slice(0, 10) : ""; sc.disabled = lettura;
   const ass = h("select", {}, h("option", { value: "" }, "Nessuno"),
     h("optgroup", { label: "Persone" }, o.utenti.map(u => h("option", { value: "u" + u.id }, u.nome + (u.id === o.io ? " (io)" : "")))),
-    o.agenti.length ? h("optgroup", { label: "Agenti" }, o.agenti.map(a => h("option", { value: "a" + a.id }, a.nome + " — " + a.ruolo))) : null);
+    o.agenti.length ? h("optgroup", { label: "Agenti" }, o.agenti.map(a => h("option", { value: "a" + a.id }, a.etichetta || (a.nome + " — " + a.ruolo)))) : null);
   ass.value = d.assegnato_utente_id ? "u" + d.assegnato_utente_id : d.assegnato_agente_id ? "a" + d.assegnato_agente_id : ""; ass.disabled = lettura;
   const pro = h("select", {}, h("option", { value: "" }, "Nessuno"), o.progetti.map(p => h("option", { value: p.id }, p.nome))); pro.value = d.progetto_id ?? ""; pro.disabled = lettura;
   const azi = h("select", {}, h("option", { value: "" }, "Nessuna"), o.aziende.map(p => h("option", { value: p.id }, p.nome))); azi.value = d.azienda_id ?? ""; azi.disabled = lettura;

@@ -34,7 +34,9 @@ from .rotte_sistema import router as router_sistema
 from .rotte_voce import router as router_voce
 from .rotte_memoria import router as router_memoria
 from .rotte_brevo import router as router_brevo
+from . import etichetta
 from .rotte_plaud import router as router_plaud
+from .rotte_iniziative import router as router_iniziative
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
 
@@ -148,6 +150,7 @@ app.include_router(router_voce)
 app.include_router(router_memoria)
 app.include_router(router_brevo)
 app.include_router(router_plaud)
+app.include_router(router_iniziative)
 
 
 @app.get("/", include_in_schema=False)
@@ -210,13 +213,13 @@ def elenco_agenti(utente: dict = Depends(utente_corrente)):
     with connessione() as conn:
         if visibili is None:
             righe = conn.execute(
-                "SELECT id, divisione_id, superiore_id, nome, ruolo, livello, tipo, modello, attivo "
-                "FROM agenti ORDER BY id"
+                f"SELECT a.id, a.divisione_id, a.superiore_id, a.nome, a.ruolo, a.livello, a.tipo, a.modello, a.attivo, {etichetta.sql()} AS etichetta "
+                "FROM agenti a ORDER BY a.id"
             ).fetchall()
         else:
             righe = conn.execute(
-                "SELECT id, divisione_id, superiore_id, nome, ruolo, livello, tipo, modello, attivo "
-                "FROM agenti WHERE divisione_id = ANY(%s) ORDER BY id",
+                f"SELECT a.id, a.divisione_id, a.superiore_id, a.nome, a.ruolo, a.livello, a.tipo, a.modello, a.attivo, {etichetta.sql()} AS etichetta "
+                "FROM agenti a WHERE a.divisione_id = ANY(%s) ORDER BY a.id",
                 (visibili,),
             ).fetchall()
     return righe

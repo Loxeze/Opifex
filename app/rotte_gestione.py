@@ -5,6 +5,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from . import etichetta
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -62,6 +63,7 @@ class DatiAgente(BaseModel):
     gmail_account_id: int | None = None
     social_attivo: bool = False
     email_attivo: bool = False
+    rimanda_a: str | None = Field(default=None, max_length=300)
     fasi: list[Fase] = []
     connessioni: list[int] = []
 
@@ -90,6 +92,7 @@ class ModificaAgente(BaseModel):
     gmail_account_id: int | None = None
     social_attivo: bool | None = None
     email_attivo: bool | None = None
+    rimanda_a: str | None = Field(default=None, max_length=300)
     fasi: list[Fase] | None = None
     connessioni: list[int] | None = None
 
@@ -147,7 +150,7 @@ SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divis
        a.sentinella,
        CASE WHEN a.sentinella THEN 'sentinella' WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' ELSE a.livello END AS categoria,
        a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.budget_token_mensile,
-       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo,
+       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.rimanda_a, ETICHETTA_SQL AS etichetta,
        COALESCE((SELECT json_agg(json_build_object('titolo', f.titolo, 'istruzioni', f.istruzioni, 'approvazione', f.approvazione,
                                                     'parere_superiore', f.parere_superiore) ORDER BY f.posizione)
                  FROM fasi_agente f WHERE f.agente_id = a.id), '[]'::json) AS fasi,
@@ -160,7 +163,7 @@ SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divis
        COALESCE((SELECT SUM(c.costo_stimato) FROM costi_api c WHERE c.agente_id = a.id
                  AND c.creato_il >= date_trunc('month', NOW())), 0)::float AS costo_mese
 FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
-"""
+""".replace("ETICHETTA_SQL", etichetta.sql())
 
 
 @router.get("/agenti")
@@ -207,6 +210,8 @@ def crea(d: DatiAgente, utente: dict = Depends(solo_titolare)):
         ).fetchone()
         if d.email_attivo:
             conn.execute("UPDATE agenti SET email_attivo = TRUE WHERE id = %s", (riga["id"],))
+        if d.rimanda_a:
+            conn.execute("UPDATE agenti SET rimanda_a = %s WHERE id = %s", (d.rimanda_a.strip() or None, riga["id"]))
         _scrivi_connessioni(conn, riga["id"], d.connessioni)
         if d.fasi:
             _scrivi_fasi(conn, riga["id"], [f.model_dump() for f in d.fasi])
@@ -319,3 +324,21 @@ def elimina_connessione(cid: int, _: dict = Depends(solo_titolare)):
         if r is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Connessione inesistente")
     return {"stato": "ok"}
+
+
+class RichiestaAssistente(BaseModel):
+    richiesta: str = Field(min_length=1, max_length=4000)
+    scheda: dict = {}
+    conversazione: list[dict] = []
+
+
+@router.post("/assistente-prompt")
+def assistente_prompt(d: RichiestaAssistente, _: dict = Depends(solo_titolare)):
+    from . import assistente_prompt as ap
+    from .fornitori import ErroreFornitore
+    try:
+        return ap.chiedi(d.richiesta, d.scheda, d.conversazione)
+    except ap.AssistenteNonDisponibile as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    except ErroreFornitore as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))

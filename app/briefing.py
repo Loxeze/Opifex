@@ -40,6 +40,13 @@ def raccogli_dati(conn, tipo: str) -> dict:
     d["richieste"] = conn.execute(
         """SELECT a.nome AS agente, r.domanda, r.bloccante FROM richieste_informazioni r JOIN agenti a ON a.id = r.agente_id
            WHERE r.stato = 'aperta' ORDER BY r.bloccante DESC, r.id""").fetchall()
+    d["iniziative"] = conn.execute(
+        """SELECT i.titolo, i.stato, a.nome AS manager,
+                  (SELECT count(*) FROM task t WHERE t.padre_id = i.task_id) AS rami,
+                  (SELECT count(*) FROM task t WHERE t.padre_id = i.task_id AND t.stato = 'completata') AS fatti
+           FROM iniziative i LEFT JOIN agenti a ON a.id = i.aperta_da_agente_id
+           WHERE i.stato IN ('da_approvare', 'in_corso') OR (i.stato = 'conclusa' AND i.conclusa_il > NOW() - INTERVAL '36 hours')
+           ORDER BY i.creata_il DESC LIMIT 8""").fetchall()
     return d
 
 
@@ -52,7 +59,9 @@ def genera_briefing(tipo: str) -> dict:
 
     testo, da_ai = base, False
     if aurora:
-        richiesta = ("Riscrivi questo briefing per Lorenzo in modo chiaro e breve, in italiano. "
+        richiesta = ("Riscrivi questo briefing per Lorenzo, che ha poco tempo: massimo 250 parole (si legge in un minuto), in italiano. "
+                     "Apri con 2-3 righe su cio' che conta di piu' e su cosa serve da lui (approvazioni, richieste, iniziative pronte). "
+                     "Poi solo le sezioni che hanno contenuto, in punti brevi; salta quelle vuote. "
                      "Non aggiungere dati che non sono presenti.\n\n" + base)
         try:
             testo = esegui_agente(aurora["id"], richiesta, "interno")["risposta"]

@@ -9,7 +9,7 @@ import json
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
 from . import spesa
-from . import brevo as brevo_email, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
+from . import brevo as brevo_email, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
@@ -169,6 +169,9 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
         risposte_l = richieste.risposte_da_consegnare(conn, agente_id)
         if risposte_l:
             messaggio = risposte_l + messaggio
+        avvisi_c = iniziative.avvisi_da_consegnare(conn, agente_id)
+        if avvisi_c:
+            messaggio = avvisi_c + messaggio
         testo_uscente = anonimizza(messaggio)
         try:
             web = {"siti": a["siti_consentiti"], "max_ricerche": a["max_ricerche"]} if a["accesso_web"] else None
@@ -188,18 +191,20 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             social_tool = bool(a["fornitore"] == "anthropic" and a["social_attivo"] and buffer_social.collegato(conn))
             mem_tool = bool(ok_int)   # lo strumento di memoria si aggiunge agli agenti che usano comunque degli strumenti
             email_tool = bool(a["fornitore"] == "anthropic" and a["email_attivo"] and brevo_email.collegato(conn))
+            iniz_tool = bool(ok_int and colleghi_ok and a["livello"] in ("manager", "referente")
+                             and not conn.execute("SELECT sentinella FROM agenti WHERE id = %s", (agente_id,)).fetchone()["sentinella"])
             if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
                     stato_dialogo = {"domande": 0, "conv": {}}
                     max_domande = int(dialoghi.impostazione(conn, "dialoghi_max_domande", "3"))
-                    elenco_c = "; ".join(f"{c['nome']} ({c['ruolo']})" for c in colleghi_ok)
+                    elenco_c = "; ".join(dialoghi.scheda(c) for c in colleghi_ok)
                     extra.append({"name": "chiedi_a_agente",
                                   "description": "Fai una domanda a un collega e ricevi la sua risposta. Colleghi disponibili: " + elenco_c,
                                   "input_schema": {"type": "object", "properties": {"destinatario": {"type": "string"},
                                                    "domanda": {"type": "string"}}, "required": ["destinatario", "domanda"]}})
-                    avviso_extra += ("\n\nCOLLEGHI: se non hai chiaro cosa ti viene chiesto o ti servono informazioni di altri, usa chiedi_a_agente "
+                    avviso_extra += ("\n\nCOLLEGHI: ognuno ha una scheda (nome — dipartimento — azienda — compito): scegli a chi chiedere in base a quella. Se non hai chiaro cosa ti viene chiesto o ti servono informazioni di altri, usa chiedi_a_agente "
                                      "invece di indovinare. Nella domanda spiega chi sei, cosa stai facendo, a che punto sei e cosa ti serve esattamente. "
                                      f"Puoi fare al massimo {max_domande} domande per compito.")
 
@@ -258,6 +263,14 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     for s_ in strumenti_posta.STRUMENTI:
                         gestori[s_["name"]] = gp
 
+                if iniz_tool:
+                    extra.append(iniziative.STRUMENTO)
+                    avviso_extra += iniziative.AVVISO
+
+                    def _iniz(nome, dati, _aid=agente_id):
+                        with connessione() as c2:
+                            return iniziative.apri(c2, _aid, dati)
+                    gestori["iniziativa_apri"] = _iniz
                 if mem_tool:
                     extra.append(memoria_lavoro.STRUMENTO)
                     avviso_extra += ("\n\nMEMORIA: se durante il lavoro emerge una decisione, un fatto o una preferenza di Lorenzo che servira' in futuro, "

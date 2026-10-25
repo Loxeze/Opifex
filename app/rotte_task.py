@@ -6,7 +6,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 
-from . import consigli_task, registro
+from . import consigli_task, etichetta, registro
 from .db import connessione
 from .documenti import ESTENSIONI, MAX_BYTE, FileNonLeggibile, dividi_in_pezzi, estrai_testo
 from .permessi import divisioni_visibili, utente_corrente
@@ -179,13 +179,13 @@ def opzioni(u: dict = Depends(utente_corrente)):
     with connessione() as conn:
         ass = _agenti_assegnabili(conn, u)
         agenti = conn.execute(
-            f"SELECT a.id, a.nome, a.ruolo FROM agenti a WHERE a.attivo AND NOT {SENTINELLA} AND a.id = ANY(%s) ORDER BY a.nome",
+            f"SELECT a.id, a.nome, a.ruolo, {etichetta.sql()} AS etichetta FROM agenti a WHERE a.attivo AND NOT {SENTINELLA} AND a.id = ANY(%s) ORDER BY a.nome",
             ([r["id"] for r in conn.execute("SELECT id FROM agenti").fetchall()] if ass is None else ass or [0],)).fetchall()
         return {"utenti": conn.execute("SELECT id, nome FROM utenti WHERE attivo ORDER BY nome").fetchall(), "agenti": agenti,
                 "progetti": conn.execute("SELECT id, nome FROM progetti WHERE NOT archiviato ORDER BY nome").fetchall(),
                 "aziende": conn.execute("SELECT id, nome FROM aziende WHERE attiva ORDER BY nome").fetchall(),
                 "manager": conn.execute(
-                    f"""SELECT a.id, a.nome, a.ruolo, d.nome AS dipartimento FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
+                    f"""SELECT a.id, a.nome, a.ruolo, {etichetta.sql()} AS etichetta, d.nome AS dipartimento FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
                         WHERE a.attivo AND NOT {SENTINELLA} AND a.livello IN ('manager','referente') AND a.id = ANY(%s) ORDER BY d.nome, a.nome""",
                     ([r["id"] for r in conn.execute("SELECT id FROM agenti").fetchall()] if _agenti_miei(conn, u) is None else _agenti_miei(conn, u) or [0],)).fetchall(),
                 "io": u["id"]}

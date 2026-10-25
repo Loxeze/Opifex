@@ -73,8 +73,8 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["percorsi", "Percorsi"], ["social", "Social"], ["email", "Email"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
-const VISTE_COLLABORATORE = [["task", "Task"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
+const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["iniziative", "Iniziative"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["percorsi", "Percorsi"], ["social", "Social"], ["email", "Email"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE_COLLABORATORE = [["task", "Task"], ["iniziative", "Iniziative"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Account Google"], ["connessioni", "Connessioni a siti e app"],
   ["canali", "Canali (Telegram)"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["sistema", "Backup e costi"]];
 
@@ -123,7 +123,7 @@ function disegna() {
   if (stato.timer) { clearInterval(stato.timer); stato.timer = null; }
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, iniziative: vistaIniziative, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
 
@@ -169,12 +169,13 @@ function modulo(a) {
 
   const nome = h("input", { type: "text", value: d.nome, maxlength: 60 });
   const ruolo = h("input", { type: "text", value: d.ruolo, maxlength: 120, placeholder: "Es. Cerca nuovi bandi" });
+  const rimanda = h("input", { type: "text", value: d.rimanda_a || "", maxlength: 300, placeholder: "Es. Per i testi chiedi a Sofia; per i contatti al CRM" });
   const istr = h("textarea", { style: "min-height:180px" }); istr.value = d.istruzioni;
   const div = h("select", {}, h("option", { value: "" }, "Nessuna (agente di sistema)"),
     stato.opzioni.divisioni.map(x => h("option", { value: x.id }, x.nome)));
   div.value = d.divisione_id ?? "";
   const sup = h("select", {}, h("option", { value: "" }, "Nessuno"),
-    stato.agenti.filter(x => !a || x.id !== a.id).map(x => h("option", { value: x.id }, x.nome + " (" + x.ruolo + ")")));
+    stato.agenti.filter(x => !a || x.id !== a.id).map(x => h("option", { value: x.id }, x.etichetta || (x.nome + " (" + x.ruolo + ")"))));
   sup.value = d.superiore_id ?? "";
   const livello = h("select", {}, [["operativo", "Operativo"], ["manager", "Manager"], ["referente", "Referente"], ["sentinella", "Sentinella (osserva e segnala)"]]
     .map(([v, t]) => h("option", { value: v }, t)));
@@ -240,7 +241,7 @@ function modulo(a) {
   const salva = async () => {
     msg.replaceChildren();
     const corpo = {
-      nome: nome.value.trim(), ruolo: ruolo.value.trim(), istruzioni: istr.value.trim(),
+      nome: nome.value.trim(), ruolo: ruolo.value.trim(), rimanda_a: rimanda.value.trim() || null, istruzioni: istr.value.trim(),
       divisione_id: livello.value === "sentinella" ? null : (div.value ? Number(div.value) : null), superiore_id: livello.value === "sentinella" ? null : (sup.value ? Number(sup.value) : null),
       livello: livello.value === "sentinella" ? "manager" : livello.value, sentinella: livello.value === "sentinella", modello: modello.value, fascia_dati_max: fascia.value,
       max_token_risposta: Number(tetto.value), budget_token_mensile: budget.value ? Number(budget.value) : null,
@@ -314,8 +315,11 @@ function modulo(a) {
       h("h2", {}, nuovo ? "Nuovo agente" : d.nome),
       h("div", { class: "interruttore" }, attivo, h("span", {}, "Agente attivo (se spento non risponde e non lavora)")),
       h("label", {}, "Nome", nome),
-      h("label", {}, "Ruolo", ruolo),
+      h("label", {}, "Compito specifico (lo vedono anche gli altri agenti)", ruolo),
+      h("label", {}, "Cosa NON fa / a chi rimanda (facoltativo)", rimanda),
       h("h3", {}, "Prompt"),
+      assistentePrompt(istr, () => ({ nome: nome.value.trim(), ruolo: ruolo.value.trim(), rimanda_a: rimanda.value.trim(), livello: livello.value,
+        divisione: div.selectedOptions[0] ? div.selectedOptions[0].textContent : "", aziende: (stato.opzioni.aziende || []).filter(z => (d.aziende || []).includes(z.id)).map(z => z.nome).join(", ") })),
       h("label", {}, "Cosa deve fare", h("p", { class: "aiuto" }, "In italiano, come lo spiegheresti a un collaboratore: i suoi compiti, le sue relazioni con gli altri agenti, cosa deve guardare e cosa scaricare, il tono, cosa non deve fare."), istr),
       h("h3", {}, "Fasi di lavoro"),
       h("p", { class: "aiuto" }, "Facoltative. Se le lasci vuote l'agente non ha percorsi da seguire. Se le scrivi, per un lavoro avviato dalla pagina «Percorsi» l'agente le svolge una alla volta, nell'ordine, senza saltarne né anticiparne: a fine fase mostra il risultato e (se lo chiedi) aspetta la tua decisione."), contFasi,
@@ -512,7 +516,7 @@ function vistaDialoghi(senzaTitoli) {
 
   // avvio di un dialogo
   const attivi = stato.agenti.filter(a => a.attivo);
-  const opz = () => attivi.map(a => h("option", { value: a.id }, a.nome + " — " + a.ruolo));
+  const opz = () => attivi.map(a => h("option", { value: a.id }, a.etichetta || (a.nome + " — " + a.ruolo)));
   const da = h("select", {}, opz()); const a2 = h("select", {}, opz());
   if (attivi.length > 1) a2.selectedIndex = 1;
   const arg = h("textarea", { style: "min-height:70px", placeholder: "Es. Coordinare la ricerca dei bandi sui borghi per le imprese di Lorenzo" });
@@ -636,7 +640,7 @@ function vistaChat() {
 
 function vistaChatSolo() {
   const attivi = stato.agenti.filter(a => a.attivo);
-  const scelta = h("select", {}, attivi.map(a => h("option", { value: a.id }, a.nome + " — " + a.ruolo)));
+  const scelta = h("select", {}, attivi.map(a => h("option", { value: a.id }, a.etichetta || (a.nome + " — " + a.ruolo))));
   if (stato.chatAgente && attivi.some(a => a.id === stato.chatAgente)) scelta.value = stato.chatAgente;
   scelta.addEventListener("change", () => { stato.chatAgente = Number(scelta.value); });
   const f = h("select", {}, Object.entries(ETICHETTA_FASCIA).map(([v, t]) => h("option", { value: v }, t)));

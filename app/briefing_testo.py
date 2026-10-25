@@ -32,6 +32,12 @@ def riepilogo_testuale(tipo: str, d: dict) -> str:
         righe += ["", f"INFORMAZIONI CHE MI SERVONO DA TE ({len(rich)})"]
         righe += _elenco(rich, lambda r: f"- {'[BLOCCANTE] ' if r.get('bloccante') else ''}{r['agente']}: {r['domanda']}", 12)
 
+    ini = d.get("iniziative", [])
+    if ini:
+        righe += ["", f"INIZIATIVE ({len(ini)})"]
+        nomi = {"da_approvare": "DA APPROVARE", "in_corso": "in corso", "conclusa": "pronta per la tua decisione"}
+        righe += _elenco(ini, lambda r: f"- {r['titolo']} ({r.get('manager') or '?'}): {nomi.get(r['stato'], r['stato'])}, {r.get('fatti', 0)}/{r.get('rami', 0)} task fatte")
+
     prop = d.get("proposte", [])
     if prop:
         righe += ["", f"PROPOSTE DI SVILUPPO IN ATTESA ({len(prop)})"]

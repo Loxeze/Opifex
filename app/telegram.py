@@ -206,6 +206,31 @@ def _verso_agente(conn, testo: str, fascia: str) -> str:
         return "Errore nel contattare l'AI: " + str(e)[:200]
 
 
+def _da_vocale(conn, token: str, cid: int, v: dict, fascia: str) -> str | None:
+    """Scarica il vocale da Telegram e lo trascrive. In caso di problema lo dice a Lorenzo e ritorna None."""
+    from . import trascrizione
+    if (v.get("file_size") or 0) > trascrizione.MAX_BYTE:
+        invia(token, cid, "Il vocale e' troppo lungo: dividilo in messaggi piu' brevi.")
+        return None
+    try:
+        _chiama(token, "sendChatAction", chat_id=cid, action="typing")
+        info = _chiama(token, "getFile", file_id=v.get("file_id"))
+        r = httpx.get(f"https://api.telegram.org/file/bot{token}/{info['file_path']}", timeout=30)
+        if r.status_code != 200:
+            raise ErroreTelegram("download del vocale non riuscito")
+        estensione = str(info["file_path"]).rsplit(".", 1)[-1] if "." in str(info.get("file_path", "")) else "ogg"
+        conn.commit()
+        testo = trascrizione.trascrivi(r.content, estensione, fascia, _titolare_id(conn), v.get("mime_type") or "audio/ogg")
+    except trascrizione.ErroreTrascrizione as e:
+        invia(token, cid, "Non riesco a trascrivere il vocale: " + str(e))
+        return None
+    except (ErroreTelegram, httpx.HTTPError, KeyError):
+        invia(token, cid, "Non riesco a scaricare il vocale da Telegram: riprova o scrivimi il messaggio.")
+        return None
+    invia(token, cid, "🎤 «" + testo[:500] + "»")
+    return testo
+
+
 def gestisci_messaggio(conn, token: str, upd: dict):
     m = upd.get("message") or {}
     chat = m.get("chat") or {}
@@ -234,8 +259,12 @@ def gestisci_messaggio(conn, token: str, upd: dict):
 
     if cid != r["chat_id"]:
         return  # chiunque altro: nessuna risposta
+    if not testo and (m.get("voice") or m.get("audio")):
+        testo = _da_vocale(conn, token, cid, m.get("voice") or m.get("audio"), r["fascia_dati"])
+        if not testo:
+            return
     if not testo:
-        invia(token, cid, "Per ora gestisco solo messaggi di testo.")
+        invia(token, cid, "Gestisco messaggi di testo e vocali.")
         return
     risp = _comando(conn, testo, r)
     if risp is None:

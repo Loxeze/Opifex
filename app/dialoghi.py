@@ -31,6 +31,13 @@ def impostazione(conn, chiave: str, default: str) -> str:
     return r["valore"] if r else default
 
 
+def scheda(c: dict) -> str:
+    """Scheda di competenza di un collega, in una riga: Nome — Dipartimento — Azienda/e — compito (non fa: a chi rimanda)."""
+    parti = [c["nome"], c.get("divisione"), c.get("aziende"), c["ruolo"]]
+    t = " — ".join(p for p in parti if p)
+    return t + (f" (non si occupa di: {c['rimanda_a']})" if c.get("rimanda_a") else "")
+
+
 def colleghi(conn, agente_id: int) -> list[dict]:
     """Agenti con cui questo agente puo' parlare.
 
@@ -44,13 +51,15 @@ def colleghi(conn, agente_id: int) -> list[dict]:
         """WITH RECURSIVE sotto AS (
                SELECT id FROM agenti WHERE superiore_id = %(id)s
                UNION SELECT x.id FROM agenti x JOIN sotto s ON x.superiore_id = s.id)
-           SELECT id, nome, ruolo FROM agenti
-           WHERE attivo AND id <> %(id)s AND (
-                 id = %(sup)s
-              OR superiore_id = %(id)s
-              OR (%(gest)s AND (id IN (SELECT id FROM sotto) OR livello IN ('manager', 'referente')))
+           SELECT a.id, a.nome, a.ruolo, a.rimanda_a, d.nome AS divisione,
+                  (SELECT string_agg(z.nome, ', ' ORDER BY z.nome) FROM agenti_aziende x JOIN aziende z ON z.id = x.azienda_id WHERE x.agente_id = a.id) AS aziende
+           FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
+           WHERE a.attivo AND a.id <> %(id)s AND (
+                 a.id = %(sup)s
+              OR a.superiore_id = %(id)s
+              OR (%(gest)s AND (a.id IN (SELECT id FROM sotto) OR a.livello IN ('manager', 'referente')))
               OR %(vigila)s)
-           ORDER BY id""",
+           ORDER BY a.id""",
         {"id": agente_id, "sup": a["superiore_id"], "gest": a["livello"] in ("manager", "referente"),
          "vigila": bool(a["sentinella"])}).fetchall()
 
