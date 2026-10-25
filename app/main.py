@@ -38,6 +38,7 @@ from . import etichetta
 from .rotte_plaud import router as router_plaud
 from .rotte_iniziative import router as router_iniziative
 from .rotte_crm import router as router_crm
+from .rotte_voce_el import router as router_voce_el
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
 
@@ -153,6 +154,7 @@ app.include_router(router_brevo)
 app.include_router(router_plaud)
 app.include_router(router_iniziative)
 app.include_router(router_crm)
+app.include_router(router_voce_el)
 
 
 @app.get("/", include_in_schema=False)

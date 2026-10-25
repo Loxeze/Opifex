@@ -104,7 +104,17 @@ AIUTO = ("Scrivimi normalmente: ti risponde l'agente con cui stai parlando (all'
          "/agenti - elenco degli agenti\n/aurora - torna ad Aurora\n"
          "/richieste - cosa serve agli agenti\n/rispondi NUMERO testo - rispondi a una richiesta\n"
          "/briefing - l'ultimo briefing\n/stato - situazione in breve\n"
+         "/voce on|off - rispondi anche a voce quando ti scrivo con un vocale\n"
          "/fascia pubblico|interno|riservato - che dati possono uscire verso l'AI in questa chat")
+
+
+def invia_audio(token: str, chat_id: int, mp3: bytes, titolo: str = "Risposta"):
+    """Invia un file audio (Telegram lo mostra con il lettore). Gli errori non fermano il servizio: il testo e' gia' stato mandato."""
+    try:
+        httpx.post(f"https://api.telegram.org/bot{token}/sendAudio", data={"chat_id": chat_id, "title": titolo[:60]},
+                   files={"audio": ("risposta.mp3", mp3, "audio/mpeg")}, timeout=60)
+    except httpx.HTTPError:
+        pass
 
 
 def _titolare_id(conn):
@@ -162,6 +172,14 @@ def _comando(conn, testo: str, r: dict) -> str | None:
         from .versione import versione_corrente
         return (f"Opifex {versione_corrente()}: {c['agenti']} agenti attivi, {c['richieste']} richieste aperte, "
                 f"{c['approvazioni']} da approvare, costo AI di oggi {float(c['costo']):.2f}. Dati in chat: {r['fascia_dati']}.")
+    if cmd == "/voce":
+        from . import voce_elevenlabs as ve
+        if len(parti) < 2 or parti[1].lower() not in ("on", "off"):
+            return "Uso: /voce on | off. Ora: " + ("attiva" if ve.configurazione(conn)["telegram_voce"] else "spenta")
+        if parti[1].lower() == "on" and not ve.configurazione(conn)["chiave"]:
+            return "Prima collega ElevenLabs in Impostazioni → Voce."
+        ve._set(conn, "elevenlabs_telegram_voce", "1" if parti[1].lower() == "on" else "0")
+        return "Risposte vocali " + ("attivate: quando mi scrivi con un vocale ti rispondo anche a voce." if parti[1].lower() == "on" else "spente.")
     if cmd == "/fascia":
         if len(parti) < 2 or parti[1].lower() not in FASCE:
             return "Uso: /fascia pubblico | interno | riservato. Ora: " + r["fascia_dati"]
@@ -231,6 +249,19 @@ def _da_vocale(conn, token: str, cid: int, v: dict, fascia: str) -> str | None:
     return testo
 
 
+def _risposta_vocale(conn, token: str, cid: int, risp: str, fascia: str):
+    """Se Lorenzo ha attivato le risposte vocali, manda anche l'audio della risposta (in silenzio se qualcosa non va: il testo e' gia' arrivato)."""
+    from . import voce_elevenlabs as ve
+    try:
+        if not ve.configurazione(conn)["telegram_voce"]:
+            return
+        conn.commit()
+        mp3 = ve.sintetizza(risp[:ve.MAX_CARATTERI], fascia, _titolare_id(conn))
+        invia_audio(token, cid, mp3, "Risposta")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def gestisci_messaggio(conn, token: str, upd: dict):
     m = upd.get("message") or {}
     chat = m.get("chat") or {}
@@ -259,7 +290,9 @@ def gestisci_messaggio(conn, token: str, upd: dict):
 
     if cid != r["chat_id"]:
         return  # chiunque altro: nessuna risposta
+    era_vocale = False
     if not testo and (m.get("voice") or m.get("audio")):
+        era_vocale = True
         testo = _da_vocale(conn, token, cid, m.get("voice") or m.get("audio"), r["fascia_dati"])
         if not testo:
             return
@@ -283,6 +316,8 @@ def gestisci_messaggio(conn, token: str, upd: dict):
             testo = resto.strip()
         risp = _verso_agente(conn, testo, r["fascia_dati"])
     invia(token, cid, risp)
+    if era_vocale:
+        _risposta_vocale(conn, token, cid, risp, r["fascia_dati"])
 
 
 def invia_notifiche(conn, token: str, chat_id: int) -> int:
