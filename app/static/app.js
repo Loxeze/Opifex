@@ -84,7 +84,7 @@ function cornice(contenuto) {
   radice.replaceChildren(
     h("header", {}, h("h1", {}, "Opifex ", h("small", {}, "// officina")),
       h("nav", {}, (stato.ruolo === "titolare" ? VISTE : VISTE_COLLABORATORE).map(([id, nome]) =>
-        h("button", { class: stato.vista === id || (id === "dashboard" && stato.vista === "richieste") || (id === "progetti" && stato.vista === "progetto") ? "attivo" : "", onclick: () => vai(id) },
+        h("button", { class: stato.vista === id || (id === "dashboard" && stato.vista === "richieste") || (id === "progetti" && stato.vista === "progetto") || (id === "crm" && stato.vista === "contatto") ? "attivo" : "", onclick: () => vai(id) },
           nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : "")))),
       h("button", { class: "s", onclick: esci }, "Esci")),
     h("main", { class: stato.vista === "dashboard" ? "largo" : "" }, contenuto));
@@ -123,7 +123,7 @@ function disegna() {
   if (stato.timer) { clearInterval(stato.timer); stato.timer = null; }
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
 

@@ -43,6 +43,7 @@ from .rotte_studi import router as router_studi
 from .rotte_trigger import router as router_quando
 from .rotte_reparti import router as router_reparti
 from .rotte_progetto import router as router_progetto
+from .rotte_crm_schede import router as router_crm_schede
 from .rotte_dossier import router as router_dossier
 from .rotte_crm import router as router_crm
 from .rotte_voce_el import router as router_voce_el
@@ -83,7 +84,7 @@ async def _canale_telegram():
 async def _manutenzione():
     """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Gli errori non fermano il servizio."""
     import asyncio
-    from . import allarmi, backup, plaud, prova_ripristino, sintesi_memoria, studio
+    from . import allarmi, backup, crm_schede, plaud, prova_ripristino, sintesi_memoria, studio
 
     def giro():
         with connessione() as conn:
@@ -97,6 +98,7 @@ async def _manutenzione():
                 prova_ripristino.prova(conn)
             if studio.da_fare(conn):
                 studio.rileva_e_segna(conn)
+            crm_schede.promemoria(conn)
     await asyncio.sleep(90)
     while True:
         try:
@@ -196,6 +198,7 @@ app.include_router(router_studi)
 app.include_router(router_quando)
 app.include_router(router_reparti)
 app.include_router(router_progetto)
+app.include_router(router_crm_schede)
 app.include_router(router_dossier)
 app.include_router(router_crm)
 app.include_router(router_voce_el)

@@ -2,16 +2,28 @@
 // Contatti (CRM): liste, importazione CSV, riepilogo aggregato e ricerca. I dati personali sono cifrati sul server; gli agenti vedono solo conteggi.
 
 function vistaCrm() {
+  const TAB = [["schede", "Contatti"], ["ricontattare", "Da ricontattare"], ["pipeline", "Opportunità"], ["liste", "Liste e importazione"]];
+  if (!stato.crmTab) stato.crmTab = "schede";
+  const corpo = h("div");
+  const tabs = h("div", { class: "azioni", style: "margin-bottom:12px" }, TAB.map(([id, nome]) => h("button", { class: stato.crmTab === id ? "p" : "s", onclick: () => { stato.crmTab = id; disegna(); } }, nome)));
+  if (stato.crmTab === "schede") corpo.append(...[].concat(crmSchede("")));
+  else if (stato.crmTab === "ricontattare") corpo.append(...[].concat(crmSchede("da_ricontattare")));
+  else if (stato.crmTab === "pipeline") corpo.append(...[].concat(crmPipeline()));
+  else corpo.append(...[].concat(crmListe()));
+  return [h("h2", {}, "CRM"), tabs, corpo];
+}
+
+function crmListe() {
   const corpo = h("div");
   const carica = async () => {
     try {
       const d = await api("GET", "/gestione/crm/liste");
-      riempi(corpo, [h("p", { class: "aiuto" }, "I nomi, le email e i telefoni sono cifrati nel database. Gli agenti con «può consultare i conteggi del CRM» vedono solo numeri (sotto " + d.minimo + " contatti rispondono «meno di " + d.minimo + "»), mai elenchi o recapiti."),
+      riempi(corpo, [h("p", { class: "aiuto" }, "Qui carichi le liste di contatti da file CSV. I nomi, le email e i telefoni sono cifrati nel database. Gli agenti con «può consultare i conteggi del CRM» vedono solo numeri (sotto " + d.minimo + " contatti rispondono «meno di " + d.minimo + "»), mai elenchi o recapiti."),
         formLista(d, carica), d.liste.length ? d.liste.map(l => cartaLista(l, carica)) : h("p", { class: "sotto" }, "Nessuna lista ancora."), riepilogoCrm(), ricercaCrm()]);
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };
   carica();
-  return [h("h2", {}, "Contatti"), corpo];
+  return corpo;
 }
 
 function formLista(d, ricarica) {
