@@ -32,6 +32,7 @@ from .rotte_posta import router as router_posta
 from .rotte_registro import router as router_registro
 from .rotte_sistema import router as router_sistema
 from .rotte_voce import router as router_voce
+from .rotte_memoria import router as router_memoria
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
 
@@ -69,13 +70,15 @@ async def _canale_telegram():
 async def _manutenzione():
     """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Gli errori non fermano il servizio."""
     import asyncio
-    from . import allarmi, backup
+    from . import allarmi, backup, sintesi_memoria
 
     def giro():
         with connessione() as conn:
             if backup.da_fare(conn):
                 backup.esegui(conn)
             allarmi.controlla(conn)
+            if sintesi_memoria.da_fare(conn):
+                sintesi_memoria.genera(conn)
     await asyncio.sleep(90)
     while True:
         try:
@@ -139,6 +142,7 @@ app.include_router(router_posta)
 app.include_router(router_registro)
 app.include_router(router_sistema)
 app.include_router(router_voce)
+app.include_router(router_memoria)
 
 
 @app.get("/", include_in_schema=False)

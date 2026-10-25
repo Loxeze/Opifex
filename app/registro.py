@@ -12,6 +12,7 @@ TIPI = {
     "task": "Task",
     "tetto_spesa": "Tetto di spesa",
     "backup": "Backup",
+    "memoria": "Memoria di lavoro",
 }
 
 

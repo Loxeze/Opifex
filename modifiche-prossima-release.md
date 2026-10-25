@@ -101,3 +101,6 @@
 
 ## 1.10.4 (fatto)
 - Task: tolti gli allegati dal repository; caricamento di nuovi documenti (anche multipli) associati alla task; manager di supporto che legge la task e scrive un consiglio nei commenti (automatico alla scelta + pulsante "Chiedi un consiglio").
+
+## 1.11.0 (fatto)
+- Memoria di lavoro: voci (decisione/fatto/preferenza/lezione/sintesi) con ambito azienda/progetto/dipartimento, approvazione, ricerca, strumento memoria_proponi per gli agenti, proposte automatiche da risposte alle richieste e note dei percorsi, sintesi settimanale (manager + Aurora), pannello in Chat e pagina in Impostazioni.

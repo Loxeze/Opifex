@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from . import percorsi
+from . import memoria_lavoro, percorsi
 from . import registro
 from .db import connessione
 from .esecuzione import EsecuzioneBloccata
@@ -106,4 +106,13 @@ def decisione(pid: int, d: Decisione, utente: dict = Depends(utente_corrente)):
         registro.registra(conn, utente, "fase_percorso", {"approva": "approvata", "modifiche": "modifiche richieste", "annulla": "percorso annullato",
                                                           "riprova": "ripetuta dopo errore"}[d.azione],
                           p.get("titolo") or f"Percorso {pid}", "percorso", pid, d.nota.strip(), {"fase": p.get("fase_corrente"), "stato_dopo": nuovo})
+    if d.nota.strip() and d.azione in ("approva", "modifiche"):
+        try:
+            with connessione() as c2:
+                ag = c2.execute("SELECT divisione_id FROM agenti WHERE id = %s", (p["agente_id"],)).fetchone()
+                memoria_lavoro.proponi(c2, f"Percorso «{p.get('titolo')}», fase {p.get('fase_corrente')}: "
+                                           f"{'approvata' if d.azione == 'approva' else 'modifiche richieste'} da {utente['nome']} — {d.nota.strip()[:700]}",
+                                       "decisione", divisione_id=ag["divisione_id"] if ag else None, fonte=f"percorso #{pid}", utente_id=utente["id"])
+        except Exception:  # noqa: BLE001
+            pass
     return {"stato": nuovo}

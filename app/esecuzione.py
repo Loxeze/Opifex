@@ -9,7 +9,7 @@ import json
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
 from . import spesa
-from . import agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
+from . import memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
@@ -29,7 +29,7 @@ def _carica_agente(conn, agente_id: int) -> dict:
         """
         SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.tipo, a.fascia_dati_max, a.attivo,
                a.modello AS modello_richiesto,
-               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
+               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
                m.id AS modello_id, m.nome AS modello_nome,
                m.costo_input_per_milione, m.costo_output_per_milione,
                f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
@@ -153,6 +153,9 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
         al_ctx = memoria.contesto_allineamento(conn, a_f)
         if al_ctx:
             prefisso.append(al_ctx)
+        mem_ctx = memoria_lavoro.contesto(conn, a_f, messaggio)
+        if mem_ctx:
+            prefisso.append(mem_ctx)
         if doc_ctx:
             prefisso.append(doc_ctx)
         if allegati:
@@ -183,6 +186,7 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                                                                         a["non_conservazione_attiva"], a["dpa_firmato"])[0] else None)
             posta_tool = bool(posta_c)
             social_tool = bool(a["fornitore"] == "anthropic" and a["social_attivo"] and buffer_social.collegato(conn))
+            mem_tool = bool(ok_int)   # lo strumento di memoria si aggiunge agli agenti che usano comunque degli strumenti
             if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
@@ -246,6 +250,20 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     gp = strumenti_posta.gestore(conn, posta_c, agente_id)
                     for s_ in strumenti_posta.STRUMENTI:
                         gestori[s_["name"]] = gp
+
+                if mem_tool:
+                    extra.append(memoria_lavoro.STRUMENTO)
+                    avviso_extra += ("\n\nMEMORIA: se durante il lavoro emerge una decisione, un fatto o una preferenza di Lorenzo che servira' in futuro, "
+                                     "proponila con memoria_proponi (una sola informazione, breve, mai password o chiavi): la approva una persona. Non proporre banalita'.")
+
+                    def _mem(nome, dati, _aid=agente_id):
+                        try:
+                            with connessione() as c2:
+                                memoria_lavoro.proponi_da_agente(c2, _aid, str(dati.get("testo", "")), str(dati.get("tipo") or "decisione"))
+                            return "Proposta registrata: la vedra' Lorenzo per approvarla."
+                        except memoria_lavoro.MemoriaNonValida as e:
+                            return "ERRORE: " + str(e)
+                    gestori["memoria_proponi"] = _mem
 
                 def gestore(nome, dati):
                     f = gestori.get(nome)

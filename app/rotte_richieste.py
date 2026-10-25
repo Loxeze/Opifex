@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from . import registro, ripresa
+from . import memoria_lavoro, registro, ripresa
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -39,6 +39,13 @@ def rispondi(rid: int, d: Risposta, u: dict = Depends(solo_titolare)):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Richiesta inesistente o gia' chiusa")
         registro.registra(conn, u, "richiesta_info", "risposta data", (dom["domanda"] if dom else "")[:200], "richiesta", rid,
                           d.risposta.strip()[:500], {"agente": dom["nome"] if dom else None})
+    try:   # la risposta di Lorenzo e' un fatto da ricordare: proposta di memoria, da approvare
+        with connessione() as c2:
+            ag = c2.execute("SELECT divisione_id FROM agenti WHERE id = %s", (r["agente_id"],)).fetchone()
+            memoria_lavoro.proponi(c2, f"{dom['nome']} aveva chiesto: {dom['domanda'][:350]} — Risposta di {u['nome']}: {d.risposta.strip()[:600]}", "fatto",
+                                   divisione_id=ag["divisione_id"] if ag else None, fonte=f"richiesta #{rid}", utente_id=u["id"])
+    except Exception:  # noqa: BLE001 - la memoria non deve mai bloccare la risposta
+        pass
     ripresa.riprendi(r["agente_id"], u["id"])
     return {"stato": "ok", "ripreso": True}
 
