@@ -34,7 +34,7 @@ function schedaRiunioni(cfg, ricarica) {
   const agente = h("select", {}, [h("option", { value: "" }, "— scegli —")].concat(cfg.agenti.map(a => h("option", { value: a.id }, a.nome)))); agente.value = cfg.agente_id || "";
   const mitt = h("input", { type: "text", maxlength: 80, value: cfg.mittente || "plaud" });
   return h("div", { class: "carta" }, h("div", { class: "nome" }, "Verbali delle riunioni"),
-    h("p", { class: "aiuto" }, "Plaud non ha un collegamento diretto: nell'app Plaud (o con Zapier) fai inviare trascrizione e riassunto di ogni registrazione per email a una casella già collegata in Sistemi → Posta. Qui scegli quella casella e come riconoscere il mittente: Opifex la legge in sola lettura, un agente riassume e propone i task. Niente viene creato senza il tuo OK."),
+    h("p", { class: "aiuto" }, "Plaud non ha un collegamento diretto: nell'app Plaud (o con Zapier) fai inviare trascrizione e riassunto di ogni registrazione per email a una casella già collegata in Impostazioni → Collegamenti (posta). Non serve affidarla a un agente: la legge il sistema con il controllo qui sotto. Qui scegli quella casella e come riconoscere il mittente: Opifex la legge in sola lettura, un agente riassume e propone i task. Niente viene creato senza il tuo OK."),
     h("div", { class: "interruttore" }, attivo, h("span", {}, "Importazione attiva (controllo ogni 10 minuti)")),
     h("label", {}, "Casella di posta", casella), h("label", {}, "Il mittente contiene", mitt), h("label", {}, "Agente che elabora i verbali", agente),
     cfg.ultimo_controllo ? h("div", { class: "sotto" }, "Ultimo controllo: " + new Date(cfg.ultimo_controllo).toLocaleString("it-IT")) : null,

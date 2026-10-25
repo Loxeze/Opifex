@@ -18,7 +18,8 @@ def elenco(_: dict = Depends(solo_titolare)):
                FROM caselle_posta c ORDER BY c.id""").fetchall()
         # solo gli agenti dei dipartimenti che gestiscono la posta (piu' quelli che hanno gia' una casella)
         agenti = conn.execute("""SELECT a.id, a.nome, a.ruolo, d.nome AS dipartimento FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
-                                 WHERE a.attivo AND (d.gestisce_posta OR EXISTS (SELECT 1 FROM agenti_caselle_posta x WHERE x.agente_id = a.id))
+                                 WHERE a.attivo AND (d.gestisce_posta OR EXISTS (SELECT 1 FROM agenti_caselle_posta x WHERE x.agente_id = a.id)
+                                                     OR a.id = COALESCE((SELECT NULLIF(valore, '')::int FROM impostazioni_sistema WHERE chiave = 'plaud_agente_id'), 0))
                                  ORDER BY a.id""").fetchall()
         dipartimenti = conn.execute("SELECT id, nome FROM divisioni WHERE gestisce_posta AND attiva ORDER BY id").fetchall()
     return {"caselle": caselle, "agenti": agenti, "dipartimenti": dipartimenti}
@@ -84,13 +85,15 @@ def affida(cid: int, d: Affidamento, u: dict = Depends(solo_titolare)):
             conn.execute("DELETE FROM agenti_caselle_posta WHERE casella_id=%s", (cid,))
             registro.registra(conn, u, "collegamento", "casella di posta tolta all'agente", c["email"], "posta", cid)
             return {"stato": "ok"}
-        a = conn.execute("""SELECT a.nome, a.attivo, d.gestisce_posta FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
+        a = conn.execute("""SELECT a.nome, a.attivo, d.gestisce_posta,
+                                   a.id = COALESCE((SELECT NULLIF(valore, '')::int FROM impostazioni_sistema WHERE chiave = 'plaud_agente_id'), 0) AS agente_verbali
+                            FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
                             WHERE a.id=%s""", (d.agente_id,)).fetchone()
         if a is None or not a["attivo"]:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Agente inesistente o spento")
-        if not a["gestisce_posta"]:
+        if not a["gestisce_posta"] and not a["agente_verbali"]:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                "Le caselle si affidano solo agli agenti di un dipartimento che gestisce la posta (es. Corrispondenza): sposta l'agente li'")
+                                "Le caselle si affidano solo agli agenti di un dipartimento che gestisce la posta (es. Corrispondenza): sposta l'agente li' (oppure sceglilo come agente dei verbali in Riunioni)")
         conn.execute("INSERT INTO agenti_caselle_posta (agente_id, casella_id) VALUES (%s,%s) "
                      "ON CONFLICT (casella_id) DO UPDATE SET agente_id = EXCLUDED.agente_id", (d.agente_id, cid))
         registro.registra(conn, u, "collegamento", "casella di posta affidata in esclusiva", c["email"], "posta", cid, "", {"agente": a["nome"]})
