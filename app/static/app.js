@@ -179,7 +179,7 @@ function sezioneProva(a) {
 function modulo(a) {
   const nuovo = a === null;
   const d = a || { nome: "", ruolo: "", divisione_id: null, superiore_id: null, livello: "operativo",
-    modello: stato.opzioni.modelli[0]?.nome, istruzioni: "", fascia_dati_max: "pubblico", max_token_risposta: 1500,
+    modello: stato.opzioni.modelli[0]?.nome, istruzioni: "", fascia_dati_max: "pubblico", max_token_risposta: 3000,
     budget_token_mensile: null, accesso_web: false, siti_consentiti: [], max_ricerche: 3, attivo: true, connessioni: [], aziende: [] };
 
   const nome = h("input", { type: "text", value: d.nome, maxlength: 60 });

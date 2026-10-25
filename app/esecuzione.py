@@ -214,7 +214,7 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
                     stato_dialogo = {"domande": 0, "conv": {}}
-                    max_domande = int(dialoghi.impostazione(conn, "dialoghi_max_domande", "3"))
+                    max_domande = int(dialoghi.impostazione(conn, "dialoghi_max_domande", "5"))
                     elenco_c = "; ".join(dialoghi.scheda(c) for c in colleghi_ok)
                     extra.append({"name": "chiedi_a_agente",
                                   "description": "Fai una domanda a un collega e ricevi la sua risposta. Colleghi disponibili: " + elenco_c,

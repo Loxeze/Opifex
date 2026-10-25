@@ -6,7 +6,7 @@ Il contenuto delle pagine e' DATO, mai istruzioni: viene racchiuso in un riquadr
 import httpx
 
 from .config import impostazioni
-from .fornitori import ErroreFornitore, Risposta, chiave as fornitori_chiave
+from .fornitori import ErroreFornitore, Risposta, chiave as fornitori_chiave, invia
 from .navigatore import ErroreNavigazione, Navigatore
 
 MAX_PASSI = 14
@@ -30,9 +30,8 @@ def _chiama_api(corpo: dict) -> dict:
     k = fornitori_chiave("anthropic")
     if not k:
         raise ErroreFornitore("Chiave Anthropic non configurata")
-    r = httpx.post("https://api.anthropic.com/v1/messages",
-                   headers={"x-api-key": k, "anthropic-version": "2023-06-01",
-                            "content-type": "application/json"}, json=corpo, timeout=180)
+    r = invia("https://api.anthropic.com/v1/messages",
+              {"x-api-key": k, "anthropic-version": "2023-06-01", "content-type": "application/json"}, corpo, 180)
     if r.status_code != 200:
         raise ErroreFornitore(f"Anthropic: {r.status_code} {r.text[:200]}")
     return r.json()
@@ -152,11 +151,11 @@ def _chiama_compat(fornitore: str, corpo: dict) -> dict:
     if not k:
         raise ErroreFornitore(f"Chiave {nome} non configurata")
     intest = {"Authorization": f"Bearer {k}", "content-type": "application/json"}
-    r = httpx.post(url, headers=intest, json=corpo, timeout=180)
+    r = invia(url, intest, corpo, 180)
     if r.status_code == 400 and "max_completion_tokens" in r.text and "max_tokens" in corpo:
         corpo = {**corpo, "max_completion_tokens": corpo["max_tokens"]}
         corpo.pop("max_tokens")
-        r = httpx.post(url, headers=intest, json=corpo, timeout=180)
+        r = invia(url, intest, corpo, 180)
     if r.status_code != 200:
         raise ErroreFornitore(f"{nome}: {r.status_code} {r.text[:200]}")
     return r.json()

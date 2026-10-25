@@ -82,47 +82,63 @@ async def _canale_telegram():
             await asyncio.sleep(15)
 
 
+def _passo(nome: str, f):
+    """Esegue un passo dei lavori di fondo isolandolo: se fallisce lo si registra e si avvisa (una volta al giorno),
+    ma gli altri passi proseguono. Prima un guasto nel backup bloccava anche gli allarmi."""
+    import logging
+    try:
+        with connessione() as conn:
+            f(conn)
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger("opifex").exception("passo di fondo '%s' fallito", nome)
+        try:
+            with connessione() as conn:
+                oggi = __import__("datetime").date.today().isoformat()
+                chiave = "errore_fondo_" + nome
+                r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave=%s", (chiave,)).fetchone()
+                if not r or r["valore"] != oggi:
+                    conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore", (chiave, oggi))
+                    conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
+                                 (f"Un lavoro automatico non e' riuscito: {nome} ({type(e).__name__}: {str(e)[:120]}). Gli altri proseguono.",))
+        except Exception:  # noqa: BLE001 - se non si riesce nemmeno ad avvisare resta il log
+            pass
+
+
 async def _manutenzione():
-    """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Gli errori non fermano il servizio."""
+    """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Ogni passo e' isolato dagli altri."""
     import asyncio
     from . import allarmi, backup, crm_schede, plaud, prova_ripristino, sintesi_memoria, studio
 
     def giro():
-        with connessione() as conn:
-            if backup.da_fare(conn):
-                backup.esegui(conn)
-            allarmi.controlla(conn)
-            if sintesi_memoria.da_fare(conn):
-                sintesi_memoria.genera(conn)
-            plaud.controlla(conn)
-            if prova_ripristino.da_fare(conn):
-                prova_ripristino.prova(conn)
-            if studio.da_fare(conn):
-                studio.rileva_e_segna(conn)
-            crm_schede.promemoria(conn)
+        _passo("backup", lambda c: backup.esegui(c) if backup.da_fare(c) else None)
+        _passo("allarmi", allarmi.controlla)
+        _passo("sintesi memoria", lambda c: sintesi_memoria.genera(c) if sintesi_memoria.da_fare(c) else None)
+        _passo("posta PLAUD", plaud.controlla)
+        _passo("prova ripristino", lambda c: prova_ripristino.prova(c) if prova_ripristino.da_fare(c) else None)
+        _passo("studi", lambda c: studio.rileva_e_segna(c) if studio.da_fare(c) else None)
+        _passo("promemoria CRM", crm_schede.promemoria)
     await asyncio.sleep(90)
     while True:
         try:
             await asyncio.to_thread(giro)
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
         await asyncio.sleep(600)
 
 
 async def _trigger_orari():
-    """Ogni minuto controlla i trigger a orario accesi e li avvia."""
+    """Ogni minuto controlla i trigger a orario accesi e li avvia; poi invia le notifiche push."""
     import asyncio
     from . import trigger, webpush
 
     def giro():
-        with connessione() as conn:
-            trigger.tick(conn)
-            webpush.invia_notifiche(conn)
+        _passo("trigger a orario", trigger.tick)
+        _passo("notifiche push", webpush.invia_notifiche)
     await asyncio.sleep(45)
     while True:
         try:
             await asyncio.to_thread(giro)
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
         await asyncio.sleep(60)
 

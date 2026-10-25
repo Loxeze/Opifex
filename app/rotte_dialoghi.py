@@ -38,7 +38,7 @@ def riepilogo(_: dict = Depends(solo_titolare)):
         r = conn.execute("""SELECT AVG(extract(epoch FROM (creato_il - prec)))::float AS medio FROM (
                               SELECT creato_il, LAG(creato_il) OVER (PARTITION BY conversazione_id ORDER BY id) AS prec
                               FROM messaggi_agenti WHERE creato_il >= NOW() - interval '7 days') x WHERE prec IS NOT NULL""").fetchone()
-        budget = int(dialoghi.impostazione(conn, "dialoghi_budget_token_giornaliero", "200000"))
+        budget = int(dialoghi.impostazione(conn, "dialoghi_budget_token_giornaliero", "1000000"))
     return {**c, "token_oggi": int(t["n"]), "budget_token": budget,
             "secondi_medi_tra_messaggi": round(r["medio"], 1) if r["medio"] is not None else None}
 
@@ -61,8 +61,8 @@ def leggi_limiti(_: dict = Depends(solo_titolare)):
         return {k: dialoghi.impostazione(conn, k, d) for k, d in LIMITI.items()}
 
 
-LIMITI = {"dialoghi_max_messaggi": "8", "dialoghi_max_domande": "3",
-          "dialoghi_budget_token_giornaliero": "200000", "modello_dialogo_predefinito": "claude-haiku-5-5"}
+LIMITI = {"dialoghi_max_messaggi": "12", "dialoghi_max_domande": "5",
+          "dialoghi_budget_token_giornaliero": "1000000", "modello_dialogo_predefinito": "claude-haiku-5-5"}
 
 
 class Limiti(BaseModel):

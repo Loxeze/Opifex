@@ -9,7 +9,8 @@ from .config import impostazioni
 pool = ConnectionPool(
     conninfo=impostazioni.database_url,
     min_size=1,
-    max_size=10,
+    max_size=40,      # ogni agente al lavoro tiene una connessione mentre aspetta il modello: servono margini
+    timeout=60,
     kwargs={"row_factory": dict_row},
     open=False,
 )

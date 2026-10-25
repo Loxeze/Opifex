@@ -6,6 +6,8 @@ Si usa HTTP diretto (httpx), senza librerie specifiche dei fornitori, cosi' le d
 """
 from dataclasses import dataclass, field
 
+import time
+
 import httpx
 
 from .config import impostazioni
@@ -37,6 +39,41 @@ class ErroreFornitore(Exception):
     pass
 
 
+PAUSE_RIPROVA = (2, 6, 15)          # secondi tra un tentativo e l'altro
+CODICI_TRANSITORI = {408, 409, 425, 429, 500, 502, 503, 504, 529}   # sovraccarico o guasto momentaneo del fornitore
+
+
+def invia(url: str, intestazioni: dict, corpo: dict, timeout: int = 180):
+    """POST al fornitore con nuovi tentativi per gli errori momentanei (sovraccarico, limite di richieste, rete lenta).
+    Senza questo un singolo 529 o un timeout fermava l'agente. Gli errori definitivi (chiave, richiesta sbagliata) passano subito."""
+    ultimo = ""
+    for n in range(len(PAUSE_RIPROVA) + 1):
+        try:
+            r = httpx.post(url, headers=intestazioni, json=corpo, timeout=timeout)
+        except httpx.HTTPError as e:   # timeout, rete interrotta, DNS
+            ultimo = type(e).__name__
+            r = None
+        if r is not None and r.status_code not in CODICI_TRANSITORI:
+            return r
+        if r is not None:
+            ultimo = f"{r.status_code} {r.text[:120]}"
+            if n < len(PAUSE_RIPROVA):
+                try:
+                    attesa = min(float(r.headers.get("retry-after", 0)), 30)
+                except ValueError:
+                    attesa = 0
+            else:
+                attesa = 0
+        else:
+            attesa = 0
+        if n < len(PAUSE_RIPROVA):
+            time.sleep(max(attesa, PAUSE_RIPROVA[n]))
+        elif r is not None:
+            return r      # ultimo tentativo fallito: ci pensa il chiamante a segnalare l'errore col suo messaggio
+    raise ErroreFornitore(f"Il fornitore non risponde ({ultimo}); riprovati {len(PAUSE_RIPROVA) + 1} tentativi")
+
+
+
 def _chiama_anthropic(modello: str, istruzioni: str, messaggio: str, max_token: int,
                       web: dict | None = None) -> Risposta:
     k = chiave("anthropic")
@@ -54,16 +91,8 @@ def _chiama_anthropic(modello: str, istruzioni: str, messaggio: str, max_token: 
         if web.get("siti"):
             strumento["allowed_domains"] = web["siti"]
         corpo["tools"] = [strumento]
-    r = httpx.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": k,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json=corpo,
-        timeout=180,
-    )
+    r = invia("https://api.anthropic.com/v1/messages",
+              {"x-api-key": k, "anthropic-version": "2023-06-01", "content-type": "application/json"}, corpo, 180)
     if r.status_code != 200:
         raise ErroreFornitore(f"Anthropic: {r.status_code} {r.text[:200]}")
     d = r.json()
@@ -85,11 +114,11 @@ def _chiama_compatibile_openai(url: str, chiave: str, nome: str, modello: str, i
         ],
     }
     intest = {"Authorization": f"Bearer {chiave}", "content-type": "application/json"}
-    r = httpx.post(url, headers=intest, json=corpo, timeout=120)
+    r = invia(url, intest, corpo, 120)
     if r.status_code == 400 and "max_completion_tokens" in r.text:
         # i modelli piu' recenti di OpenAI vogliono questo nome per il limite di risposta
         corpo["max_completion_tokens"] = corpo.pop("max_tokens")
-        r = httpx.post(url, headers=intest, json=corpo, timeout=120)
+        r = invia(url, intest, corpo, 120)
     if r.status_code != 200:
         raise ErroreFornitore(f"{nome}: {r.status_code} {r.text[:200]}")
     d = r.json()

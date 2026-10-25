@@ -19,7 +19,7 @@ Regole del dialogo:
 5. Se la questione e' completamente chiarita scrivi alla fine [CHIARITO].
 Rispondi in italiano, in modo completo ma senza giri di parole."""
 
-MAX_TOKEN_DIALOGO = 1500
+MAX_TOKEN_DIALOGO = 2500
 
 
 class DialogoBloccato(Exception):
@@ -153,11 +153,11 @@ def _fai_parlare(conn, parlante_id: int, destinatario_id: int, conv_id: int, ist
 
 
 def _controlli_generali(conn, conv_id: int | None):
-    if _token_dialoghi_oggi(conn) >= int(impostazione(conn, "dialoghi_budget_token_giornaliero", "200000")):
+    if _token_dialoghi_oggi(conn) >= int(impostazione(conn, "dialoghi_budget_token_giornaliero", "1000000")):
         raise DialogoBloccato("Budget giornaliero dei dialoghi esaurito")
     if conv_id is not None:
         n = conn.execute("SELECT count(*) AS n FROM messaggi_agenti WHERE conversazione_id = %s", (conv_id,)).fetchone()["n"]
-        if n >= int(impostazione(conn, "dialoghi_max_messaggi", "8")):
+        if n >= int(impostazione(conn, "dialoghi_max_messaggi", "12")):
             raise DialogoBloccato("Questa conversazione ha raggiunto il numero massimo di messaggi")
 
 
@@ -166,7 +166,7 @@ def _risposta_speciale(conn, dest: dict, da_id: int, conv_id: int, domanda: str,
     from .esecuzione import EsecuzioneBloccata, esegui_agente
     chi = conn.execute("SELECT nome, ruolo FROM agenti WHERE id = %s", (da_id,)).fetchone()
     try:
-        r = esegui_agente(dest["id"], f"Domanda del collega {chi['nome']} ({chi['ruolo']}):\n{domanda}", fascia, utente_id, max_token=2500)
+        r = esegui_agente(dest["id"], f"Domanda del collega {chi['nome']} ({chi['ruolo']}):\n{domanda}", fascia, utente_id, max_token=3500)
     except EsecuzioneBloccata as e:
         raise DialogoBloccato(str(e)) from None
     _salva_messaggio(conn, conv_id, dest["id"], da_id, r["risposta"])
@@ -203,7 +203,7 @@ def dialogo_avviato_da_utente(da_id: int, a_id: int, argomento: str, messaggi: i
     with connessione() as conn:
         if a_id not in {c["id"] for c in colleghi(conn, da_id)}:
             raise DialogoBloccato("Questi due agenti non possono dialogare tra loro (solo superiore, subordinati e manager tra loro)")
-        massimo = int(impostazione(conn, "dialoghi_max_messaggi", "8"))
+        massimo = int(impostazione(conn, "dialoghi_max_messaggi", "12"))
         messaggi = max(2, min(messaggi, massimo))
         conv_id = conn.execute(
             "INSERT INTO conversazioni (titolo, fascia_dati, iniziata_da_utente) VALUES (%s,%s,%s) RETURNING id",

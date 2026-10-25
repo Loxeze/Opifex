@@ -7,7 +7,7 @@ import threading
 from .db import connessione
 
 SINCRONO = False   # nei collaudi si esegue nello stesso thread
-MAX_TOKEN_RAMO = 1500
+MAX_TOKEN_RAMO = 3000
 
 STRUMENTO = {"name": "iniziativa_apri",
              "description": ("Apri un'iniziativa quando emerge un'opportunita' che richiede il lavoro di piu' agenti, anche di altri dipartimenti. "
