@@ -58,6 +58,11 @@ async def carica(file: UploadFile = File(...), nome: str = Form(""), fascia_dati
         for i, p in enumerate(pezzi):
             conn.execute("INSERT INTO pezzi_documenti (documento_id, ordine, testo) VALUES (%s,%s,%s)", (riga["id"], i, p))
         _assegna(conn, riga["id"], _ids(agenti))
+        try:
+            from . import studio
+            studio.da_documento(conn, riga["id"], (nome.strip() or nome_file), None)
+        except Exception:
+            pass
         conn.execute("INSERT INTO registro_azioni (azione, dettagli, utente_id) VALUES ('documento_caricato', %s::jsonb, %s)",
                      (json.dumps({"documento_id": riga["id"], "file": nome_file, "fascia": fascia_dati}), utente["id"]))
     return {"id": riga["id"], "pezzi": len(pezzi), "caratteri": len(testo)}

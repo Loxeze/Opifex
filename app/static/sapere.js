@@ -152,3 +152,46 @@ function vistaCerimoniere() {
     h("p", { class: "aiuto" }, "Il maestro delle cerimonie legge l'organizzazione dal vivo (schede di competenza, dipartimenti, aziende): quando aggiungi un ruolo non serve aggiornare nulla. Un manager gli espone un bisogno e lui indica a chi rivolgersi, presenta il richiedente e, se nessuno copre l'esigenza, ti propone un nuovo ruolo. Non svolge il lavoro: instrada."),
     msg, corpo];
 }
+
+const ORIGINE_STUDIO = { bando: "bando caricato", discussione: "argomento discusso", lacuna: "lacuna rilevata", iniziativa: "approfondimento di Padre Casati", manuale: "richiesto da te" };
+const STATO_STUDIO = { proposto: "da approvare", approvato: "in partenza", in_corso: "in corso…", completato: "concluso", scartato: "scartato", errore: "non riuscito" };
+
+function vistaStudi() {
+  const corpo = h("div"), msg = h("div");
+  let timer = null;
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/studi");
+      const decidi = async (s, azione) => {
+        try { await api("POST", "/gestione/studi/" + s.id + "/decisione", { azione }); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+      };
+      const tema = h("input", { maxlength: 200, placeholder: "Es. Regole di rendicontazione dei bandi PNRR" });
+      const motivo = h("textarea", { style: "min-height:56px", maxlength: 1500, placeholder: "Perché serve (facoltativo)" });
+      const rep = h("select", {}, h("option", { value: "" }, "Per tutti i reparti"), d.divisioni.map(x => h("option", { value: x.id }, x.nome)));
+      riempi(corpo, [
+        h("p", { class: "aiuto" }, "Padre Casati studia quando c'è un motivo: un bando caricato, una domanda dei colleghi che la biblioteca non copre, un agente che riceve molti 👎, un approfondimento che vuole fare lui o che chiedi tu. Ogni studio parte solo dopo la tua approvazione, consulta biblioteca e archivi aperti e si chiude con una scheda e una voce di dossier da approvare in «Memoria di lavoro»."),
+        h("h3", {}, "Studi" + (d.da_approvare ? " da approvare (" + d.da_approvare + ")" : "")),
+        d.studi.length ? d.studi.map(s => {
+          const sch = h("pre", { style: "white-space:pre-wrap;display:none;max-height:380px;overflow:auto" });
+          return h("div", { class: "carta", style: "margin-bottom:8px" },
+            h("div", { class: "nome" }, s.tema),
+            h("div", { class: "sotto" }, [STATO_STUDIO[s.stato], ORIGINE_STUDIO[s.origine], s.reparto, s.richiesto_da ? "per " + s.richiesto_da : "", s.riferimento,
+              s.token_usati ? s.token_usati + " token" : "", s.memoria_id ? "voce di dossier: " + (s.stato_voce === "approvata" ? "approvata" : "da approvare") : ""].filter(Boolean).join(" · ")),
+            s.motivo ? h("div", {}, "Perché: " + s.motivo) : null,
+            s.errore ? avviso(s.errore, "no") : null, sch,
+            h("div", { class: "azioni" },
+              s.stato === "proposto" ? [h("button", { class: "p", onclick: () => decidi(s, "approva") }, "Approva lo studio"), h("button", { class: "s", onclick: () => decidi(s, "scarta") }, "Scarta")] : null,
+              s.ha_scheda ? h("button", { class: "s", onclick: async () => { if (sch.style.display === "none") { try { sch.textContent = (await api("GET", "/gestione/studi/" + s.id)).scheda; sch.style.display = "block"; } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } else sch.style.display = "none"; } }, "Leggi la scheda") : null));
+        }) : h("p", { class: "sotto" }, "Nessuno studio ancora."),
+        h("h3", {}, "Chiedi uno studio"),
+        h("div", { class: "riga" }, h("label", {}, "Tema", tema), h("label", {}, "Reparto", rep)), motivo,
+        h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
+          try { await api("POST", "/gestione/studi", { tema: tema.value.trim(), motivo: motivo.value.trim() || null, divisione_id: rep.value ? Number(rep.value) : null });
+            tema.value = motivo.value = ""; msg.replaceChildren(avviso("Studio avviato: Padre Casati ci sta lavorando.", "ok")); await carica(); }
+          catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Avvia lo studio"))]);
+      if (d.studi.some(s => s.stato === "in_corso" || s.stato === "approvato") && !timer) timer = setInterval(() => { if (!document.body.contains(corpo)) { clearInterval(timer); return; } carica(); }, 8000);
+    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return h("div", {}, h("h2", {}, "Studi di Padre Casati"), msg, corpo);
+}

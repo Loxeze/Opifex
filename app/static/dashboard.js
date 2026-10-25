@@ -96,7 +96,7 @@ function vistaDashboard() {
 
 function vistaImpostazioni() {
   const mappa = { profilo: vistaAccount, struttura: vistaStruttura, collegamenti: vistaCollegamenti, connessioni: vistaConnessioni, canali: vistaCanali,
-    utenti: vistaUtenti, aggiornamenti: vistaAggiornamenti, sicurezza: vistaSicurezza, registro: vistaRegistro, sistema: vistaSistema, memoria: vistaMemoria, dossier: vistaDossier, biblioteca: vistaBiblioteca, cerimoniere: vistaCerimoniere, voce: vistaVoce };
+    utenti: vistaUtenti, aggiornamenti: vistaAggiornamenti, sicurezza: vistaSicurezza, registro: vistaRegistro, sistema: vistaSistema, memoria: vistaMemoria, dossier: vistaDossier, biblioteca: vistaBiblioteca, studi: vistaStudi, cerimoniere: vistaCerimoniere, voce: vistaVoce };
   if (!mappa[stato.sezione]) stato.sezione = "profilo";
   return h("div", { class: "impostazioni" },
     h("nav", { class: "menu-imp", "aria-label": "Sezioni delle impostazioni" }, SEZIONI_IMPOSTAZIONI.map(([id, nome]) =>
