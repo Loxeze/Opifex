@@ -86,6 +86,17 @@ def elenco(_: dict = Depends(solo_titolare)):
                FROM documenti d LEFT JOIN utenti u ON u.id = d.caricato_da ORDER BY d.creato_il DESC""").fetchall()
 
 
+@router.get("/documenti/{doc_id}/testo")
+def anteprima(doc_id: int, _: dict = Depends(solo_titolare)):
+    """Il testo del documento per l'anteprima (fino a 200 mila caratteri)."""
+    with connessione() as conn:
+        d = conn.execute("SELECT id, nome, nome_file, fascia_dati, caratteri FROM documenti WHERE id = %s", (doc_id,)).fetchone()
+        if d is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Documento non trovato")
+        testo = "".join(r["testo"] for r in conn.execute("SELECT testo FROM pezzi_documenti WHERE documento_id = %s ORDER BY ordine", (doc_id,)).fetchall())
+    return {**d, "testo": testo[:200000], "troncato": len(testo) > 200000}
+
+
 def _discendenti(conn, agente_id: int) -> set[int]:
     return {r["id"] for r in conn.execute(
         """WITH RECURSIVE sotto AS (SELECT id FROM agenti WHERE superiore_id = %s

@@ -137,9 +137,11 @@ function vistaUtenti() {
       const nome = h("input", { type: "text", maxlength: 120 });
       const email = h("input", { type: "email", maxlength: 200 });
       const scelte = d.divisioni.map(v => ({ v, c: h("input", { type: "checkbox" }) }));
+      const sceltaImp = d.aziende.map(z => ({ z, c: h("input", { type: "checkbox" }) }));
       riempi(corpo, [
         d.utenti.map(u => {
           const caselle = d.divisioni.map(v => { const c = h("input", { type: "checkbox" }); c.checked = u.divisioni.includes(v.id); return { v, c }; });
+          const impU = d.aziende.map(z => { const c = h("input", { type: "checkbox" }); c.checked = (u.aziende || []).includes(z.id); return { z, c }; });
           return h("div", { class: "carta", style: "margin-bottom:12px" },
             h("div", { class: "nome" }, u.nome + (u.attivo ? "" : " (disattivato)")),
             h("div", { class: "sotto" }, u.email + " · " + (u.ruolo === "titolare" ? "Titolare" : "Collaboratore") + " · secondo fattore: " + (u.secondo_fattore ? "attivo" : "non ancora") +
@@ -147,7 +149,10 @@ function vistaUtenti() {
             u.ruolo === "titolare" ? null : [
               h("div", { class: "sotto", style: "margin-top:8px" }, "Divisioni a cui può accedere:"),
               h("div", { class: "riga" }, caselle.map(({ v, c }) => h("label", { style: "flex:0 0 auto;margin-right:12px" }, c, " " + v.nome))),
+              h("div", { class: "sotto", style: "margin-top:8px" }, "Imprese di cui vede progetti e task:"),
+              h("div", { class: "riga" }, impU.map(({ z, c }) => h("label", { style: "flex:0 0 auto;margin-right:12px" }, c, " " + z.nome))),
               h("div", { class: "azioni" },
+                h("button", { class: "s", onclick: async () => { msg.replaceChildren(); try { await api("PUT", "/gestione/utenti/" + u.id + "/aziende", { aziende: impU.filter(x => x.c.checked).map(x => x.z.id) }); msg.replaceChildren(avviso("Imprese salvate.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva imprese"),
                 h("button", { class: "s", onclick: async () => { msg.replaceChildren(); try { await api("PUT", "/gestione/utenti/" + u.id + "/divisioni", { divisioni: caselle.filter(x => x.c.checked).map(x => x.v.id) }); msg.replaceChildren(avviso("Divisioni salvate.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva divisioni"),
                 h("button", { class: "s", onclick: async () => { if (!confirm("Generare una nuova password temporanea per " + u.nome + "? Dovrà anche rifare il secondo fattore.")) return;
                   try { const r = await api("POST", "/gestione/utenti/" + u.id + "/reimposta"); mostraTemp("Nuova password temporanea per " + u.nome + ":", r.password_temporanea); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Reimposta accesso"),
@@ -159,9 +164,11 @@ function vistaUtenti() {
           h("label", {}, "Nome", nome), h("label", {}, "Email", email),
           h("div", { class: "sotto" }, "Divisioni a cui può accedere:"),
           h("div", { class: "riga" }, scelte.map(({ v, c }) => h("label", { style: "flex:0 0 auto;margin-right:12px" }, c, " " + v.nome))),
+          h("div", { class: "sotto" }, "Imprese di cui vede progetti e task:"),
+          h("div", { class: "riga" }, sceltaImp.map(({ z, c }) => h("label", { style: "flex:0 0 auto;margin-right:12px" }, c, " " + z.nome))),
           h("p", { class: "aiuto" }, "Riceverà una password temporanea da cambiare al primo accesso, e dovrà attivare l'app di autenticazione (obbligatoria per i collaboratori). Vede solo Chat e il proprio account, limitati alle divisioni scelte."),
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
-            try { const r = await api("POST", "/gestione/utenti", { nome: nome.value.trim(), email: email.value.trim(), divisioni: scelte.filter(x => x.c.checked).map(x => x.v.id) });
+            try { const r = await api("POST", "/gestione/utenti", { nome: nome.value.trim(), email: email.value.trim(), divisioni: scelte.filter(x => x.c.checked).map(x => x.v.id), aziende: sceltaImp.filter(x => x.c.checked).map(x => x.z.id) });
               await carica(); mostraTemp("Collaboratore creato. Password temporanea:", r.password_temporanea); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Crea collaboratore")))]);
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };

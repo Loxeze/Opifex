@@ -46,9 +46,11 @@ def _ids_visibili(conn, u: dict) -> set[int] | None:
     righe = conn.execute(
         """WITH RECURSIVE base AS (
              SELECT id FROM task WHERE assegnato_utente_id = %(u)s OR creato_da_utente_id = %(u)s OR assegnato_agente_id = ANY(%(a)s)
+                OR azienda_id = ANY(%(az)s) OR progetto_id IN (SELECT id FROM progetti WHERE azienda_id = ANY(%(az)s))
            ), tutte AS (
              SELECT id FROM base UNION SELECT t.id FROM task t JOIN tutte p ON t.padre_id = p.id
-           ) SELECT id FROM tutte""", {"u": u["id"], "a": miei}).fetchall()
+           ) SELECT id FROM tutte""", {"u": u["id"], "a": miei,
+                                                  "az": [r["azienda_id"] for r in conn.execute("SELECT azienda_id FROM accessi_azienda WHERE utente_id = %s", (u["id"],)).fetchall()] or [0]}).fetchall()
     return {r["id"] for r in righe}
 
 

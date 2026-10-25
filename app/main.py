@@ -42,6 +42,7 @@ from .rotte_cerimoniere import router as router_cerimoniere
 from .rotte_studi import router as router_studi
 from .rotte_trigger import router as router_quando
 from .rotte_reparti import router as router_reparti
+from .rotte_progetto import router as router_progetto
 from .rotte_dossier import router as router_dossier
 from .rotte_crm import router as router_crm
 from .rotte_voce_el import router as router_voce_el
@@ -131,6 +132,13 @@ async def ciclo_vita(app: FastAPI):
         percorsi.recupera_interrotti()
     except Exception:
         pass
+    try:
+        from . import pm
+        if pm.abilitato():
+            with connessione() as conn:
+                pm.crea_mancanti(conn)   # un project manager per ogni progetto esistente
+    except Exception:
+        pass
     compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari())]
     yield
     for c in compiti:
@@ -187,6 +195,7 @@ app.include_router(router_cerimoniere)
 app.include_router(router_studi)
 app.include_router(router_quando)
 app.include_router(router_reparti)
+app.include_router(router_progetto)
 app.include_router(router_dossier)
 app.include_router(router_crm)
 app.include_router(router_voce_el)

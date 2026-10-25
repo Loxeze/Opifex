@@ -163,3 +163,10 @@ details.livello{background:linear-gradient(180deg,#1d2029,#191c24);border:1px so
 details.livello>summary{cursor:pointer;font-weight:600;padding:8px 0;list-style:revert}
 .task-riga,.task-scheda{border-radius:12px}
 .pill,.etichetta{border-radius:999px}
+
+.doc-doppio{display:grid;grid-template-columns:minmax(280px,2fr) 3fr;gap:16px;align-items:start}
+.doc-doppio>div:first-child{max-height:75vh;overflow:auto;padding-right:4px}
+.anteprima-doc{position:sticky;top:70px;max-height:78vh;overflow:auto}
+.testo-doc{white-space:pre-wrap;font:13px/1.55 'Inter',system-ui,sans-serif;margin:10px 0 0}
+.carta.doc-sel{border-color:var(--primario)}
+@media(max-width:800px){.doc-doppio{grid-template-columns:1fr}.anteprima-doc{position:static}}

@@ -8,6 +8,7 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from . import registro
 from . import cassaforte, totp
 from .config import impostazioni
 from .db import connessione
@@ -322,16 +323,19 @@ def elenco(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         righe = conn.execute("""SELECT u.id, u.nome, u.email, u.ruolo_globale AS ruolo, u.attivo, u.totp_attivo AS secondo_fattore,
                                        u.deve_cambiare_password AS password_temporanea, u.ultimo_accesso,
-                                       COALESCE((SELECT array_agg(divisione_id ORDER BY divisione_id) FROM accessi_divisione WHERE utente_id=u.id), '{}') AS divisioni
+                                       COALESCE((SELECT array_agg(divisione_id ORDER BY divisione_id) FROM accessi_divisione WHERE utente_id=u.id), '{}') AS divisioni,
+                                       COALESCE((SELECT array_agg(azienda_id ORDER BY azienda_id) FROM accessi_azienda WHERE utente_id=u.id), '{}') AS aziende
                                 FROM utenti u ORDER BY u.id""").fetchall()
         divisioni = conn.execute("SELECT id, nome FROM divisioni ORDER BY nome").fetchall()
-    return {"utenti": righe, "divisioni": divisioni}
+        aziende = conn.execute("SELECT id, nome FROM aziende WHERE attiva ORDER BY nome").fetchall()
+    return {"utenti": righe, "divisioni": divisioni, "aziende": aziende}
 
 
 class NuovoCollaboratore(BaseModel):
     nome: str = Field(min_length=1, max_length=120)
     email: str = Field(min_length=5, max_length=200)
     divisioni: list[int] = []
+    aziende: list[int] = []
 
 
 @gestione.post("", status_code=201)
@@ -348,7 +352,30 @@ def crea(d: NuovoCollaboratore, _: dict = Depends(solo_titolare)):
                            (d.nome.strip(), email, cifra_password(temp))).fetchone()["id"]
         for dv in set(d.divisioni):
             conn.execute("INSERT INTO accessi_divisione (utente_id, divisione_id) VALUES (%s,%s)", (uid, dv))
+        _imposta_aziende(conn, uid, d.aziende)
     return {"id": uid, "password_temporanea": temp}   # mostrata una sola volta
+
+
+def _imposta_aziende(conn, uid: int, ids: list[int]):
+    ids = list(set(ids))
+    if ids and conn.execute("SELECT count(*) AS n FROM aziende WHERE id = ANY(%s)", (ids,)).fetchone()["n"] != len(ids):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Impresa inesistente")
+    conn.execute("DELETE FROM accessi_azienda WHERE utente_id = %s", (uid,))
+    for a in ids:
+        conn.execute("INSERT INTO accessi_azienda (utente_id, azienda_id) VALUES (%s,%s)", (uid, a))
+
+
+class Aziende(BaseModel):
+    aziende: list[int]
+
+
+@gestione.put("/{uid}/aziende")
+def aziende_utente(uid: int, d: Aziende, t: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        _altro_utente(conn, uid, t)
+        _imposta_aziende(conn, uid, d.aziende)
+        registro.registra(conn, t, "organizzazione", "imprese del collaboratore aggiornate", f"utente {uid}", "utente", uid)
+    return {"ok": True}
 
 
 def _verifica_divisioni(conn, ids):

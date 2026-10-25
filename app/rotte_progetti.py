@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from . import google, registro
+from . import google, pm, registro
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -129,7 +129,8 @@ class NuovoProgetto(BaseModel):
 
 def _imposta_agenti(conn, pid: int, ids: list[int] | None):
     attivi = {r["id"] for r in conn.execute("SELECT id FROM agenti WHERE attivo").fetchall()}
-    scelti = attivi if not ids else set(ids)
+    altri_pm = {r["pm_agente_id"] for r in conn.execute("SELECT pm_agente_id FROM progetti WHERE pm_agente_id IS NOT NULL AND id <> %s", (pid,)).fetchall()}
+    scelti = (attivi - altri_pm) if not ids else set(ids)   # di default tutti, tranne i project manager degli altri progetti
     if not scelti <= attivi:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Agente inesistente o spento")
     conn.execute("DELETE FROM progetti_agenti WHERE progetto_id=%s AND NOT agente_id = ANY(%s)", (pid, list(scelti)))
@@ -150,6 +151,8 @@ def crea(d: NuovoProgetto, _: dict = Depends(solo_titolare)):
         pid = conn.execute("INSERT INTO progetti (nome, descrizione, azienda_id, colore) VALUES (%s,%s,%s,%s) RETURNING id",
                            (nome, d.descrizione.strip(), d.azienda_id, d.colore)).fetchone()["id"]
         _imposta_agenti(conn, pid, d.agenti)
+        if pm.abilitato():
+            pm.crea_per(conn, pid)
         esito = google.sincronizza_progetto(conn, pid) if google._leggi(conn, "drive_account_id") else \
             {"ok": False, "errore": "Cartelle Drive non ancora create: collega un account Google con Drive nella scheda Collegamenti"}
     return {"id": pid, "drive": esito}
@@ -184,6 +187,7 @@ def modifica(pid: int, d: ModificaProgetto, _: dict = Depends(solo_titolare)):
         conn.execute("""UPDATE progetti SET nome=%s, descrizione=%s, allineamento=%s,
                         allineamento_il = CASE WHEN %s THEN NOW() ELSE allineamento_il END WHERE id=%s""",
                      (nome, d.descrizione.strip(), d.allineamento.strip(), cambia_al, pid))
+        pm.rinomina(conn, pid)
         drive = None
         if nome != p["nome"] and p["drive_cartella_id"]:
             try:

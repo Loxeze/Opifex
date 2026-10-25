@@ -95,7 +95,7 @@ function vistaDashboard() {
 }
 
 function vistaImpostazioni() {
-  const mappa = { profilo: vistaAccount, struttura: vistaStruttura, collegamenti: vistaCollegamenti, connessioni: vistaConnessioni, canali: vistaCanali, percorsi: vistaPercorsi, social: vistaSocial,
+  const mappa = { profilo: vistaAccount, struttura: vistaStruttura, collegamenti: () => [vistaCollegamenti(), h("hr"), vistaEmail()].flat(Infinity), iniziative: vistaIniziative, connessioni: vistaConnessioni, canali: vistaCanali, percorsi: vistaPercorsi, social: vistaSocial,
     utenti: vistaUtenti, aggiornamenti: vistaAggiornamenti, sicurezza: vistaSicurezza, registro: vistaRegistro, sistema: vistaSistema, memoria: vistaMemoria, dossier: vistaDossier, biblioteca: vistaBiblioteca, studi: vistaStudi, cerimoniere: vistaCerimoniere, quando: vistaQuando, smistamento: vistaSmistamento, reparti: vistaReparti, sandbox: vistaSandbox, voce: vistaVoce };
   if (!mappa[stato.sezione]) stato.sezione = "profilo";
   return h("div", { class: "impostazioni" },
@@ -111,6 +111,15 @@ function vistaDocumenti() {
   const fFascia = h("select", {}, h("option", { value: "" }, "Tutti i livelli"), Object.entries(ETICHETTA_FASCIA).map(([v, t]) => h("option", { value: v }, t)));
   const fAgente = h("select", {}, h("option", { value: "" }, "Tutti gli agenti"), h("option", { value: "-1" }, "Senza agente"), stato.agenti.map(a => h("option", { value: a.id }, a.nome)));
   const nomeAg = (id) => stato.agenti.find(a => a.id === id)?.nome || "?";
+  const anteprima = h("div", { class: "carta anteprima-doc" }, h("p", { class: "sotto" }, "Scegli un documento a sinistra per leggerlo qui."));
+  const mostraAnteprima = async (d) => {
+    anteprima.replaceChildren(h("p", { class: "sotto" }, "Carico…"));
+    try {
+      const r = await api("GET", "/gestione/documenti/" + d.id + "/testo");
+      anteprima.replaceChildren(h("div", { class: "nome" }, r.nome), h("div", { class: "sotto" }, r.nome_file + " · " + ETICHETTA_FASCIA[r.fascia_dati]),
+        h("pre", { class: "testo-doc" }, r.testo || "(il documento non contiene testo leggibile)"), r.troncato ? h("p", { class: "sotto" }, "Anteprima limitata ai primi 200 mila caratteri.") : null);
+    } catch (e) { anteprima.replaceChildren(avviso(e.message, "no")); }
+  };
   const disegnaLista = () => {
     const q = cerca.value.trim().toLowerCase();
     const el = stato.documenti.filter(d => (!q || (d.nome + " " + d.nome_file).toLowerCase().includes(q)) && (!fFascia.value || d.fascia_dati === fFascia.value)
@@ -121,7 +130,7 @@ function vistaDocumenti() {
         const passati = d.assegnazioni.filter(y => y.passato_da === x.agente_id).map(y => nomeAg(y.agente_id));
         return nomeAg(x.agente_id) + (passati.length ? " → " + passati.join(", ") : "");
       }).join(" · ") : "Nessun agente (non lo usa nessuno)";
-      return h("div", { class: "carta", style: "margin-bottom:10px" },
+      return h("div", { class: "carta" + (stato.docAperto === d.id ? " doc-sel" : ""), style: "margin-bottom:10px;cursor:pointer", onclick: (ev) => { if (ev.target.closest("button")) return; stato.docAperto = d.id; disegnaLista(); mostraAnteprima(d); } },
         h("div", { class: "nome" }, d.nome),
         h("div", { class: "sotto" }, d.nome_file + " · " + Math.round(d.caratteri / 1000) + " mila caratteri · caricato da " + (d.caricato_da || "—") + " il " + new Date(d.creato_il).toLocaleDateString("it-IT")),
         h("div", {}, h("span", { class: "etichetta " + (d.fascia_dati === "pubblico" ? "ok" : "avv") }, ETICHETTA_FASCIA[d.fascia_dati])),
@@ -139,5 +148,6 @@ function vistaDocumenti() {
   return [h("h2", {}, "Repository documenti"),
     h("p", { class: "sotto" }, stato.documenti.length + " documenti. Ogni documento si carica dalla scheda dell'agente a cui serve; il manager può passarlo ai suoi sottoposti, mentre i superiori lo vedono in automatico. Qui controlli tutto."),
     nonUsati ? avviso(nonUsati + " documenti non sono usati da nessun agente.", "avv") : null,
-    h("div", { class: "riga" }, h("label", {}, "Cerca", cerca), h("label", {}, "Livello", fFascia), h("label", {}, "Agente", fAgente)), lista];
+    h("div", { class: "riga" }, h("label", {}, "Cerca", cerca), h("label", {}, "Livello", fFascia), h("label", {}, "Agente", fAgente)),
+    h("div", { class: "doc-doppio" }, lista, anteprima)];
 }

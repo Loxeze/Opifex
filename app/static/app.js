@@ -73,18 +73,18 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["iniziative", "Iniziative"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["email", "Email"], ["crm", "Contatti"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
-const VISTE_COLLABORATORE = [["task", "Task"], ["iniziative", "Iniziative"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
-const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Account Google"], ["connessioni", "Connessioni a siti e app"],
-  ["canali", "Canali (Telegram)"], ["social", "Social"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["voce", "Voce"], ["sistema", "Backup e costi"]];
+const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["crm", "CRM"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE_COLLABORATORE = [["task", "Task"], ["progetti", "Progetti"], ["iniziative", "Iniziative"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
+const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Collegamenti (Google, posta)"], ["connessioni", "Connessioni a siti e app"],
+  ["canali", "Canali (Telegram)"], ["social", "Social"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["iniziative", "Iniziative"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["voce", "Voce"], ["sistema", "Backup e costi"]];
 
-function vai(vista, sezione) { if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "social")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
+function vai(vista, sezione) { if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "social" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
 function cornice(contenuto) {
   radice.replaceChildren(
     h("header", {}, h("h1", {}, "Opifex ", h("small", {}, "// officina")),
       h("nav", {}, (stato.ruolo === "titolare" ? VISTE : VISTE_COLLABORATORE).map(([id, nome]) =>
-        h("button", { class: stato.vista === id || (id === "dashboard" && stato.vista === "richieste") ? "attivo" : "", onclick: () => vai(id) },
+        h("button", { class: stato.vista === id || (id === "dashboard" && stato.vista === "richieste") || (id === "progetti" && stato.vista === "progetto") ? "attivo" : "", onclick: () => vai(id) },
           nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : "")))),
       h("button", { class: "s", onclick: esci }, "Esci")),
     h("main", { class: stato.vista === "dashboard" ? "largo" : "" }, contenuto));
@@ -123,7 +123,7 @@ function disegna() {
   if (stato.timer) { clearInterval(stato.timer); stato.timer = null; }
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
 

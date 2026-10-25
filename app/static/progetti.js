@@ -25,6 +25,7 @@ function vistaProgetti() {
         p.drive_errore && p.drive_stato === "errore" ? avviso(p.drive_errore, "no") : null,
         p.allineamento ? h("div", { class: "sotto", style: "margin-top:6px;white-space:pre-wrap" }, "Allineamento" + (p.allineamento_il ? " (" + new Date(p.allineamento_il).toLocaleDateString("it-IT") + ")" : "") + ": " + p.allineamento.slice(0, 300) + (p.allineamento.length > 300 ? "…" : "")) : null,
         h("div", { class: "azioni" },
+          h("button", { class: "p", onclick: () => { stato.progettoAperto = p.id; vai("progetto"); } }, "Dashboard"),
           h("button", { class: "s", onclick: () => modificaProgetto(p, carica, msg, d.aziende) }, "Modifica"),
           p.drive_url ? h("a", { href: p.drive_url, target: "_blank", rel: "noopener noreferrer" }, h("button", { class: "s", type: "button" }, "Apri su Drive")) : null,
           h("button", { class: "s", onclick: async (e) => { e.currentTarget.disabled = true; msg.replaceChildren();
