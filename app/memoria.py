@@ -23,6 +23,33 @@ def registra_scambio(conn, agente_id: int, utente_id: int | None, domanda: str, 
                  (agente_id, utente_id, risposta, fascia))
 
 
+MAX_SCAMBI = 6
+MAX_SCAMBIO = 600
+GIORNI_SCAMBI = 14
+
+
+def scambi_colleghi(conn, a: dict) -> str:
+    """Diario degli ultimi scambi dell'agente con i colleghi (domande ricevute e risposte date): senza questo ogni volta
+    ripartirebbe da zero. Solo le conversazioni la cui fascia puo' uscire verso il suo fornitore."""
+    righe = conn.execute(
+        """SELECT m.testo, m.creato_il, c.fascia_dati, d.nome AS da, t.nome AS a
+           FROM messaggi_agenti m JOIN conversazioni c ON c.id = m.conversazione_id
+           LEFT JOIN agenti d ON d.id = m.da_agente_id LEFT JOIN agenti t ON t.id = m.a_agente_id
+           WHERE (m.da_agente_id = %s OR m.a_agente_id = %s) AND m.creato_il > NOW() - make_interval(days => %s)
+           ORDER BY m.id DESC LIMIT %s""", (a["id"], a["id"], GIORNI_SCAMBI, MAX_SCAMBI * 3)).fetchall()
+    out = []
+    for r in righe:
+        if not _ok(a, r["fascia_dati"]):
+            continue
+        out.append(f"[{r['creato_il']:%d/%m %H:%M}] {r['da'] or 'Lorenzo'} → {r['a'] or 'Lorenzo'}: " + _taglia(r["testo"], MAX_SCAMBIO))
+        if len(out) >= MAX_SCAMBI:
+            break
+    if not out:
+        return ""
+    return ("I TUOI ULTIMI SCAMBI CON I COLLEGHI (dal piu' recente; sono il tuo ricordo di cosa e' stato chiesto e detto, non ripartire da zero):\n"
+            + "\n".join(out))
+
+
 def storia_chat(conn, a: dict, utente_id: int | None) -> str:
     """Ultimi messaggi tra questo utente e questo agente (solo quelli la cui fascia puo' uscire)."""
     if utente_id is None:

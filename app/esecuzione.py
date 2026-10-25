@@ -157,6 +157,10 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             st = memoria.storia_chat(conn, a_f, utente_id)
             if st:
                 prefisso.append("Conversazione precedente con questo utente (continua da qui, non farti ripetere cio' che ha gia' detto):\n" + st)
+        if not a["vede_tutto"]:   # chi vede tutto li ha gia' nella panoramica
+            sc = memoria.scambi_colleghi(conn, a_f)
+            if sc:
+                prefisso.append(sc)
         al_ctx = memoria.contesto_allineamento(conn, a_f)
         if al_ctx:
             prefisso.append(al_ctx)

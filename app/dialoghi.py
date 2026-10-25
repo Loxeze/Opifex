@@ -132,6 +132,16 @@ def _fai_parlare(conn, parlante_id: int, destinatario_id: int, conv_id: int, ist
                      (parlante_id, json.dumps({"errore": str(e)[:200], "dialogo": True}), utente_id))
         conn.commit()
         raise
+    if not (r.testo or "").strip():  # risposta vuota: un secondo tentativo con piu' spazio, poi un messaggio che dice cosa e' successo
+        try:
+            r2 = chiama_modello(p["fornitore"], p["modello_nome"], sistema, contenuto, MAX_TOKEN_DIALOGO * 2)
+            r = type(r)(r2.testo, r.token_input + r2.token_input, r.token_output + r2.token_output, getattr(r2, "diag", {}))
+        except ErroreFornitore:
+            pass
+        if not (r.testo or "").strip():
+            conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s,'risposta_vuota',%s::jsonb,%s)",
+                         (parlante_id, json.dumps({"dialogo": True, "modello": p["modello_nome"], **(getattr(r, "diag", None) or {})}), utente_id))
+            r = type(r)("(Nessuna risposta dal modello: riprova o controlla l'agente con «Prova agente».)", r.token_input, r.token_output, {})
     costo = round(r.token_input / 1e6 * float(p["c_in"] or 0) + r.token_output / 1e6 * float(p["c_out"] or 0), 4)
     conn.execute("INSERT INTO costi_api (agente_id, modello, token_input, token_output, costo_stimato, tipo) VALUES (%s,%s,%s,%s,%s,'dialogo')",
                  (parlante_id, p["modello_nome"], r.token_input, r.token_output, costo))
