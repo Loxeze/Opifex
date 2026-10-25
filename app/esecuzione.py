@@ -7,7 +7,7 @@ cio' che richiede approvazione finisce nella coda di Lorenzo.
 import json
 
 from .db import connessione
-from .fornitori import ErroreFornitore, chiama_modello
+from .fornitori import ErroreFornitore, Risposta, chiama_modello
 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
 from . import casati, cerimoniere, spesa, consegne, sandbox, revisione, pm
@@ -381,6 +381,19 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             conn.commit()
             raise
 
+        if not (ris.testo or "").strip():
+            # una risposta vuota non deve passare in silenzio: si registra la causa e chi legge la vede
+            diag = dict(getattr(ris, "diag", None) or {})
+            conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s, 'risposta_vuota', %s::jsonb, %s)",
+                         (agente_id, json.dumps({**diag, "modello": a["modello_nome"], "max_token": a["max_token_risposta"],
+                                                 "token_output": ris.token_output}), utente_id))
+            causa = {"max_tokens": "il limite di lunghezza e' stato raggiunto prima di scrivere la risposta",
+                     "limite_passi": "troppi passaggi di strumenti senza arrivare a scrivere",
+                     "refusal": "il modello ha rifiutato di rispondere"}.get(diag.get("stop"), "il modello non ha restituito testo")
+            ris = Risposta("(L'agente non ha scritto nessuna risposta: " + causa + ". Dettagli nel registro delle azioni; "
+                           "puoi provarlo da Impostazioni → scheda dell'agente → «Prova agente».)",
+                           ris.token_input, ris.token_output, diag)
+            memorizza = False
         conn.execute(
             """INSERT INTO registro_uscite
                (agente_id, fornitore_id, modello_id, fascia_dati, anonimizzato, token_input, bloccato)

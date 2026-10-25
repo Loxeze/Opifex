@@ -19,7 +19,7 @@ Regole del dialogo:
 5. Se la questione e' completamente chiarita scrivi alla fine [CHIARITO].
 Rispondi in italiano, in modo completo ma senza giri di parole."""
 
-MAX_TOKEN_DIALOGO = 700
+MAX_TOKEN_DIALOGO = 1500
 
 
 class DialogoBloccato(Exception):
@@ -156,7 +156,7 @@ def _risposta_speciale(conn, dest: dict, da_id: int, conv_id: int, domanda: str,
     from .esecuzione import EsecuzioneBloccata, esegui_agente
     chi = conn.execute("SELECT nome, ruolo FROM agenti WHERE id = %s", (da_id,)).fetchone()
     try:
-        r = esegui_agente(dest["id"], f"Domanda del collega {chi['nome']} ({chi['ruolo']}):\n{domanda}", fascia, utente_id, max_token=1200)
+        r = esegui_agente(dest["id"], f"Domanda del collega {chi['nome']} ({chi['ruolo']}):\n{domanda}", fascia, utente_id, max_token=2500)
     except EsecuzioneBloccata as e:
         raise DialogoBloccato(str(e)) from None
     _salva_messaggio(conn, conv_id, dest["id"], da_id, r["risposta"])

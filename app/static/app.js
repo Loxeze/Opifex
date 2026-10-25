@@ -161,6 +161,21 @@ function carta(a) {
     h("div", { class: "sotto" }, "Questo mese: " + a.token_mese.toLocaleString("it-IT") + " token"));
 }
 
+function sezioneProva(a) {
+  const esito = h("div");
+  const b = h("button", { class: "s", type: "button", onclick: async () => {
+    b.disabled = true; b.textContent = "Provo…"; esito.replaceChildren();
+    try {
+      const r = await api("POST", "/gestione/agenti/" + a.id + "/prova");
+      esito.replaceChildren(r.riuscita
+        ? h("div", {}, avviso("Risponde (" + r.secondi + " s, " + r.token_output + " token in uscita).", "ok"), h("div", { class: "carta", style: "white-space:pre-wrap" }, r.risposta))
+        : avviso(r.errore || (r.risposta + (r.dettagli ? " [" + JSON.stringify(r.dettagli) + "]" : "")), "no"));
+    } catch (e) { esito.replaceChildren(avviso(e.message, "no")); }
+    b.disabled = false; b.textContent = "Prova agente";
+  } }, "Prova agente");
+  return h("div", {}, h("h3", {}, "Prova"), h("p", { class: "aiuto" }, "Manda una domanda semplice e mostra la risposta com'è, con tempi e consumi. Se è vuota, ne spiega la causa."), b, esito);
+}
+
 function modulo(a) {
   const nuovo = a === null;
   const d = a || { nome: "", ruolo: "", divisione_id: null, superiore_id: null, livello: "operativo",
@@ -333,6 +348,7 @@ function modulo(a) {
       h("div", { class: "riga" },
         h("label", {}, "Lunghezza massima risposta (token)", tetto),
         h("label", {}, "Budget mensile (token)", budget)),
+      nuovo ? null : sezioneProva(a),
       h("h3", {}, "Dialoghi con gli altri agenti"),
       h("div", { class: "interruttore" }, dialoga, h("span", {}, "Può fare domande a superiore, subordinati e altri manager mentre lavora")),
       h("div", { class: "interruttore" }, vedeTutto, h("span", {}, "Vede cosa fai e cosa ti dicono gli altri agenti (sintesi recente, nei limiti di riservatezza)")),

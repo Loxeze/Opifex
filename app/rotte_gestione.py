@@ -346,3 +346,28 @@ def assistente_prompt(d: RichiestaAssistente, _: dict = Depends(solo_titolare)):
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     except ErroreFornitore as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
+
+
+@router.post("/agenti/{agente_id}/prova")
+def prova_agente(agente_id: int, _=Depends(solo_titolare)):
+    """Manda all'agente una domanda semplice e mostra la risposta cosi' com'e': serve a capire se risponde e con quali limiti."""
+    import time
+
+    from .cassaforte import CassaforteNonConfigurata
+    from .esecuzione import EsecuzioneBloccata, esegui_agente
+    from .fornitori import ErroreFornitore
+    from .navigatore import ErroreNavigazione
+    with connessione() as conn:
+        a = conn.execute("SELECT id, nome FROM agenti WHERE id = %s", (agente_id,)).fetchone()
+        if not a:
+            raise HTTPException(404, "Agente non trovato")
+    t0 = time.time()
+    try:
+        r = esegui_agente(agente_id, "Prova di funzionamento: presentati in due frasi dicendo che cosa fai e per quali imprese lavori.", "pubblico", None)
+    except (EsecuzioneBloccata, ErroreFornitore, CassaforteNonConfigurata, ErroreNavigazione) as e:
+        return {"riuscita": False, "errore": str(e)[:300], "secondi": round(time.time() - t0, 1)}
+    with connessione() as conn:
+        ultimo = conn.execute("SELECT dettagli FROM registro_azioni WHERE agente_id=%s AND azione='risposta_vuota' ORDER BY id DESC LIMIT 1", (agente_id,)).fetchone()
+    vuota = r["risposta"].startswith("(L'agente non ha scritto nessuna risposta")
+    return {"riuscita": not vuota, "risposta": r["risposta"], "token_input": r["token_input"], "token_output": r["token_output"],
+            "secondi": round(time.time() - t0, 1), "dettagli": (ultimo["dettagli"] if (vuota and ultimo) else None)}

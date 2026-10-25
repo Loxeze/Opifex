@@ -4,7 +4,7 @@ Gli agenti non parlano mai direttamente con un fornitore: passano da qui.
 Le chiavi API stanno nel file .env del server oppure, se inserite dall'app, cifrate nella cassaforte: mai in chiaro e mai su Drive.
 Si usa HTTP diretto (httpx), senza librerie specifiche dei fornitori, cosi' le dipendenze restano poche.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -30,6 +30,7 @@ class Risposta:
     testo: str
     token_input: int
     token_output: int
+    diag: dict = field(default_factory=dict)   # passi, stop_reason, ritentativo: per capire perche' una risposta e' vuota
 
 
 class ErroreFornitore(Exception):
@@ -67,7 +68,7 @@ def _chiama_anthropic(modello: str, istruzioni: str, messaggio: str, max_token: 
         raise ErroreFornitore(f"Anthropic: {r.status_code} {r.text[:200]}")
     d = r.json()
     testo = "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text")
-    return Risposta(testo, d["usage"]["input_tokens"], d["usage"]["output_tokens"])
+    return Risposta(testo, d["usage"]["input_tokens"], d["usage"]["output_tokens"], {"stop": d.get("stop_reason") or ""})
 
 
 def _chiama_compatibile_openai(url: str, chiave: str, nome: str, modello: str, istruzioni: str,
@@ -96,6 +97,7 @@ def _chiama_compatibile_openai(url: str, chiave: str, nome: str, modello: str, i
         d["choices"][0]["message"]["content"] or "",
         d["usage"]["prompt_tokens"],
         d["usage"]["completion_tokens"],
+        {"stop": d["choices"][0].get("finish_reason") or ""},
     )
 
 
