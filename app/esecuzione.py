@@ -10,11 +10,16 @@ from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
-from . import spesa
+from . import casati, cerimoniere, spesa
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
+
+
+def _elenco_biblioteca(a: dict) -> str:
+    with connessione() as c2:
+        return casati.elenco_biblioteca(c2, a)
 
 
 def percorsi_blocco(conn, agente_id: int) -> str:
@@ -31,7 +36,7 @@ def _carica_agente(conn, agente_id: int) -> dict:
         """
         SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.tipo, a.fascia_dati_max, a.attivo,
                a.modello AS modello_richiesto,
-               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.crm_attivo, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
+               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.crm_attivo, a.ruolo_speciale, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
                m.id AS modello_id, m.nome AS modello_nome,
                m.costo_input_per_milione, m.costo_output_per_milione,
                f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
@@ -196,7 +201,8 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             crm_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["crm_attivo"])
             iniz_tool = bool(ok_int and colleghi_ok and a["livello"] in ("manager", "referente")
                              and not conn.execute("SELECT sentinella FROM agenti WHERE id = %s", (agente_id,)).fetchone()["sentinella"])
-            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool:
+            spec_tool = a["ruolo_speciale"] if (ok_int and a["ruolo_speciale"] in ("formatore", "cerimoniere")) else None
+            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -270,6 +276,18 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     extra.append(crm.STRUMENTO)
                     avviso_extra += crm.AVVISO
                     gestori["crm_conta"] = crm.gestore(connessione, agente_id)
+                if spec_tool == "formatore":
+                    extra.extend(casati.STRUMENTI)
+                    avviso_extra += casati.AVVISO + "\n\nBIBLIOTECA ORA: " + _elenco_biblioteca(a_f)
+                    gc = casati.gestore(a_f, agente_id, connessione)
+                    for s_ in casati.STRUMENTI:
+                        gestori[s_["name"]] = gc
+                if spec_tool == "cerimoniere":
+                    extra.extend(cerimoniere.STRUMENTI)
+                    avviso_extra += cerimoniere.AVVISO
+                    gcm = cerimoniere.gestore(agente_id, connessione)
+                    for s_ in cerimoniere.STRUMENTI:
+                        gestori[s_["name"]] = gcm
                 if iniz_tool:
                     extra.append(iniziative.STRUMENTO)
                     avviso_extra += iniziative.AVVISO
@@ -281,12 +299,14 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                 if mem_tool:
                     extra.append(memoria_lavoro.STRUMENTO)
                     avviso_extra += ("\n\nMEMORIA: se durante il lavoro emerge una decisione, un fatto o una preferenza di Lorenzo che servira' in futuro, "
-                                     "proponila con memoria_proponi (una sola informazione, breve, mai password o chiavi): la approva una persona. Non proporre banalita'.")
+                                     "proponila con memoria_proponi (una sola informazione, breve, mai password o chiavi): la approva una persona. Non proporre banalita'. "
+                                     "Le regole, le procedure e le lezioni su come si lavora bene sono il dossier di competenza tuo e del tuo reparto.")
 
                     def _mem(nome, dati, _aid=agente_id):
                         try:
                             with connessione() as c2:
-                                memoria_lavoro.proponi_da_agente(c2, _aid, str(dati.get("testo", "")), str(dati.get("tipo") or "decisione"))
+                                memoria_lavoro.proponi_da_agente(c2, _aid, str(dati.get("testo", "")), str(dati.get("tipo") or "decisione"),
+                                                                 str(dati.get("ambito") or "reparto"), str(dati.get("tema") or "") or None)
                             return "Proposta registrata: la vedra' Lorenzo per approvarla."
                         except memoria_lavoro.MemoriaNonValida as e:
                             return "ERRORE: " + str(e)

@@ -76,7 +76,7 @@ function mostraAccesso(errore) {
 const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["iniziative", "Iniziative"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["percorsi", "Percorsi"], ["social", "Social"], ["email", "Email"], ["crm", "Contatti"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
 const VISTE_COLLABORATORE = [["task", "Task"], ["iniziative", "Iniziative"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Account Google"], ["connessioni", "Connessioni a siti e app"],
-  ["canali", "Canali (Telegram)"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["voce", "Voce"], ["sistema", "Backup e costi"]];
+  ["canali", "Canali (Telegram)"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["cerimoniere", "Cerimoniere"], ["voce", "Voce"], ["sistema", "Backup e costi"]];
 
 function vai(vista, sezione) { if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
@@ -676,7 +676,7 @@ function vistaChatSolo() {
       } else r = await api("POST", "/agenti/" + scelta.value + "/chat", { messaggio: testo.value, fascia_dati: f.value });
       const avvAll = [];
       if (r.allegati_troncati && r.allegati_troncati.length) avvAll.push("File letti solo in parte perché lunghi: " + r.allegati_troncati.join(", "));
-      stato.conversazione.unshift({ agente: agente.nome, domanda: testo.value + (r.allegati_letti ? "\n📎 " + r.allegati_letti.join(", ") : ""), risposta: r.risposta, t: r.token_input + r.token_output,
+      stato.conversazione.unshift({ agente: agente.nome, agenteId: agente.id, domanda: testo.value + (r.allegati_letti ? "\n📎 " + r.allegati_letti.join(", ") : ""), risposta: r.risposta, t: r.token_input + r.token_output,
         usati: r.documenti_usati || [], esclusi: r.documenti_esclusi_per_riservatezza || [], avvisi: (r.avvisi || []).concat(avvAll) });
       testo.value = ""; disegna();
       if (Voce.leggiRisposte || Voce.viva) {
@@ -718,13 +718,13 @@ function vistaChatSolo() {
       vocale ? h("div", { class: "interruttore" }, leggi, h("span", {}, "Leggi ad alta voce le risposte")) : null,
       Voce.supportoDettatura ? h("div", { class: "interruttore" }, viva, h("span", {}, "Vivavoce: parli, il messaggio parte quando smetti, l'agente risponde a voce e riascolta")) : null,
       vocale ? h("label", {}, "Trascrizione della voce", modoVoce) : null,
-      vocale ? h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => Voce.provaMicrofono(t => provaMic.replaceChildren(document.createTextNode(t))) }, "🔧 Prova il microfono")) : null, provaMic,
       vocale ? h("p", { class: "aiuto" }, "Browser: usa il riconoscimento vocale del browser (non funziona su Firefox e Brave). Server: registra e trascrive con OpenAI, richiede la chiave OpenAI e vale per qualsiasi browser. Con il browser: in Chrome l'audio passa dal servizio di Google. Non dettare dati riservati se non vuoi che escano dal tuo computer.") : null),
     stato.conversazione.map(c => h("div", { class: "carta", style: "margin-top:12px" },
       h("div", { class: "sotto" }, "Tu → " + c.agente),
       h("div", { class: "risposta" }, c.domanda),
       h("div", { class: "sotto", style: "margin-top:10px" }, c.agente + " (" + c.t + " token)"),
       h("div", { class: "risposta" }, c.risposta),
+      c.agenteId ? h("div", { class: "azioni" }, pollici(c.agenteId, "chat", null)) : null,
       Voce.supportoLettura ? h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => Voce.leggi(c.risposta) }, "🔊 Ascolta")) : null,
       c.usati.length ? h("div", { class: "sotto", style: "margin-top:8px" }, "Documenti consultati: " + c.usati.join(", ")) : null,
       c.esclusi.length ? avviso("Non consultati per riservatezza: " + c.esclusi.join(", "), "avv") : null,

@@ -1,11 +1,11 @@
 "use strict";
 // Memoria di lavoro: proposte da approvare (nella Chat) e archivio completo (Impostazioni > Memoria di lavoro).
 
-const TIPO_MEM = { decisione: "Decisione", fatto: "Fatto", preferenza: "Preferenza", lezione: "Lezione", sintesi: "Sintesi" };
+const TIPO_MEM = { decisione: "Decisione", fatto: "Fatto", preferenza: "Preferenza", lezione: "Lezione", sintesi: "Sintesi", regola: "Regola", procedura: "Procedura", esempio: "Esempio", errore: "Errore da evitare", studio: "Studio" };
 const FASCIA_MEM = { pubblico: "Pubblico", interno: "Interno", riservato: "Riservato" };
 
 function ambitoMem(v) {
-  return [v.divisione, v.azienda, v.progetto].filter(Boolean).join(" · ") || "Generale";
+  return (v.agente_personale ? ["Personale: " + v.agente_personale] : [v.divisione, v.azienda, v.progetto]).filter(Boolean).join(" · ") || "Generale";
 }
 
 function schedaMemoria(v, ricarica, msg) {
@@ -17,7 +17,8 @@ function schedaMemoria(v, ricarica, msg) {
   const origine = v.proposta_da_agente ? "proposta da " + v.proposta_da_agente : v.proposta_da_utente ? "inserita da " + v.proposta_da_utente : "";
   return h("div", { class: "carta", style: "margin-bottom:8px" },
     h("div", { class: "nome" }, (TIPO_MEM[v.tipo] || v.tipo) + " · " + ambitoMem(v)),
-    h("div", { class: "sotto" }, [new Date(v.creata_il).toLocaleDateString("it-IT"), origine, v.fonte, FASCIA_MEM[v.fascia_dati]].filter(Boolean).join(" · ")),
+    h("div", { class: "sotto" }, [new Date(v.creata_il).toLocaleDateString("it-IT"), origine, v.fonte, FASCIA_MEM[v.fascia_dati], v.tema ? "tema: " + v.tema : "",
+      v.casi ? v.casi + " casi a sostegno" : "", v.verifica_il ? (new Date(v.verifica_il) < new Date() ? "⚠ da riverificare dal " : "verifica entro il ") + new Date(v.verifica_il).toLocaleDateString("it-IT") : ""].filter(Boolean).join(" · ")),
     v.stato === "proposta" && v.puo_approvare ? [testo, h("div", { class: "azioni" },
       h("button", { class: "p", onclick: () => decidi("approva") }, "Approva"), h("button", { class: "s", onclick: () => decidi("scarta") }, "Scarta"))]
       : h("div", { class: "risposta" }, v.testo));
@@ -58,6 +59,9 @@ function vistaMemoria() {
       const d = await api("GET", "/memoria?stato=" + filtro + "&q=" + encodeURIComponent(q.value.trim()));
       riempi(corpo, d.voci.length ? d.voci.map(v => {
         const s = schedaMemoria(v, carica, msg);
+        if (v.puo_approvare && v.stato === "approvata" && v.verifica_il) s.append(h("div", { class: "azioni" },
+          h("button", { class: "s", onclick: async () => { const t = new Date(); t.setDate(t.getDate() + 180);
+            try { await api("PUT", "/memoria/" + v.id, { verifica_il: t.toISOString().slice(0, 10) }); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Riverificata oggi")));
         if (v.puo_approvare && v.stato !== "proposta") s.append(h("div", { class: "azioni" },
           h("button", { class: "s", onclick: async () => { const t = prompt("Correggi il testo", v.testo); if (t === null || !t.trim()) return;
             try { await api("PUT", "/memoria/" + v.id, { testo: t.trim() }); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Modifica"),
@@ -69,6 +73,7 @@ function vistaMemoria() {
         nuova.dataset.pronto = "1";
         const t = h("textarea", { style: "min-height:64px", maxlength: 1200, placeholder: "Es. Per il Castello di Montarrenti non partecipiamo ai bandi sotto i 20.000 euro." });
         const tipo = h("select", {}, d.tipi.filter(x => x !== "sintesi").map(x => h("option", { value: x }, TIPO_MEM[x])));
+        const tema = h("input", { maxlength: 80, placeholder: "Tema (facoltativo), es. bandi regionali" });
         const fa = h("select", {}, Object.entries(FASCIA_MEM).map(([v, n]) => h("option", { value: v }, n))); fa.value = "interno";
         const di = h("select", {}, h("option", { value: "" }, "Generale"), d.opzioni.divisioni.map(x => h("option", { value: x.id }, x.nome)));
         const az = h("select", {}, h("option", { value: "" }, "Tutte le aziende"), d.opzioni.aziende.map(x => h("option", { value: x.id }, x.nome)));
@@ -77,10 +82,10 @@ function vistaMemoria() {
         nuova.append(h("h3", {}, "Aggiungi una voce"),
           h("p", { class: "aiuto" }, "Una sola informazione, breve. Niente password o chiavi. Gli agenti dell'ambito scelto la ritroveranno quando serve."), t,
           h("div", { class: "riga" }, h("label", {}, "Tipo", tipo), h("label", {}, "Dipartimento", di), h("label", {}, "Azienda", az)),
-          h("div", { class: "riga" }, h("label", {}, "Progetto", pr), h("label", {}, "Riservatezza", fa)), m2,
+          h("div", { class: "riga" }, h("label", {}, "Progetto", pr), h("label", {}, "Riservatezza", fa), h("label", {}, "Tema", tema)), m2,
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
             try { await api("POST", "/memoria", { testo: t.value.trim(), tipo: tipo.value, fascia_dati: fa.value, divisione_id: di.value ? Number(di.value) : null,
-              azienda_id: az.value ? Number(az.value) : null, progetto_id: pr.value ? Number(pr.value) : null });
+              azienda_id: az.value ? Number(az.value) : null, progetto_id: pr.value ? Number(pr.value) : null, tema: tema.value.trim() || null });
               t.value = ""; m2.replaceChildren(avviso("Registrata.", "ok")); await carica(); } catch (e) { m2.replaceChildren(avviso(e.message, "no")); } } }, "Registra")));
       }
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
@@ -88,7 +93,7 @@ function vistaMemoria() {
   sel.addEventListener("change", () => { filtro = sel.value; carica(); });
   q.addEventListener("input", () => { clearTimeout(q._t); q._t = setTimeout(carica, 300); });
   carica();
-  return h("div", {}, h("h2", {}, "Memoria di lavoro"),
-    h("p", { class: "aiuto" }, "Quello che gli agenti ricordano: decisioni, fatti, preferenze e lezioni. Le voci nascono come proposte (dalle tue risposte agli agenti, dalle approvazioni dei percorsi, dai suggerimenti degli agenti e dalle sintesi settimanali) e valgono solo dopo l'approvazione. Ogni agente riceve soltanto le voci del suo ambito e solo se la riservatezza lo consente."),
+  return h("div", {}, h("h2", {}, "Memoria di lavoro e dossier"),
+    h("p", { class: "aiuto" }, "Quello che gli agenti ricordano e sanno fare: decisioni, fatti, preferenze, lezioni, regole, procedure, esempi, errori da evitare e studi. Quelle di competenza (regole, procedure, studi, lezioni) hanno una data di verifica: scaduta, l'agente la riceve segnata «da riverificare». Le voci nascono come proposte (dalle tue risposte agli agenti, dalle approvazioni dei percorsi, dai suggerimenti degli agenti e dalle sintesi settimanali) e valgono solo dopo l'approvazione. Ogni agente riceve soltanto le voci del suo ambito e solo se la riservatezza lo consente."),
     h("div", { class: "riga" }, sel, q), msg, corpo, nuova);
 }

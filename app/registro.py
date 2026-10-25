@@ -14,6 +14,8 @@ TIPI = {
     "backup": "Backup",
     "memoria": "Memoria di lavoro",
     "campagna_email": "Campagna email",
+    "biblioteca": "Biblioteca e dispense",
+    "organizzazione": "Ruoli proposti dal Cerimoniere",
 }
 
 

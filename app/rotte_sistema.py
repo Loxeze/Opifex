@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from . import allarmi, backup, cassaforte, registro, spesa
+from . import allarmi, backup, cassaforte, prova_ripristino, registro, spesa
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/gestione/sistema")
 @router.get("")
 def stato(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        return {"backup": backup.stato(conn), "spesa": {"limiti": spesa.limiti(conn), "consumo": spesa.consumo(conn),
+        return {"backup": {**backup.stato(conn), "ripristino": prova_ripristino.stato(conn)}, "spesa": {"limiti": spesa.limiti(conn), "consumo": spesa.consumo(conn),
                                                         "modelli_senza_prezzo": spesa.modelli_senza_prezzo(conn)}}
 
 
@@ -54,6 +54,14 @@ def attiva(d: Attivo, _: dict = Depends(solo_titolare)):
     with connessione() as conn:
         conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('backup_attivo',%s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", ("1" if d.attivo else "0",))
     return {"stato": "ok"}
+
+
+@router.post("/backup/prova-ripristino")
+def prova_del_ripristino(u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        e = prova_ripristino.prova(conn)
+        registro.registra(conn, u, "backup", "prova di ripristino riuscita" if e["ok"] else "prova di ripristino fallita", "Backup", "backup", "prova", e["dettaglio"])
+    return e
 
 
 @router.post("/backup/ora")

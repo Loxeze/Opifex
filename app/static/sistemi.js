@@ -139,6 +139,11 @@ function vistaSistema() {
               try { const r = await api("POST", "/gestione/sistema/backup/chiave" + (rigenera ? "?rigenera=true" : "")); 
                 msg.replaceChildren(avviso("CHIAVE DI BACKUP (si vede una volta sola, conservala in un posto sicuro fuori dal server, per esempio nel tuo gestore di password): " + r.chiave, "avv")); carica(); }
               catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, b.chiave_creata ? "Rigenera la chiave" : "Crea la chiave di backup")),
+          (() => { const r = b.ripristino; const bt = h("button", { class: "s", onclick: async () => { bt.disabled = true; bt.textContent = "Provo il ripristino…";
+            try { const e = await api("POST", "/gestione/sistema/backup/prova-ripristino"); msg.replaceChildren(avviso(e.ok ? "Prova riuscita: " + e.dettaglio : "Prova FALLITA: " + e.dettaglio, e.ok ? "ok" : "no")); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); }
+            bt.disabled = false; bt.textContent = "Prova il ripristino adesso"; carica(); } }, "Prova il ripristino adesso");
+            return h("div", {}, r ? avviso((r.ok ? "Ultima prova di ripristino riuscita: " : "Ultima prova di ripristino FALLITA: ") + new Date(r.quando).toLocaleString("it-IT") + " · " + r.metodo + " · " + r.dettaglio, r.ok ? "ok" : "no")
+              : h("p", { class: "sotto" }, "Il ripristino non è ancora stato provato: Opifex lo prova da solo ogni settimana."), h("div", { class: "azioni" }, bt)); })(),
           b.locali.length ? h("div", { class: "sotto" }, "Sul server (" + b.cartella + "): " + b.locali.slice(0, 5).map(x => x.nome.replace("opifex-backup-", "").replace(".enc", "") + " (" + KB(x.dimensione) + ")").join(" · ")) : null,
           h("p", { class: "aiuto" }, "Ripristino: copia il file .enc sul server e usa  python -m app.ripristina FILE.enc LA_TUA_CHIAVE CARTELLA  dalla cartella /opt/agenti: ottieni database.sql e env.txt. Poi psql con l'indirizzo del database < database.sql, e rimetti il .env.")),
         h("h3", {}, "Tetto di spesa"),

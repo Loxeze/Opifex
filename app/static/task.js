@@ -158,6 +158,7 @@ async function schedaTask(id, padreId, dopo) {
     h("label", {}, "Titolo", titolo), h("label", {}, "Descrizione", desc),
     h("div", { class: "riga" }, h("label", {}, "Stato", sSt), h("label", {}, "Priorità", sPr), h("label", {}, "Scadenza", sc)),
     h("div", { class: "riga" }, h("label", {}, "Assegnata a", ass), h("label", {}, "Progetto", pro), h("label", {}, "Azienda", azi)),
+    !nuova && d.assegnato_agente_id ? h("div", { class: "azioni" }, h("span", { class: "sotto" }, "Il lavoro dell'agente è andato bene? "), pollici(d.assegnato_agente_id, "task", id)) : null,
     h("label", {}, "Manager di supporto", sup, h("span", { class: "aiuto" }, "Legge la task e ti scrive nei commenti come la affronterebbe e come alleggerirti il lavoro.")),
     !nuova && d.supporto_agente_id && !lettura ? h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => {
       try { await api("POST", "/task/" + id + "/consiglio"); msg.replaceChildren(avviso("Richiesto: il consiglio comparirà nei commenti tra qualche istante.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Chiedi un consiglio al manager")) : null,

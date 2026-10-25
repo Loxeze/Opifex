@@ -26,11 +26,11 @@ def _filtro(u: dict) -> tuple[str, list]:
     return "m.divisione_id = ANY(%s)", [list(v)]
 
 
-CAMPI = """m.id, m.testo, m.tipo, m.stato, m.fascia_dati, m.azienda_id, m.progetto_id, m.divisione_id, m.fonte, m.sostituisce_id, m.creata_il, m.decisa_il,
-           z.nome AS azienda, p.nome AS progetto, d.nome AS divisione, ag.nome AS proposta_da_agente, pu.nome AS proposta_da_utente, du.nome AS decisa_da"""
+CAMPI = """m.id, m.testo, m.tipo, m.stato, m.fascia_dati, m.azienda_id, m.progetto_id, m.divisione_id, m.fonte, m.sostituisce_id, m.creata_il, m.decisa_il, m.agente_id, m.tema, m.casi, m.verifica_il, m.origine,
+           z.nome AS azienda, p.nome AS progetto, d.nome AS divisione, ap.nome AS agente_personale, ag.nome AS proposta_da_agente, pu.nome AS proposta_da_utente, du.nome AS decisa_da"""
 DA = """FROM memorie_lavoro m LEFT JOIN aziende z ON z.id = m.azienda_id LEFT JOIN progetti p ON p.id = m.progetto_id
         LEFT JOIN divisioni d ON d.id = m.divisione_id LEFT JOIN agenti ag ON ag.id = m.proposta_da_agente_id
-        LEFT JOIN utenti pu ON pu.id = m.proposta_da_utente_id LEFT JOIN utenti du ON du.id = m.decisa_da_utente_id"""
+        LEFT JOIN agenti ap ON ap.id = m.agente_id LEFT JOIN utenti pu ON pu.id = m.proposta_da_utente_id LEFT JOIN utenti du ON du.id = m.decisa_da_utente_id"""
 
 
 @router.get("")
@@ -61,6 +61,9 @@ class Nuova(BaseModel):
     progetto_id: int | None = None
     divisione_id: int | None = None
     sostituisce_id: int | None = None
+    tema: str | None = Field(default=None, max_length=80)
+    agente_id: int | None = None      # voce personale: vale solo per questo agente
+    casi: int = Field(default=0, ge=0, le=1000)
 
 
 @router.post("", status_code=201)
@@ -72,7 +75,8 @@ def crea(d: Nuova, u: dict = Depends(utente_corrente)):
         try:
             mid = memoria_lavoro.proponi(conn, d.testo, d.tipo, azienda_id=d.azienda_id, progetto_id=d.progetto_id, divisione_id=d.divisione_id,
                                          fascia_dati=d.fascia_dati, fonte="inserita da " + u["nome"], utente_id=u["id"], stato="approvata",
-                                         decisa_da=u["id"], sostituisce_id=d.sostituisce_id)
+                                         decisa_da=u["id"], sostituisce_id=d.sostituisce_id, ambito_agente_id=d.agente_id, tema=d.tema,
+                                         origine="inserita da una persona", casi=d.casi)
         except memoria_lavoro.MemoriaNonValida as e:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
         registro.registra(conn, u, "memoria", "voce registrata", d.testo[:200], "memoria", mid)
@@ -102,8 +106,10 @@ def decidi(mid: int, d: Decisione, u: dict = Depends(utente_corrente)):
             except memoria_lavoro.MemoriaNonValida as e:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
         nuovo = "approvata" if d.azione == "approva" else "scartata"
-        conn.execute("UPDATE memorie_lavoro SET stato = %s, testo = %s, decisa_da_utente_id = %s, decisa_il = NOW() WHERE id = %s AND stato = 'proposta'",
-                     (nuovo, testo, u["id"], mid))
+        conn.execute("""UPDATE memorie_lavoro SET stato = %s, testo = %s, decisa_da_utente_id = %s, decisa_il = NOW(),
+                        verifica_il = CASE WHEN %s = 'approvata' AND verifica_il IS NULL AND tipo = ANY(%s) THEN CURRENT_DATE + %s ELSE verifica_il END
+                        WHERE id = %s AND stato = 'proposta'""",
+                     (nuovo, testo, u["id"], nuovo, list(memoria_lavoro.TIPI_CON_VERIFICA), memoria_lavoro.GIORNI_VERIFICA, mid))
         if nuovo == "approvata" and m["sostituisce_id"]:
             conn.execute("UPDATE memorie_lavoro SET stato = 'superata' WHERE id = %s AND stato = 'approvata'", (m["sostituisce_id"],))
         registro.registra(conn, u, "memoria", "voce approvata" if nuovo == "approvata" else "voce scartata", testo[:200], "memoria", mid,
@@ -115,6 +121,9 @@ class Modifica(BaseModel):
     testo: str | None = Field(default=None, min_length=3, max_length=1200)
     tipo: str | None = None
     fascia_dati: str | None = None
+    tema: str | None = Field(default=None, max_length=80)
+    casi: int | None = Field(default=None, ge=0, le=1000)
+    verifica_il: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")   # «riverificata oggi»: la data della prossima verifica
 
 
 @router.put("/{mid}")
@@ -134,8 +143,10 @@ def modifica(mid: int, d: Modifica, u: dict = Depends(utente_corrente)):
             testo = memoria_lavoro.pulisci(d.testo) if d.testo is not None else m["testo"]
         except memoria_lavoro.MemoriaNonValida as e:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
-        conn.execute("UPDATE memorie_lavoro SET testo = %s, tipo = %s, fascia_dati = %s WHERE id = %s",
-                     (testo, d.tipo or m["tipo"], d.fascia_dati or m["fascia_dati"], mid))
+        conn.execute("""UPDATE memorie_lavoro SET testo = %s, tipo = %s, fascia_dati = %s, tema = %s, casi = %s,
+                        verifica_il = %s::date WHERE id = %s""",
+                     (testo, d.tipo or m["tipo"], d.fascia_dati or m["fascia_dati"], (d.tema if d.tema is not None else m["tema"]) or None,
+                      d.casi if d.casi is not None else m["casi"], d.verifica_il or m["verifica_il"], mid))
         registro.registra(conn, u, "memoria", "voce modificata", testo[:200], "memoria", mid)
     return {"stato": "ok"}
 

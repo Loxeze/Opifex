@@ -37,6 +37,9 @@ from .rotte_brevo import router as router_brevo
 from . import etichetta
 from .rotte_plaud import router as router_plaud
 from .rotte_iniziative import router as router_iniziative
+from .rotte_biblioteca import router as router_biblioteca
+from .rotte_cerimoniere import router as router_cerimoniere
+from .rotte_dossier import router as router_dossier
 from .rotte_crm import router as router_crm
 from .rotte_voce_el import router as router_voce_el
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
@@ -76,7 +79,7 @@ async def _canale_telegram():
 async def _manutenzione():
     """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Gli errori non fermano il servizio."""
     import asyncio
-    from . import allarmi, backup, plaud, sintesi_memoria
+    from . import allarmi, backup, plaud, prova_ripristino, sintesi_memoria
 
     def giro():
         with connessione() as conn:
@@ -86,6 +89,8 @@ async def _manutenzione():
             if sintesi_memoria.da_fare(conn):
                 sintesi_memoria.genera(conn)
             plaud.controlla(conn)
+            if prova_ripristino.da_fare(conn):
+                prova_ripristino.prova(conn)
     await asyncio.sleep(90)
     while True:
         try:
@@ -153,6 +158,9 @@ app.include_router(router_memoria)
 app.include_router(router_brevo)
 app.include_router(router_plaud)
 app.include_router(router_iniziative)
+app.include_router(router_biblioteca)
+app.include_router(router_cerimoniere)
+app.include_router(router_dossier)
 app.include_router(router_crm)
 app.include_router(router_voce_el)
 

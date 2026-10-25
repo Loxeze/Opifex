@@ -51,12 +51,13 @@ def colleghi(conn, agente_id: int) -> list[dict]:
         """WITH RECURSIVE sotto AS (
                SELECT id FROM agenti WHERE superiore_id = %(id)s
                UNION SELECT x.id FROM agenti x JOIN sotto s ON x.superiore_id = s.id)
-           SELECT a.id, a.nome, a.ruolo, a.rimanda_a, d.nome AS divisione,
+           SELECT a.id, a.nome, a.ruolo, a.rimanda_a, a.ruolo_speciale, d.nome AS divisione,
                   (SELECT string_agg(z.nome, ', ' ORDER BY z.nome) FROM agenti_aziende x JOIN aziende z ON z.id = x.azienda_id WHERE x.agente_id = a.id) AS aziende
            FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
            WHERE a.attivo AND a.id <> %(id)s AND (
                  a.id = %(sup)s
               OR a.superiore_id = %(id)s
+              OR a.ruolo_speciale IS NOT NULL
               OR (%(gest)s AND (a.id IN (SELECT id FROM sotto) OR a.livello IN ('manager', 'referente')))
               OR %(vigila)s)
            ORDER BY a.id""",
@@ -150,6 +151,18 @@ def _controlli_generali(conn, conv_id: int | None):
             raise DialogoBloccato("Questa conversazione ha raggiunto il numero massimo di messaggi")
 
 
+def _risposta_speciale(conn, dest: dict, da_id: int, conv_id: int, domanda: str, fascia: str, utente_id) -> str:
+    """Padre Casati e il Cerimoniere rispondono con i loro strumenti (biblioteca, mappa): passano dall'esecuzione completa."""
+    from .esecuzione import EsecuzioneBloccata, esegui_agente
+    chi = conn.execute("SELECT nome, ruolo FROM agenti WHERE id = %s", (da_id,)).fetchone()
+    try:
+        r = esegui_agente(dest["id"], f"Domanda del collega {chi['nome']} ({chi['ruolo']}):\n{domanda}", fascia, utente_id, max_token=1200)
+    except EsecuzioneBloccata as e:
+        raise DialogoBloccato(str(e)) from None
+    _salva_messaggio(conn, conv_id, dest["id"], da_id, r["risposta"])
+    return r["risposta"]
+
+
 def domanda_a_collega(da_id: int, nome_dest: str, domanda: str, conv_id: int | None, fascia: str,
                       utente_id: int | None) -> tuple[str, int]:
     """Un agente fa una domanda a un collega durante il suo lavoro. Restituisce (risposta, id conversazione)."""
@@ -168,6 +181,8 @@ def domanda_a_collega(da_id: int, nome_dest: str, domanda: str, conv_id: int | N
                 raise DialogoBloccato("Conversazione inesistente")
         _salva_messaggio(conn, conv_id, da_id, dest["id"], domanda)
         conn.commit()
+        if dest.get("ruolo_speciale"):
+            return _risposta_speciale(conn, dest, da_id, conv_id, domanda, fascia, utente_id), conv_id
         risposta = _fai_parlare(conn, dest["id"], da_id, conv_id,
                                 "Rispondi al messaggio precedente. Se non e' chiaro, chiedi chiarimenti precisi.", fascia, utente_id)
     return risposta, conv_id
