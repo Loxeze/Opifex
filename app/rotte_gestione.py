@@ -348,26 +348,62 @@ def assistente_prompt(d: RichiestaAssistente, _: dict = Depends(solo_titolare)):
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
 
 
-@router.post("/agenti/{agente_id}/prova")
-def prova_agente(agente_id: int, _=Depends(solo_titolare)):
-    """Manda all'agente una domanda semplice e mostra la risposta cosi' com'e': serve a capire se risponde e con quali limiti."""
+def _prova_una(agente_id: int) -> dict:
     import time
 
     from .cassaforte import CassaforteNonConfigurata
     from .esecuzione import EsecuzioneBloccata, esegui_agente
     from .fornitori import ErroreFornitore
     from .navigatore import ErroreNavigazione
-    with connessione() as conn:
-        a = conn.execute("SELECT id, nome FROM agenti WHERE id = %s", (agente_id,)).fetchone()
-        if not a:
-            raise HTTPException(404, "Agente non trovato")
     t0 = time.time()
     try:
         r = esegui_agente(agente_id, "Prova di funzionamento: presentati in due frasi dicendo che cosa fai e per quali imprese lavori.", "pubblico", None)
     except (EsecuzioneBloccata, ErroreFornitore, CassaforteNonConfigurata, ErroreNavigazione) as e:
         return {"riuscita": False, "errore": str(e)[:300], "secondi": round(time.time() - t0, 1)}
+    except Exception as e:  # noqa: BLE001 - la prova deve sempre dare un esito, mai un errore generico
+        return {"riuscita": False, "errore": f"Errore imprevisto ({type(e).__name__})", "secondi": round(time.time() - t0, 1)}
     with connessione() as conn:
         ultimo = conn.execute("SELECT dettagli FROM registro_azioni WHERE agente_id=%s AND azione='risposta_vuota' ORDER BY id DESC LIMIT 1", (agente_id,)).fetchone()
     vuota = r["risposta"].startswith("(L'agente non ha scritto nessuna risposta")
     return {"riuscita": not vuota, "risposta": r["risposta"], "token_input": r["token_input"], "token_output": r["token_output"],
             "secondi": round(time.time() - t0, 1), "dettagli": (ultimo["dettagli"] if (vuota and ultimo) else None)}
+
+
+@router.post("/agenti/{agente_id}/prova")
+def prova_agente(agente_id: int, _=Depends(solo_titolare)):
+    """Manda all'agente una domanda semplice e mostra la risposta cosi' com'e': serve a capire se risponde e con quali limiti."""
+    with connessione() as conn:
+        if not conn.execute("SELECT 1 FROM agenti WHERE id = %s", (agente_id,)).fetchone():
+            raise HTTPException(404, "Agente non trovato")
+    return _prova_una(agente_id)
+
+
+@router.post("/salute-agenti")
+def salute_agenti(_=Depends(solo_titolare)):
+    """Prova tutti gli agenti accesi, quattro alla volta, con una domanda breve. Costa qualche migliaio di token in tutto."""
+    from concurrent.futures import ThreadPoolExecutor
+    with connessione() as conn:
+        ag = conn.execute("""SELECT a.id, a.nome, a.ruolo, a.attivo, a.modello, d.nome AS divisione FROM agenti a
+                             LEFT JOIN divisioni d ON d.id = a.divisione_id ORDER BY d.nome NULLS FIRST, a.nome""").fetchall()
+    accesi = [a for a in ag if a["attivo"]]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        esiti = dict(zip([a["id"] for a in accesi], pool.map(lambda a: _prova_una(a["id"]), accesi)))
+    righe = []
+    for a in ag:
+        e = esiti.get(a["id"])
+        if e is None:
+            stato = "spento"
+        elif e["riuscita"]:
+            stato = "ok"
+        elif e.get("dettagli") is not None or not e.get("errore"):
+            stato = "vuota"
+        elif "sospeso" in e["errore"].lower() or "budget" in e["errore"].lower() or "tetto" in e["errore"].lower() or "riservatezza" in e["errore"].lower() or "garanzie" in e["errore"].lower():
+            stato = "bloccato"
+        else:
+            stato = "errore"
+        righe.append({"id": a["id"], "nome": a["nome"], "ruolo": a["ruolo"], "divisione": a["divisione"], "modello": a["modello"], "stato": stato,
+                      "secondi": e["secondi"] if e else None, "token": (e.get("token_input", 0) + e.get("token_output", 0)) if e else 0,
+                      "anteprima": (e.get("risposta") or "")[:140] if e else "", "errore": (e.get("errore") if e else None),
+                      "dettagli": (e.get("dettagli") if e else None)})
+    conteggio = {k: sum(1 for r in righe if r["stato"] == k) for k in ("ok", "vuota", "errore", "bloccato", "spento")}
+    return {"agenti": righe, "conteggio": conteggio}
