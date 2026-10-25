@@ -85,6 +85,26 @@ def canali(conn) -> list[dict]:
     return _gql(conn, "query { channels(input: { organizationId: %s }) { id name service } }" % _s(org)).get("channels") or []
 
 
+def canali_per_agente(conn, agente_id: int) -> list[dict]:
+    """Canali che l'agente puo' usare: quelli senza assegnazioni (liberi) e quelli assegnati alle sue aziende o ai suoi progetti.
+    Un agente che «vede tutto» li ha tutti."""
+    tutti = canali(conn)
+    a = conn.execute("SELECT vede_tutto FROM agenti WHERE id = %s", (agente_id,)).fetchone()
+    if a and a["vede_tutto"]:
+        return tutti
+    ass = {}
+    for r in conn.execute("SELECT canale_id, azienda_id, progetto_id FROM canali_social_assegnazioni").fetchall():
+        ass.setdefault(r["canale_id"], []).append(r)
+    mie_az = {r["azienda_id"] for r in conn.execute("SELECT azienda_id FROM agenti_aziende WHERE agente_id = %s", (agente_id,)).fetchall()}
+    miei_pr = {r["progetto_id"] for r in conn.execute("SELECT progetto_id FROM progetti_agenti WHERE agente_id = %s", (agente_id,)).fetchall()}
+    out = []
+    for c in tutti:
+        righe = ass.get(c["id"])
+        if not righe or any(r["azienda_id"] in mie_az or r["progetto_id"] in miei_pr for r in righe if (r["azienda_id"] or r["progetto_id"])):
+            out.append(c)
+    return out
+
+
 _URL_MEDIA = re.compile(r"^https://[^\s\"'<>]+$")
 
 
@@ -144,16 +164,16 @@ def gestore(conn, agente_id: int):
     def _g(nome: str, d: dict) -> str:
         try:
             if nome == "social_elenca_canali":
-                c = canali(conn)
+                c = canali_per_agente(conn, agente_id)
                 return "\n".join(f"{x['id']} | {x['name']} | {x['service']}" for x in c) or "Nessun canale collegato a Buffer"
             if nome == "social_prepara_post":
                 testo = str(d.get("testo", "")).strip()
                 if not testo or len(testo) > 5000:
                     return "ERRORE: testo mancante o troppo lungo"
                 cid = str(d.get("canale_id", ""))
-                ch = next((x for x in canali(conn) if x["id"] == cid), None)
+                ch = next((x for x in canali_per_agente(conn, agente_id) if x["id"] == cid), None)
                 if ch is None:
-                    return "ERRORE: canale non trovato: usa social_elenca_canali"
+                    return "ERRORE: canale non trovato o non assegnato a te: usa social_elenca_canali"
                 quando = None
                 if d.get("quando"):
                     try:

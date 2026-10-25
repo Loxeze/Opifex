@@ -18,12 +18,35 @@ function vistaSocial() {
   return [h("h2", {}, "Social"), corpo];
 }
 
+function boxCanali(ricarica) {
+  const box = h("div"); const msg = h("div");
+  (async () => {
+    try {
+      const d = await api("GET", "/gestione/social/canali");
+      riempi(box, [h("h4", {}, "A chi serve ogni canale"),
+        h("p", { class: "aiuto" }, "Assegna ogni canale alle aziende e ai progetti che lo usano: gli agenti vedono e usano solo i canali del loro ambito. Un canale senza assegnazioni resta libero per tutti gli agenti social."),
+        d.canali.map(c => {
+          const az = d.aziende.map(a => { const x = h("input", { type: "checkbox" }); x.checked = c.aziende.includes(a.id); return [a, x]; });
+          const pr = d.progetti.map(a => { const x = h("input", { type: "checkbox" }); x.checked = c.progetti.includes(a.id); return [a, x]; });
+          const m2 = h("div");
+          return h("div", { class: "carta", style: "margin-bottom:8px" }, h("div", { class: "nome" }, c.name + " · " + c.service),
+            h("div", { class: "sotto" }, "Aziende"), h("div", { class: "spunte" }, az.map(([a, x]) => h("label", { class: "spunta" }, x, a.nome))),
+            h("div", { class: "sotto" }, "Progetti"), h("div", { class: "spunte" }, pr.map(([a, x]) => h("label", { class: "spunta" }, x, a.nome))), m2,
+            h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => {
+              try { await api("PUT", "/gestione/social/canali/" + encodeURIComponent(c.id), { aziende: az.filter(([, x]) => x.checked).map(([a]) => a.id), progetti: pr.filter(([, x]) => x.checked).map(([a]) => a.id) });
+                m2.replaceChildren(avviso("Salvato", "ok")); } catch (e) { m2.replaceChildren(avviso(e.message, "no")); } } }, "Salva")));
+        }), msg]);
+    } catch (e) { box.replaceChildren(avviso(e.message, "no")); }
+  })();
+  return box;
+}
+
 function schedaBuffer(bf, ricarica) {
   const msg = h("div");
   if (bf.collegato) {
     return h("div", { class: "carta" }, h("div", { class: "nome" }, "Buffer collegato"),
       bf.errore ? avviso(bf.errore, "no") : null,
-      bf.canali.length ? h("div", {}, bf.canali.map(c => h("span", { class: "etichetta" }, c.name + " · " + c.service)))
+      bf.canali.length ? boxCanali(ricarica)
         : h("p", { class: "aiuto" }, "Nessun canale: collegali dentro Buffer (Instagram, Facebook, LinkedIn, TikTok…)."),
       h("p", { class: "aiuto" }, "Per far preparare post a un agente, accendi «Può preparare post per i social» nella sua scheda. I post restano qui in attesa del tuo OK."),
       msg, h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => {
@@ -32,7 +55,7 @@ function schedaBuffer(bf, ricarica) {
   }
   const chiave = h("input", { type: "password", autocomplete: "off", placeholder: "Chiave API di Buffer" });
   return h("div", { class: "carta" }, h("div", { class: "nome" }, "Collega Buffer"),
-    h("p", { class: "aiuto" }, "In Buffer: Impostazioni → API → crea una chiave (la crea il proprietario dell'organizzazione). Incollala qui: viene cifrata e non verrà più mostrata. Gli agenti non pubblicano mai da soli."),
+    h("p", { class: "aiuto" }, "Non basta il login a Buffer: serve una chiave API. In Buffer clicca l'icona del profilo in basso a sinistra → «API» (oppure vai su publish.buffer.com/settings/api) → scheda «Personal Access» → «+ New Key» (la crea il proprietario dell'organizzazione). Incollala qui sotto: viene cifrata e non verrà più mostrata. Gli agenti non pubblicano mai da soli."),
     h("label", {}, "Chiave API", chiave), msg,
     h("div", { class: "azioni" }, h("button", { class: "p", onclick: async (ev) => {
       const b = ev.currentTarget; b.disabled = true; msg.replaceChildren();

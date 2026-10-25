@@ -73,7 +73,7 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["percorsi", "Percorsi"], ["social", "Social"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["percorsi", "Percorsi"], ["social", "Social"], ["email", "Email"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
 const VISTE_COLLABORATORE = [["task", "Task"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Account Google"], ["connessioni", "Connessioni a siti e app"],
   ["canali", "Canali (Telegram)"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["sistema", "Backup e costi"]];
@@ -123,7 +123,7 @@ function disegna() {
   if (stato.timer) { clearInterval(stato.timer); stato.timer = null; }
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: vistaProgetti, agenti: vistaAgenti, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
 
@@ -199,6 +199,7 @@ function modulo(a) {
     (stato.opzioni.account_gmail || []).map(g => h("option", { value: g.id }, g.etichetta + " — " + g.email)));
   gmailSel.value = d.gmail_account_id || "";
   const socialAttivo = h("input", { type: "checkbox" }); socialAttivo.checked = !!d.social_attivo;
+  const emailAttivo = h("input", { type: "checkbox" }); emailAttivo.checked = !!d.email_attivo;
   const driveAttivo = h("input", { type: "checkbox" }); driveAttivo.checked = !!d.drive_attivo;
   const conn = stato.connessioni.map(c => {
     const cb = h("input", { type: "checkbox", value: c.id }); cb.checked = d.connessioni.includes(c.id);
@@ -246,7 +247,7 @@ function modulo(a) {
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,
       fasi: fasi.filter(f => f.titolo.trim()).map(f => ({ ...f, titolo: f.titolo.trim() })),
-      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null,
+      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, email_attivo: emailAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null,
       connessioni: conn.filter(([, cb]) => cb.checked).map(([c]) => c.id),
     };
     try {
@@ -332,6 +333,7 @@ function modulo(a) {
       h("div", { class: "interruttore" }, vedeTutto, h("span", {}, "Vede cosa fai e cosa ti dicono gli altri agenti (sintesi recente, nei limiti di riservatezza)")),
       h("label", {}, "Casella di posta che gestisce (legge e prepara bozze, non invia)", gmailSel),
       h("div", { class: "interruttore" }, socialAttivo, h("span", {}, "Può preparare post per i social via Buffer (non pubblica: li approvi tu dalla pagina Social)")),
+      h("div", { class: "interruttore" }, emailAttivo, h("span", {}, "Può preparare campagne email via Brevo (non invia: le approvi tu dalla pagina Email)")),
       h("div", { class: "interruttore" }, driveAttivo, h("span", {}, "Può creare e modificare fogli e documenti Google nella cartella Opifex (non può cancellare)")),
       h("label", {}, "Modello per i dialoghi", h("p", { class: "aiuto" }, "Per parlare con i colleghi basta un modello semplice ed economico: il modello di lavoro sopra resta per pensare e svolgere i compiti."), modDialogo),
       h("h3", {}, "Accesso al web"),

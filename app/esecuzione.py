@@ -9,7 +9,7 @@ import json
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
 from . import spesa
-from . import memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
+from . import brevo as brevo_email, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
@@ -29,7 +29,7 @@ def _carica_agente(conn, agente_id: int) -> dict:
         """
         SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.tipo, a.fascia_dati_max, a.attivo,
                a.modello AS modello_richiesto,
-               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
+               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
                m.id AS modello_id, m.nome AS modello_nome,
                m.costo_input_per_milione, m.costo_output_per_milione,
                f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
@@ -187,7 +187,8 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             posta_tool = bool(posta_c)
             social_tool = bool(a["fornitore"] == "anthropic" and a["social_attivo"] and buffer_social.collegato(conn))
             mem_tool = bool(ok_int)   # lo strumento di memoria si aggiunge agli agenti che usano comunque degli strumenti
-            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool:
+            email_tool = bool(a["fornitore"] == "anthropic" and a["email_attivo"] and brevo_email.collegato(conn))
+            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -237,6 +238,12 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     gs = buffer_social.gestore(conn, agente_id)
                     for s_ in buffer_social.STRUMENTI:
                         gestori[s_["name"]] = gs
+                if email_tool:
+                    extra.extend(brevo_email.STRUMENTI)
+                    avviso_extra += brevo_email.AVVISO
+                    ge = brevo_email.gestore(conn, agente_id)
+                    for s_ in brevo_email.STRUMENTI:
+                        gestori[s_["name"]] = ge
                 if gmail_tool:
                     extra.extend(strumenti_gmail.STRUMENTI)
                     avviso_extra += strumenti_gmail.AVVISO

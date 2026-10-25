@@ -59,6 +59,52 @@ def scollega(utente: dict = Depends(solo_titolare)):
     return {"collegato": False}
 
 
+@router.get("/canali")
+def canali_assegnati(_: dict = Depends(solo_titolare)):
+    """Canali di Buffer con le aziende e i progetti a cui sono assegnati (nessuna assegnazione = libero per tutti gli agenti social)."""
+    with connessione() as conn:
+        try:
+            elenco_c = buffer.canali(conn)
+        except buffer.ErroreBuffer as e:
+            raise _err(e)
+        ass = conn.execute("SELECT canale_id, azienda_id, progetto_id FROM canali_social_assegnazioni").fetchall()
+        for c in elenco_c:
+            c["aziende"] = [a["azienda_id"] for a in ass if a["canale_id"] == c["id"] and a["azienda_id"]]
+            c["progetti"] = [a["progetto_id"] for a in ass if a["canale_id"] == c["id"] and a["progetto_id"]]
+        return {"canali": elenco_c,
+                "aziende": conn.execute("SELECT id, nome FROM aziende WHERE attiva ORDER BY nome").fetchall(),
+                "progetti": conn.execute("SELECT id, nome FROM progetti WHERE NOT archiviato ORDER BY nome").fetchall()}
+
+
+class Assegnazione(BaseModel):
+    aziende: list[int] = []
+    progetti: list[int] = []
+
+
+@router.put("/canali/{canale_id}")
+def assegna_canale(canale_id: str, d: Assegnazione, utente: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            ch = next((x for x in buffer.canali(conn) if x["id"] == canale_id), None)
+        except buffer.ErroreBuffer as e:
+            raise _err(e)
+        if ch is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Canale inesistente su Buffer")
+        az, pr = sorted(set(d.aziende)), sorted(set(d.progetti))
+        if az and conn.execute("SELECT count(*) AS n FROM aziende WHERE id = ANY(%s)", (az,)).fetchone()["n"] != len(az):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Azienda inesistente")
+        if pr and conn.execute("SELECT count(*) AS n FROM progetti WHERE id = ANY(%s)", (pr,)).fetchone()["n"] != len(pr):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Progetto inesistente")
+        conn.execute("DELETE FROM canali_social_assegnazioni WHERE canale_id = %s", (canale_id,))
+        for i in az:
+            conn.execute("INSERT INTO canali_social_assegnazioni (canale_id, azienda_id) VALUES (%s,%s)", (canale_id, i))
+        for i in pr:
+            conn.execute("INSERT INTO canali_social_assegnazioni (canale_id, progetto_id) VALUES (%s,%s)", (canale_id, i))
+        registro.registra(conn, utente, "collegamento", "canale social assegnato", f"{ch['name']} ({ch['service']})", "canale_social", canale_id,
+                          dettagli={"aziende": az, "progetti": pr})
+    return {"stato": "ok"}
+
+
 @router.get("/post")
 def elenco(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
