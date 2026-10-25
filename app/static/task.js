@@ -94,7 +94,7 @@ async function schedaTask(id, padreId, dopo) {
   try { o = await opzioniTask(); if (id) t = await api("GET", "/task/" + id); } catch (e) { alert(e.message); return; }
   const nuova = !t;
   const d = t || { titolo: "", descrizione: "", stato: "da_fare", priorita: "normale", scadenza: null, progetto_id: null, azienda_id: null,
-    assegnato_utente_id: o.io, assegnato_agente_id: null, sotto: [], commenti_elenco: [], documenti: [], puo_modificare: true };
+    assegnato_utente_id: o.io, assegnato_agente_id: null, supporto_agente_id: null, sotto: [], commenti_elenco: [], documenti: [], puo_modificare: true };
   const lettura = !d.puo_modificare;
   const titolo = h("input", { type: "text", maxlength: 200, value: d.titolo, placeholder: "Cosa c'è da fare?" }); titolo.disabled = lettura;
   const desc = h("textarea", { style: "min-height:110px", maxlength: 5000 }); desc.value = d.descrizione || ""; desc.disabled = lettura;
@@ -108,7 +108,11 @@ async function schedaTask(id, padreId, dopo) {
   const pro = h("select", {}, h("option", { value: "" }, "Nessuno"), o.progetti.map(p => h("option", { value: p.id }, p.nome))); pro.value = d.progetto_id ?? ""; pro.disabled = lettura;
   const azi = h("select", {}, h("option", { value: "" }, "Nessuna"), o.aziende.map(p => h("option", { value: p.id }, p.nome))); azi.value = d.azienda_id ?? ""; azi.disabled = lettura;
   const msg = h("div");
-  const docCb = stato.ruolo === "titolare" ? (stato.documenti || []).map(x => { const cb = h("input", { type: "checkbox", value: x.id }); cb.checked = (d.documenti || []).some(z => z.id === x.id); return [x, cb]; }) : [];
+  const sup = h("select", {}, h("option", { value: "" }, "Nessuno"), (o.manager || []).map(m => h("option", { value: m.id }, m.nome + (m.dipartimento ? " — " + m.dipartimento : "") + " — " + m.ruolo)));
+  sup.value = d.supporto_agente_id ?? ""; sup.disabled = lettura;
+  const nuoviFile = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.txt,.md,.csv" });
+  const boxDoc = h("div");
+  const disegnaDoc = () => riempi(boxDoc, (d.documenti || []).length ? d.documenti.map(x => h("div", { class: "sotto" }, "📎 " + x.nome)) : h("p", { class: "sotto" }, "Nessun documento associato."));
   let chiudi;
   const aggiorna = async () => { if (dopo) await dopo(); };
 
@@ -119,12 +123,13 @@ async function schedaTask(id, padreId, dopo) {
       titolo: titolo.value.trim(), descrizione: desc.value.trim() || null, stato: sSt.value, priorita: sPr.value, scadenza: sc.value || null,
       progetto_id: pro.value ? Number(pro.value) : null, azienda_id: azi.value ? Number(azi.value) : null,
       assegnato_utente_id: ass.value.startsWith("u") ? Number(ass.value.slice(1)) : null,
-      assegnato_agente_id: ass.value.startsWith("a") ? Number(ass.value.slice(1)) : null };
+      assegnato_agente_id: ass.value.startsWith("a") ? Number(ass.value.slice(1)) : null,
+      supporto_agente_id: sup.value ? Number(sup.value) : null };
     try {
       let tid = id;
       if (nuova) tid = (await api("POST", "/task", { ...corpo, padre_id: padreId })).id;
       else await api("PUT", "/task/" + id, corpo);
-      if (docCb.length && (!nuova || docCb.some(([, cb]) => cb.checked))) await api("PUT", "/task/" + tid + "/documenti", { documenti: docCb.filter(([, cb]) => cb.checked).map(([x]) => x.id) });
+      if (nuoviFile.files.length) { const fd = new FormData(); for (const x of nuoviFile.files) fd.append("file", x); await api("POST", "/task/" + tid + "/documenti/carica", fd); }
       chiudi(); await aggiorna();
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
@@ -145,6 +150,7 @@ async function schedaTask(id, padreId, dopo) {
     (() => { const i = h("textarea", { style: "min-height:56px", maxlength: 3000, placeholder: "Scrivi un commento…" });
       return h("div", {}, i, h("button", { class: "s", onclick: async () => { if (!i.value.trim()) return;
         try { await api("POST", "/task/" + id + "/commenti", { testo: i.value.trim() }); d.commenti_elenco = (await api("GET", "/task/" + id)).commenti_elenco; disegnaCom(); await aggiorna(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Commenta")); })()]);
+  disegnaDoc();
   if (!nuova) { disegnaSotto(); disegnaCom(); }
 
   chiudi = apriPannello(nuova ? (padreId ? "Nuova sottotask" : "Nuova task") : "Task", [
@@ -152,7 +158,11 @@ async function schedaTask(id, padreId, dopo) {
     h("label", {}, "Titolo", titolo), h("label", {}, "Descrizione", desc),
     h("div", { class: "riga" }, h("label", {}, "Stato", sSt), h("label", {}, "Priorità", sPr), h("label", {}, "Scadenza", sc)),
     h("div", { class: "riga" }, h("label", {}, "Assegnata a", ass), h("label", {}, "Progetto", pro), h("label", {}, "Azienda", azi)),
-    docCb.length ? h("div", {}, h("h3", {}, "Allegati dal repository"), h("div", { class: "spunte" }, docCb.map(([x, cb]) => h("label", { class: "spunta" }, cb, x.nome)))) : null,
+    h("label", {}, "Manager di supporto", sup, h("span", { class: "aiuto" }, "Legge la task e ti scrive nei commenti come la affronterebbe e come alleggerirti il lavoro.")),
+    !nuova && d.supporto_agente_id && !lettura ? h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => {
+      try { await api("POST", "/task/" + id + "/consiglio"); msg.replaceChildren(avviso("Richiesto: il consiglio comparirà nei commenti tra qualche istante.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Chiedi un consiglio al manager")) : null,
+    h("h3", {}, "Documenti"), boxDoc,
+    lettura ? null : h("label", {}, "Carica uno o più documenti per questa task (PDF, Word, TXT, MD, CSV)", nuoviFile),
     !nuova ? [h("h3", {}, "Sottotask (" + d.sotto.length + ")"), boxSotto, h("h3", {}, "Commenti"), boxCom] : null,
     msg,
     h("div", { class: "azioni" },

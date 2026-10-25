@@ -98,3 +98,6 @@
 
 ## Da fare (suggerimenti di Lorenzo, non urgenti)
 - Etichette agenti nelle tendine (chat, assegnazioni, ecc.): mostrare "Nome — Dipartimento — Azienda/e — ruolo", non solo "Nome — ruolo". Es. "Scout — Bandi — cerca nuovi bandi", "Sofia — Marketing — Castello di Montarrenti — social media". Un'unica funzione condivisa per tutte le tendine.
+
+## 1.10.4 (fatto)
+- Task: tolti gli allegati dal repository; caricamento di nuovi documenti (anche multipli) associati alla task; manager di supporto che legge la task e scrive un consiglio nei commenti (automatico alla scelta + pulsante "Chiedi un consiglio").

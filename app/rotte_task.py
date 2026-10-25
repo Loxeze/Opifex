@@ -3,11 +3,12 @@ e quelle assegnate agli agenti delle sue divisioni. Le sentinelle non ricevono t
 import json
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 
-from . import registro
+from . import consigli_task, registro
 from .db import connessione
+from .documenti import ESTENSIONI, MAX_BYTE, FileNonLeggibile, dividi_in_pezzi, estrai_testo
 from .permessi import divisioni_visibili, utente_corrente
 
 router = APIRouter(prefix="/task")
@@ -80,6 +81,13 @@ def _controlla(conn, d: dict, u: dict):
         ass = _agenti_assegnabili(conn, u)
         if ass is not None and a["id"] not in ass:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Non puoi assegnare task a questo agente")
+    if d.get("supporto_agente_id"):
+        m = conn.execute(f"SELECT a.id, a.attivo, a.livello, {SENTINELLA} AS sentinella FROM agenti a WHERE a.id = %s", (d["supporto_agente_id"],)).fetchone()
+        if m is None or not m["attivo"] or m["sentinella"] or m["livello"] not in ("manager", "referente"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Il supporto puo' essere dato solo da un manager (o referente) attivo")
+        miei = _agenti_miei(conn, u)
+        if miei is not None and m["id"] not in miei:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Non puoi chiedere supporto a questo manager")
     if d.get("progetto_id") and conn.execute("SELECT 1 FROM progetti WHERE id = %s", (d["progetto_id"],)).fetchone() is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Progetto inesistente")
     if d.get("azienda_id") and conn.execute("SELECT 1 FROM aziende WHERE id = %s", (d["azienda_id"],)).fetchone() is None:
@@ -102,6 +110,7 @@ class NuovaTask(BaseModel):
     azienda_id: int | None = None
     assegnato_utente_id: int | None = None
     assegnato_agente_id: int | None = None
+    supporto_agente_id: int | None = None
 
 
 class ModificaTask(BaseModel):
@@ -114,6 +123,7 @@ class ModificaTask(BaseModel):
     azienda_id: int | None = None
     assegnato_utente_id: int | None = None
     assegnato_agente_id: int | None = None
+    supporto_agente_id: int | None = None
 
 
 def _valida_enum(d: dict):
@@ -125,7 +135,7 @@ def _valida_enum(d: dict):
 
 ELENCO = """
 SELECT t.id, t.titolo, t.stato, t.priorita, t.scadenza, t.padre_id, t.progetto_id, t.azienda_id,
-       t.assegnato_utente_id, t.assegnato_agente_id, t.creata_il, t.completata_il,
+       t.assegnato_utente_id, t.assegnato_agente_id, t.supporto_agente_id, t.creata_il, t.completata_il,
        p.titolo AS padre_titolo, pr.nome AS progetto, u.nome AS utente, a.nome AS agente,
        (SELECT count(*) FROM task s WHERE s.padre_id = t.id) AS sottotask,
        (SELECT count(*) FROM task s WHERE s.padre_id = t.id AND s.stato = 'completata') AS sottotask_fatte,
@@ -174,6 +184,10 @@ def opzioni(u: dict = Depends(utente_corrente)):
         return {"utenti": conn.execute("SELECT id, nome FROM utenti WHERE attivo ORDER BY nome").fetchall(), "agenti": agenti,
                 "progetti": conn.execute("SELECT id, nome FROM progetti WHERE NOT archiviato ORDER BY nome").fetchall(),
                 "aziende": conn.execute("SELECT id, nome FROM aziende WHERE attiva ORDER BY nome").fetchall(),
+                "manager": conn.execute(
+                    f"""SELECT a.id, a.nome, a.ruolo, d.nome AS dipartimento FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
+                        WHERE a.attivo AND NOT {SENTINELLA} AND a.livello IN ('manager','referente') AND a.id = ANY(%s) ORDER BY d.nome, a.nome""",
+                    ([r["id"] for r in conn.execute("SELECT id FROM agenti").fetchall()] if _agenti_miei(conn, u) is None else _agenti_miei(conn, u) or [0],)).fetchall(),
                 "io": u["id"]}
 
 
@@ -193,11 +207,13 @@ def crea(d: NuovaTask, u: dict = Depends(utente_corrente)):
         _controlla(conn, dati, u)
         r = conn.execute(
             """INSERT INTO task (titolo, descrizione, stato, priorita, scadenza, padre_id, progetto_id, azienda_id,
-                   assegnato_utente_id, assegnato_agente_id, creato_da_utente_id, completata_il)
+                   assegnato_utente_id, assegnato_agente_id, supporto_agente_id, creato_da_utente_id, completata_il)
                VALUES (%(titolo)s,%(descrizione)s,%(stato)s,%(priorita)s,%(scadenza)s,%(padre_id)s,%(progetto_id)s,%(azienda_id)s,
-                   %(assegnato_utente_id)s,%(assegnato_agente_id)s,%(me)s, CASE WHEN %(stato)s = 'completata' THEN NOW() END) RETURNING id""",
+                   %(assegnato_utente_id)s,%(assegnato_agente_id)s,%(supporto_agente_id)s,%(me)s, CASE WHEN %(stato)s = 'completata' THEN NOW() END) RETURNING id""",
             {**dati, "me": u["id"]}).fetchone()
         _log(conn, "task_creata", u, {"task_id": r["id"], "titolo": dati["titolo"][:80]})
+    if dati.get("supporto_agente_id"):
+        consigli_task.richiedi(r["id"], u["id"])
     return {"id": r["id"]}
 
 
@@ -214,6 +230,7 @@ def dettaglio(tid: int, u: dict = Depends(utente_corrente)):
             (tid,)).fetchall()
         t["documenti"] = conn.execute(
             "SELECT d.id, d.nome FROM task_documenti x JOIN documenti d ON d.id = x.documento_id WHERE x.task_id = %s ORDER BY d.nome", (tid,)).fetchall()
+        t["supporto"] = (conn.execute("SELECT nome FROM agenti WHERE id = %s", (t["supporto_agente_id"],)).fetchone() or {}).get("nome") if t.get("supporto_agente_id") else None
         t["puo_modificare"] = _puo_modificare(conn, conn.execute("SELECT * FROM task WHERE id = %s", (tid,)).fetchone(), u)
     t["scaduta"] = bool(t["scadenza"] and t["scadenza"] < date.today() and t["stato"] != "completata")
     return t
@@ -238,7 +255,8 @@ def modifica(tid: int, d: ModificaTask, u: dict = Depends(utente_corrente)):
             campi["assegnato_utente_id"] = None
         nuovi = {k: v for k, v in campi.items() if k in ("assegnato_utente_id", "assegnato_agente_id") and v}
         _controlla(conn, nuovi, u)
-        _controlla(conn, {k: campi.get(k) for k in ("progetto_id", "azienda_id") if campi.get(k)}, u)
+        _controlla(conn, {k: campi.get(k) for k in ("progetto_id", "azienda_id", "supporto_agente_id") if campi.get(k)}, u)
+        nuovo_supporto = bool(campi.get("supporto_agente_id")) and campi["supporto_agente_id"] != t["supporto_agente_id"]
         if campi.get("stato") == "completata" and t["stato"] != "completata":
             campi["completata_il"] = "adesso"
         elif campi.get("stato") and campi["stato"] != "completata":
@@ -252,6 +270,8 @@ def modifica(tid: int, d: ModificaTask, u: dict = Depends(utente_corrente)):
             registro.registra(conn, u, "task", f"stato: {t['stato']} → {campi['stato']}", t["titolo"], "task", tid)
         if nuovi and any(campi.get(k) != t.get(k) for k in ("assegnato_utente_id", "assegnato_agente_id")):
             registro.registra(conn, u, "task", "riassegnata", t["titolo"], "task", tid, dettagli=nuovi)
+    if nuovo_supporto:
+        consigli_task.richiedi(tid, u["id"])
     return {"stato": "ok"}
 
 
@@ -293,7 +313,52 @@ def allegati(tid: int, d: Allegati, u: dict = Depends(utente_corrente)):
         ids = sorted(set(d.documenti))
         if ids and conn.execute("SELECT count(*) AS n FROM documenti WHERE id = ANY(%s)", (ids,)).fetchone()["n"] != len(ids):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Documento inesistente")
-        conn.execute("DELETE FROM task_documenti WHERE task_id = %s", (tid,))
+        conn.execute("DELETE FROM task_documenti WHERE task_id = %s AND NOT caricato_qui", (tid,))
         for i in ids:
             conn.execute("INSERT INTO task_documenti (task_id, documento_id) VALUES (%s,%s)", (tid, i))
     return {"stato": "ok"}
+
+
+@router.post("/{tid}/consiglio")
+def chiedi_consiglio(tid: int, u: dict = Depends(utente_corrente)):
+    """Chiede (di nuovo) il consiglio al manager di supporto: arriva come commento nella task."""
+    with connessione() as conn:
+        t = _carica(conn, tid, u)
+        if not _puo_modificare(conn, t, u):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Non puoi modificare questa task")
+        if not t["supporto_agente_id"]:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Scegli prima il manager di supporto")
+    consigli_task.richiedi(tid, u["id"])
+    return {"stato": "richiesto"}
+
+
+@router.post("/{tid}/documenti/carica", status_code=201)
+def carica_documenti(tid: int, file: list[UploadFile] = File(...), u: dict = Depends(utente_corrente)):
+    """Carica uno o piu' documenti nuovi e li associa alla task (anche il manager di supporto li legge)."""
+    if not file or len(file) > 10:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Carica da 1 a 10 file")
+    with connessione() as conn:
+        t = _carica(conn, tid, u)
+        if not _puo_modificare(conn, t, u):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Non puoi modificare questa task")
+        creati = []
+        for f in file:
+            nome = (f.filename or "documento").strip()[:200]
+            if not nome.lower().endswith(ESTENSIONI):
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"«{nome}»: formato non supportato (PDF, Word, TXT, MD, CSV)")
+            dati = f.file.read(MAX_BYTE + 1)
+            if len(dati) > MAX_BYTE:
+                raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"«{nome}» e' troppo grande (massimo 15 MB)")
+            try:
+                testo = estrai_testo(nome, dati)
+            except FileNonLeggibile as e:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"«{nome}»: {e}")
+            r = conn.execute("INSERT INTO documenti (nome, nome_file, fascia_dati, per_tutti, caratteri, caricato_da) VALUES (%s,%s,'interno',FALSE,%s,%s) RETURNING id",
+                             (nome, nome, len(testo), u["id"])).fetchone()
+            for i, p in enumerate(dividi_in_pezzi(testo)):
+                conn.execute("INSERT INTO pezzi_documenti (documento_id, ordine, testo) VALUES (%s,%s,%s)", (r["id"], i, p))
+            conn.execute("INSERT INTO task_documenti (task_id, documento_id, caricato_qui) VALUES (%s,%s,TRUE)", (tid, r["id"]))
+            creati.append({"id": r["id"], "nome": nome})
+        conn.execute("UPDATE task SET aggiornata_il = NOW() WHERE id = %s", (tid,))
+        _log(conn, "task_documento_caricato", u, {"task_id": tid, "file": [c["nome"] for c in creati]})
+    return {"documenti": creati}
