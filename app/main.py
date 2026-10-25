@@ -41,6 +41,7 @@ from .rotte_biblioteca import router as router_biblioteca
 from .rotte_cerimoniere import router as router_cerimoniere
 from .rotte_studi import router as router_studi
 from .rotte_trigger import router as router_quando
+from .rotte_reparti import router as router_reparti
 from .rotte_dossier import router as router_dossier
 from .rotte_crm import router as router_crm
 from .rotte_voce_el import router as router_voce_el
@@ -183,6 +184,7 @@ app.include_router(router_biblioteca)
 app.include_router(router_cerimoniere)
 app.include_router(router_studi)
 app.include_router(router_quando)
+app.include_router(router_reparti)
 app.include_router(router_dossier)
 app.include_router(router_crm)
 app.include_router(router_voce_el)
