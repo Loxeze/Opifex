@@ -42,17 +42,18 @@ function formLista(d, ricarica) {
 
 function cartaLista(l, ricarica) {
   const msg = h("div");
-  const file = h("input", { type: "file", accept: ".csv,text/csv" });
+  const file = h("input", { type: "file", accept: ".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   return h("div", { class: "carta" }, h("div", { class: "nome" }, l.nome), h("span", { class: "etichetta " + (l.natura === "personale" ? "avv" : "ok") }, l.natura === "personale" ? "Dati di persone" : "Dati pubblici"),
     h("div", { class: "sotto" }, l.contatti.toLocaleString("it-IT") + " contatti" + (l.azienda ? " · " + l.azienda : "") + (l.fonte ? " · " + l.fonte : "") + (l.base_giuridica ? " · base: " + l.base_giuridica : "")),
-    h("p", { class: "aiuto" }, "File CSV con la prima riga di intestazioni. Riconosco: nome, ente, email, telefono, tipo (es. comune), regione, provincia, abitanti, settore, relazione, ultimo contatto, consenso, note."),
+    h("p", { class: "aiuto" }, "File Excel (.xlsx) o CSV con una riga di intestazioni (anche non la prima). Riconosco: nome, ente, email, telefono, tipo (es. comune), regione, provincia, abitanti, settore, relazione, ultimo contatto, consenso, note."),
     file, msg, h("div", { class: "azioni" },
       h("button", { class: "p", onclick: async (ev) => {
-        if (!file.files.length) { msg.replaceChildren(avviso("Scegli un file CSV.", "avv")); return; }
+        if (!file.files.length) { msg.replaceChildren(avviso("Scegli un file Excel o CSV.", "avv")); return; }
         const b = ev.currentTarget; b.disabled = true; msg.replaceChildren(avviso("Importazione in corso…", "avv"));
         try { const fd = new FormData(); fd.append("file", file.files[0]); const r = await api("POST", "/gestione/crm/liste/" + l.id + "/importa", fd);
-          msg.replaceChildren(avviso(r.importati + " importati, " + r.doppioni + " doppioni, " + r.righe_vuote + " righe vuote.", "ok")); setTimeout(ricarica, 1200); }
-        catch (e) { msg.replaceChildren(avviso(e.message, "no")); b.disabled = false; } } }, "Importa CSV"),
+          msg.replaceChildren(avviso(r.importati + " importati, " + r.doppioni + " doppioni, " + r.righe_vuote + " righe vuote (" + r.origine + ").", "ok"),
+            r.colonne_ignorate && r.colonne_ignorate.length ? avviso("Colonne non riconosciute (ignorate): " + r.colonne_ignorate.join(", "), "avv") : null); setTimeout(ricarica, 1200); }
+        catch (e) { msg.replaceChildren(avviso(e.message, "no")); b.disabled = false; } } }, "Importa file"),
       h("button", { class: "s", onclick: async () => { if (!confirm("Eliminare la lista e tutti i suoi contatti?")) return; try { await api("DELETE", "/gestione/crm/liste/" + l.id); ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Elimina lista")));
 }
 

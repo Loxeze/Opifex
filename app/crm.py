@@ -81,34 +81,166 @@ def _data(v: str | None):
     return None
 
 
-def importa_csv(conn, lista_id: int, contenuto: bytes) -> dict:
-    """Importa un CSV (virgola o punto e virgola, UTF-8 o Latin-1). Colonne riconosciute per nome (vedi SINONIMI)."""
+def _righe_csv(contenuto: bytes):
     try:
         testo = contenuto.decode("utf-8-sig")
     except UnicodeDecodeError:
         testo = contenuto.decode("latin-1")
     campione = testo[:4000]
     sep = ";" if campione.count(";") > campione.count(",") else ("\t" if campione.count("\t") > campione.count(",") else ",")
-    lettore = csv.reader(io.StringIO(testo), delimiter=sep)
+    return "CSV", csv.reader(io.StringIO(testo), delimiter=sep)
+
+
+# ---- lettura di file Excel (.xlsx) senza librerie esterne: un .xlsx e' uno zip di XML
+_NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+_REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+_FORMATI_DATA = {14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47}
+MAX_XML = 150 * 1024 * 1024     # dimensione massima di un foglio una volta decompresso (contro i file-bomba)
+
+
+def _xml(z, nome: str):
+    import xml.etree.ElementTree as ET
+    info = z.getinfo(nome)
+    if info.file_size > MAX_XML:
+        raise ErroreCrm("Il foglio Excel e' troppo grande: salvalo in CSV o dividilo in piu' file")
+    dati = z.read(nome)
+    if b"<!DOCTYPE" in dati[:2000] or b"<!ENTITY" in dati[:5000]:
+        raise ErroreCrm("File Excel non valido")
+    return ET.fromstring(dati)
+
+
+def _colonna(rif: str) -> int:
+    n = 0
+    for ch in re.match(r"[A-Z]+", rif).group(0):
+        n = n * 26 + ord(ch) - 64
+    return n - 1
+
+
+def _serial_a_data(v: float) -> str:
+    from datetime import timedelta
+    return (date(1899, 12, 30) + timedelta(days=int(v))).isoformat()
+
+
+def _righe_xlsx(contenuto: bytes):
+    import zipfile
     try:
-        intestazioni = [h.strip().lower() for h in next(lettore)]
-    except StopIteration:
-        raise ErroreCrm("File vuoto") from None
+        z = zipfile.ZipFile(io.BytesIO(contenuto))
+    except zipfile.BadZipFile:
+        raise ErroreCrm("Il file non sembra un Excel (.xlsx) valido") from None
+    nomi = set(z.namelist())
+    if "xl/workbook.xml" not in nomi:
+        raise ErroreCrm("Il file non sembra un Excel (.xlsx) valido")
+    try:
+        condivise = []
+        if "xl/sharedStrings.xml" in nomi:
+            for si in _xml(z, "xl/sharedStrings.xml").findall("m:si", _NS):
+                condivise.append("".join(t.text or "" for t in si.iter("{%s}t" % _NS["m"])))
+        # formati di cella che rappresentano date
+        stile_data = []
+        if "xl/styles.xml" in nomi:
+            st = _xml(z, "xl/styles.xml")
+            personal = {}
+            for nf in st.findall("m:numFmts/m:numFmt", _NS):
+                f = re.sub(r'"[^"]*"|\[[^\]]*\]', "", nf.get("formatCode", "")).lower()
+                personal[int(nf.get("numFmtId"))] = bool(re.search(r"[dmy]", f)) and not re.search(r"[#0?]", f)
+            for xf in st.findall("m:cellXfs/m:xf", _NS):
+                i = int(xf.get("numFmtId", 0))
+                stile_data.append(i in _FORMATI_DATA or personal.get(i, False))
+        rel = {}
+        if "xl/_rels/workbook.xml.rels" in nomi:
+            for r in _xml(z, "xl/_rels/workbook.xml.rels"):
+                rel[r.get("Id")] = r.get("Target")
+        fogli = []
+        for sh in _xml(z, "xl/workbook.xml").findall("m:sheets/m:sheet", _NS):
+            t = rel.get(sh.get(_REL), "")
+            t = t.lstrip("/")
+            fogli.append((sh.get("name"), t if t.startswith("xl/") else "xl/" + t))
+    except (KeyError, ValueError, AttributeError):
+        raise ErroreCrm("Il file Excel e' danneggiato o in un formato che non riconosco: salvalo di nuovo come .xlsx o CSV") from None
+
+    def righe_foglio(percorso):
+        radice = _xml(z, percorso)
+        for r in radice.iter("{%s}row" % _NS["m"]):
+            celle = {}
+            for c in r.findall("m:c", _NS):
+                try:
+                    col = _colonna(c.get("r", "A1"))
+                except AttributeError:
+                    continue
+                tipo, v = c.get("t"), c.find("m:v", _NS)
+                if tipo == "s" and v is not None:
+                    val = condivise[int(v.text)] if int(v.text) < len(condivise) else ""
+                elif tipo == "inlineStr":
+                    val = "".join(t.text or "" for t in c.iter("{%s}t" % _NS["m"]))
+                elif tipo == "b":
+                    val = "si" if (v is not None and v.text == "1") else "no"
+                elif v is None or v.text is None:
+                    val = ""
+                elif tipo in ("str", "e"):
+                    val = v.text
+                else:
+                    try:
+                        num = float(v.text)
+                    except ValueError:
+                        val = v.text
+                    else:
+                        idx = int(c.get("s", 0) or 0)
+                        if idx < len(stile_data) and stile_data[idx]:
+                            val = _serial_a_data(num)
+                        else:
+                            val = str(int(num)) if num == int(num) else repr(num)
+                celle[col] = val
+            if celle:
+                yield [celle.get(i, "") for i in range(max(celle) + 1)]
+            else:
+                yield []
+    return fogli, righe_foglio
+
+
+def _scegli_intestazioni(righe, massimo: int = 15):
+    """La riga di intestazioni non e' sempre la prima (titoli, righe vuote): si cerca tra le prime quella con piu' colonne riconosciute."""
+    buffer = []
+    migliore = (0, None)
+    for n, riga in enumerate(righe):
+        buffer.append(riga)
+        if n < massimo:
+            nomi = [str(x).strip().lower() for x in riga]
+            punti = sum(1 for k, sin in SINONIMI.items() if any(h in sin for h in nomi))
+            if punti > migliore[0]:
+                migliore = (punti, n)
+        if n >= massimo:
+            break
+    return migliore, buffer
+
+
+def _importa_righe(conn, lista_id: int, righe, origine: str) -> dict:
+    righe = iter(righe)
+    (punti, pos), buffer = _scegli_intestazioni(righe)
+    if pos is None or punti == 0:
+        prima = next((r for r in buffer if any(str(x).strip() for x in r)), [])
+        raise ErroreCrm("Non riconosco le colonne: servono nella riga delle intestazioni almeno «nome», «ente» o «email». "
+                        "Intestazioni trovate: " + (", ".join(str(x).strip() for x in prima if str(x).strip())[:300] or "nessuna"))
+    intestazioni = [str(x).strip().lower() for x in buffer[pos]]
     col = {}
     for chiave, nomi in SINONIMI.items():
         for i, h in enumerate(intestazioni):
             if h in nomi and chiave not in col:
                 col[chiave] = i
     if not col.get("email") and not col.get("ente") and not col.get("nome"):
-        raise ErroreCrm("Non riconosco le colonne: servono almeno una tra «nome», «ente» ed «email» nella prima riga")
+        raise ErroreCrm("Non riconosco le colonne: servono almeno una tra «nome», «ente» ed «email». Intestazioni trovate: "
+                        + ", ".join(h for h in intestazioni if h)[:300])
+    usate = {i for i in col.values()}
+    ignorate = [h for i, h in enumerate(intestazioni) if h and i not in usate]
     lista = conn.execute("SELECT natura FROM crm_liste WHERE id = %s", (lista_id,)).fetchone()
     if lista is None:
         raise ErroreCrm("Lista inesistente")
+    import itertools
+    dati = itertools.chain(buffer[pos + 1:], righe)
     importati = doppioni = vuoti = 0
-    for n, riga in enumerate(lettore):
+    for n, riga in enumerate(dati):
         if n >= MAX_RIGHE:
             raise ErroreCrm(f"File troppo grande: al massimo {MAX_RIGHE} righe per importazione")
-        g = lambda k: (riga[col[k]].strip() if k in col and col[k] < len(riga) else "")
+        g = lambda k: (str(riga[col[k]]).strip() if k in col and col[k] < len(riga) and riga[col[k]] is not None else "")
         if not any(g(k) for k in ("email", "ente", "nome")):
             vuoti += 1
             continue
@@ -127,7 +259,35 @@ def importa_csv(conn, lista_id: int, contenuto: bytes) -> dict:
              _data(g("ultimo_contatto")), _vero(g("consenso")),
              _c(g("nome")), _c(g("ente")), _c(email), _c(g("telefono")), _c(g("note")), eh))
         importati += 1
-    return {"importati": importati, "doppioni": doppioni, "righe_vuote": vuoti}
+    return {"importati": importati, "doppioni": doppioni, "righe_vuote": vuoti, "origine": origine,
+            "colonne_riconosciute": sorted(col), "colonne_ignorate": ignorate[:30]}
+
+
+def importa_file(conn, lista_id: int, contenuto: bytes, nome: str = "") -> dict:
+    """Importa un file di contatti: CSV (virgola, punto e virgola o tabulazione; UTF-8 o Latin-1) oppure Excel .xlsx.
+    Con piu' fogli usa il primo che contiene intestazioni riconoscibili. Colonne riconosciute per nome (vedi SINONIMI)."""
+    if contenuto[:4] == b"\xd0\xcf\x11\xe0":
+        raise ErroreCrm("Questo e' un Excel vecchio (.xls): aprilo con Excel e salvalo come «Cartella di lavoro di Excel (.xlsx)» oppure come CSV, poi riprova")
+    if contenuto[:2] == b"PK":
+        fogli, leggi = _righe_xlsx(contenuto)
+        if not fogli:
+            raise ErroreCrm("Il file Excel non contiene fogli")
+        ultimo = None
+        for nome_foglio, percorso in fogli:
+            try:
+                return _importa_righe(conn, lista_id, leggi(percorso), "Excel, foglio «" + (nome_foglio or "") + "»")
+            except ErroreCrm as e:
+                ultimo = e
+                if "Non riconosco le colonne" not in str(e):
+                    raise
+        raise ultimo
+    origine, righe = _righe_csv(contenuto)
+    return _importa_righe(conn, lista_id, righe, origine)
+
+
+def importa_csv(conn, lista_id: int, contenuto: bytes) -> dict:
+    """Compatibilita': l'importazione riconosce da sola se il file e' CSV o Excel."""
+    return importa_file(conn, lista_id, contenuto)
 
 
 def _dove(filtri: dict) -> tuple[str, list]:

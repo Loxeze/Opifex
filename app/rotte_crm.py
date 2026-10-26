@@ -1,4 +1,4 @@
-"""Contatti (CRM): liste, importazione da CSV, riepilogo aggregato e ricerca. Solo titolare. Gli agenti non passano da qui: usano solo i conteggi."""
+"""Contatti (CRM): liste, importazione da CSV o Excel, riepilogo aggregato e ricerca. Solo titolare. Gli agenti non passano da qui: usano solo i conteggi."""
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
@@ -45,7 +45,7 @@ def importa(lid: int, file: UploadFile = File(...), u: dict = Depends(solo_titol
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File troppo grande (massimo 25 MB)")
     with connessione() as conn:
         try:
-            esito = crm.importa_csv(conn, lid, dati)
+            esito = crm.importa_file(conn, lid, dati, file.filename or "")
         except crm.ErroreCrm as e:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
         except cassaforte.CassaforteNonConfigurata as e:
