@@ -127,3 +127,66 @@ def verifica(_: dict = Depends(solo_titolare)):
         except Exception as e:  # noqa: BLE001
             r.update(ok=False, ms=int((time.time() - t0) * 1000), dettaglio=_esito_errore(str(e)))
     return risultati
+
+
+# ---------- Catalogo modelli (1.24.3) ----------
+from . import catalogo_modelli  # noqa: E402
+
+
+@router.post("/modelli/importa")
+def importa_modelli(u: dict = Depends(solo_titolare)):
+    """Importa l'elenco completo dei modelli dai fornitori con chiave attiva (senza prezzi: vanno inseriti)."""
+    with connessione() as conn:
+        esito = catalogo_modelli.importa(conn)
+        registro.registra(conn, u, "modelli", "importati", "Catalogo modelli", dettagli={k: v.get("nuovi", 0) for k, v in esito.items()})
+        return esito
+
+
+@router.get("/modelli/elenco")
+def elenco_modelli(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        modelli = conn.execute(
+            """SELECT m.nome, f.nome AS fornitore, m.fascia, m.costo_input_per_milione, m.costo_output_per_milione, m.usa_per_dialoghi, m.importato
+               FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id ORDER BY f.nome, m.nome""").fetchall()
+        return {"modelli": [{**m, "costo_input_per_milione": float(m["costo_input_per_milione"]) if m["costo_input_per_milione"] is not None else None,
+                             "costo_output_per_milione": float(m["costo_output_per_milione"]) if m["costo_output_per_milione"] is not None else None} for m in modelli],
+                "automatico": catalogo_modelli.automatico(conn), "piano": catalogo_modelli.piano(conn)}
+
+
+class ImpostazioniModello(BaseModel):
+    usa_per_dialoghi: bool | None = None
+    fascia: str | None = Field(default=None, pattern="^(economico|standard|avanzato)$")
+
+
+@router.put("/modelli/{nome:path}/impostazioni")
+def impostazioni_modello(nome: str, d: ImpostazioniModello, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        if conn.execute("SELECT 1 FROM modelli_ai WHERE nome = %s", (nome,)).fetchone() is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Modello inesistente")
+        if d.usa_per_dialoghi is not None:
+            conn.execute("UPDATE modelli_ai SET usa_per_dialoghi = %s WHERE nome = %s", (d.usa_per_dialoghi, nome))
+        if d.fascia:
+            conn.execute("UPDATE modelli_ai SET fascia = %s WHERE nome = %s", (d.fascia, nome))
+    return {"stato": "ok"}
+
+
+class Automatico(BaseModel):
+    attivo: bool
+
+
+@router.put("/dialoghi-modello-automatico")
+def imposta_automatico(d: Automatico, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('dialoghi_modello_automatico', %s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore",
+                     ("true" if d.attivo else "false",))
+    return {"automatico": d.attivo}
+
+
+@router.post("/dialoghi-modello-economico")
+def assegna_economico(u: dict = Depends(solo_titolare)):
+    """Toglie le scelte manuali: ogni agente usa il modello piu' economico adatto (automatico acceso)."""
+    with connessione() as conn:
+        n = conn.execute("UPDATE agenti SET modello_dialogo = NULL WHERE modello_dialogo IS NOT NULL").rowcount
+        conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('dialoghi_modello_automatico', 'true') ON CONFLICT (chiave) DO UPDATE SET valore = 'true'")
+        registro.registra(conn, u, "modelli", "dialoghi al modello piu' economico", "Tutti gli agenti", dettagli={"agenti": n})
+        return {"agenti_aggiornati": n, "piano": catalogo_modelli.piano(conn)}

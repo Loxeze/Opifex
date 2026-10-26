@@ -129,9 +129,10 @@ def invia_notifiche(conn) -> int:
         conn.execute("UPDATE notifiche SET push_il = NOW() WHERE push_il IS NULL AND creata_il < NOW() - interval '1 day'")
         return 0
     n = 0
-    for x in conn.execute("SELECT id, testo, urgente FROM notifiche WHERE push_il IS NULL AND creata_il > NOW() - interval '1 day' ORDER BY id LIMIT 10").fetchall():
+    from . import silenzio
+    for x in silenzio.da_spedire(conn, "push_il", 10):
         a_tutti(conn, "Opifex · urgente" if x["urgente"] else "Opifex", x["testo"], tit["id"])
-        conn.execute("UPDATE notifiche SET push_il = NOW() WHERE id = %s", (x["id"],))
+        conn.execute("UPDATE notifiche SET push_il = NOW() WHERE id = ANY(%s)", (x["ids"],))
         conn.commit()
         n += 1
     return n

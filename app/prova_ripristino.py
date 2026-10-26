@@ -104,7 +104,7 @@ def prova(conn) -> dict:
     if esito["ok"]:
         _scrivi(conn, "ripristino_ultimo_ok", esito["quando"])
     else:
-        conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, TRUE)", ("ALLARME: la prova di ripristino del backup e' FALLITA: " + esito["dettaglio"],))
+        conn.execute("INSERT INTO notifiche (testo, urgente, critica) VALUES (%s, TRUE, TRUE)", ("ALLARME: la prova di ripristino del backup e' FALLITA: " + esito["dettaglio"],))
     return esito
 
 

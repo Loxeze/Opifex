@@ -63,7 +63,12 @@ def stima(conn, giorni: int = 14) -> dict:
     per_modello = conn.execute(
         """SELECT modello, COALESCE(SUM(costo_stimato),0) AS costo, COALESCE(SUM(COALESCE(token_input,0)+COALESCE(token_output,0)),0) AS token
            FROM costi_api WHERE creato_il >= NOW() - make_interval(days => %s) GROUP BY modello ORDER BY 2 DESC""", (giorni,)).fetchall()
+    medi = conn.execute(
+        """SELECT (creato_il AT TIME ZONE 'Europe/Rome')::date AS g, count(*) AS n, COALESCE(AVG(COALESCE(token_output,0)),0)::int AS out_medi,
+                  COALESCE(AVG(COALESCE(token_input,0)),0)::int AS in_medi
+           FROM messaggi_agenti WHERE creato_il >= NOW() - make_interval(days => %s) AND da_agente_id IS NOT NULL GROUP BY 1 ORDER BY 1""", (giorni,)).fetchall()
     return {"giorni": giorni, "per_giorno": per_giorno,
+            "dialoghi_medi": [{"giorno": str(r["g"]), "messaggi": int(r["n"]), "output_medi": r["out_medi"], "input_medi": r["in_medi"]} for r in medi],
             "per_agente": [{"nome": r["nome"], "costo": float(r["costo"]), "token": int(r["token"])} for r in per_agente],
             "per_modello": [{"modello": r["modello"], "costo": float(r["costo"]), "token": int(r["token"])} for r in per_modello]}
 
@@ -152,6 +157,9 @@ def testo(q: dict) -> str:
     o = [f"COSTI (stima interna da token registrati, ultimi {st['giorni']} giorni; valuta come i prezzi inseriti per i modelli):"]
     for g, d in sorted(st["per_giorno"].items())[-10:]:
         o.append(f"- {g}: {d['costo']:.2f} ({d['token']:,} token, di cui dialoghi {d['dialoghi_token']:,})")
+    if st.get("dialoghi_medi"):
+        o.append("Dialoghi tra agenti (token medi per messaggio, input/output): " + "; ".join(
+            f"{d['giorno']} {d['input_medi']}/{d['output_medi']} ({d['messaggi']} msg)" for d in st["dialoghi_medi"][-7:]))
     o.append("Per agente: " + "; ".join(f"{a['nome']} {a['costo']:.2f}" for a in st["per_agente"][:6]))
     o.append("Per modello: " + "; ".join(f"{m['modello']} {m['costo']:.2f} ({m['token']:,} token)" for m in st["per_modello"][:6]))
     for f, d in q["fornitori"].items():

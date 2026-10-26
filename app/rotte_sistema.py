@@ -76,3 +76,29 @@ def ora(u: dict = Depends(solo_titolare)):
 def prova_allarmi(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         return {"inviati": allarmi.controlla(conn)}
+
+
+# ---------- Ore di silenzio (1.24.3) ----------
+import re as _re  # noqa: E402
+
+from . import silenzio  # noqa: E402
+
+
+@router.get("/silenzio")
+def leggi_silenzio(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return {**silenzio.impostazioni(conn), "adesso_in_silenzio": silenzio.in_silenzio(conn)}
+
+
+class Silenzio(BaseModel):
+    attivo: bool
+    da: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    a: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+@router.put("/silenzio")
+def imposta_silenzio(d: Silenzio, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        for k, v in (("silenzio_attivo", "true" if d.attivo else "false"), ("silenzio_da", d.da), ("silenzio_a", d.a)):
+            conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore", (k, v))
+        return {**silenzio.impostazioni(conn), "adesso_in_silenzio": silenzio.in_silenzio(conn)}

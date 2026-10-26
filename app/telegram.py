@@ -321,10 +321,11 @@ def gestisci_messaggio(conn, token: str, upd: dict):
 
 
 def invia_notifiche(conn, token: str, chat_id: int) -> int:
+    from . import silenzio
     n = 0
-    for x in conn.execute("SELECT id, testo, urgente FROM notifiche WHERE inviata_il IS NULL ORDER BY id LIMIT 20").fetchall():
+    for x in silenzio.da_spedire(conn, "inviata_il", 20):
         invia(token, chat_id, ("URGENTE - " if x["urgente"] else "") + x["testo"])
-        conn.execute("UPDATE notifiche SET inviata_il = NOW(), canale = 'telegram' WHERE id = %s", (x["id"],))
+        conn.execute("UPDATE notifiche SET inviata_il = NOW(), canale = 'telegram' WHERE id = ANY(%s)", (x["ids"],))
         conn.commit()
         n += 1
     return n

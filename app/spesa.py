@@ -35,7 +35,7 @@ def _avvisa(conn, periodo: str, livello: str, testo: str):
     if _imp(conn, chiave) == marca:
         return
     conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (chiave, marca))
-    conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, TRUE)", (testo,))
+    conn.execute("INSERT INTO notifiche (testo, urgente, critica) VALUES (%s, TRUE, %s)", (testo, livello == "100"))
 
 
 def controlla(conn) -> str | None:

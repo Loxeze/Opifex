@@ -35,6 +35,7 @@ function blocchiFornitori() {
       h("p", { class: "aiuto" }, "La chiave salvata qui è cifrata e ha la precedenza su quella del file .env. Le chiavi API sono a pagamento a consumo e separate dagli abbonamenti (ChatGPT Plus, Grok)."),
       h("h4", {}, "Modelli registrati"),
       h("p", { class: "sotto" }, (stato.opzioni.modelli || []).map(m => m.nome + " (" + m.fornitore + ")").join(" · ")),
+      bloccoModelli(ricarica),
       h("div", { class: "carta" }, h("div", { class: "nome" }, "Registra un modello"),
         h("div", { class: "riga" }, h("label", {}, "Fornitore", forn), h("label", {}, "Nome del modello", nome), h("label", {}, "Livello", fascia)),
         h("div", { class: "riga" }, h("label", {}, "Costo input per milione di token", ci), h("label", {}, "Costo output per milione di token", co)), msgM,
@@ -158,6 +159,8 @@ function vistaSistema() {
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
             try { await api("PUT", "/gestione/sistema/spesa", { giorno: giorno.value === "" ? null : Number(giorno.value), mese: mese.value === "" ? null : Number(mese.value) }); msg.replaceChildren(avviso("Limiti salvati", "ok")); carica(); }
             catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Salva i limiti"))),
+        h("h3", {}, "Ore di silenzio"),
+        bloccoSilenzio(),
         h("h3", {}, "Allarmi"),
         h("div", { class: "carta" },
           h("p", { class: "aiuto" }, "Ogni 10 minuti Opifex controlla disco del server, errori ripetuti dei fornitori AI e stato del backup. Se qualcosa non va ricevi un messaggio urgente su Telegram (e lo stesso allarme non si ripete prima di 6 ore)."),
@@ -215,6 +218,61 @@ function bloccoCosti() {
         h("pre", { class: "sotto", style: "white-space:pre-wrap" }, q.testo),
         h("p", { class: "aiuto" }, "Per vedere la spesa reale (non solo la stima) inserisci le chiavi ADMIN dei fornitori: Anthropic (console → Settings → Admin keys) e OpenAI (Organization → Admin keys). Sono diverse dalle chiavi normali, sono solo di lettura sui costi e vengono cifrate. Aurora e le sentinelle le usano per consultare i costi."),
         msg, campo("anthropic", "Anthropic"), campo("openai", "OpenAI")));
+    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return corpo;
+}
+
+
+function bloccoModelli(ricarica) {
+  const corpo = h("div");
+  const carica = async () => {
+    try {
+      const q = await api("GET", "/gestione/modelli/elenco");
+      const msg = h("div");
+      const righe = q.modelli.map(m => {
+        const ci = h("input", { type: "number", min: 0, step: "any", value: m.costo_input_per_milione ?? "", style: "width:90px" });
+        const co = h("input", { type: "number", min: 0, step: "any", value: m.costo_output_per_milione ?? "", style: "width:90px" });
+        const dial = h("input", { type: "checkbox" }); dial.checked = m.usa_per_dialoghi;
+        dial.onchange = async () => { try { await api("PUT", "/gestione/modelli/" + m.nome + "/impostazioni", { usa_per_dialoghi: dial.checked }); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } };
+        const salva = h("button", { class: "s", onclick: async () => { try { await api("PUT", "/gestione/modelli/" + m.nome + "/costi", { costo_input_per_milione: ci.value === "" ? null : Number(ci.value), costo_output_per_milione: co.value === "" ? null : Number(co.value) }); msg.replaceChildren(avviso("Prezzi salvati: " + m.nome, "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva");
+        return h("tr", {}, h("td", {}, m.nome), h("td", {}, m.fornitore), h("td", {}, m.fascia), h("td", {}, ci), h("td", {}, co), h("td", {}, dial), h("td", {}, salva));
+      });
+      const auto = h("input", { type: "checkbox" }); auto.checked = q.automatico;
+      auto.onchange = async () => { try { await api("PUT", "/gestione/dialoghi-modello-automatico", { attivo: auto.checked }); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } };
+      const senzaPrezzo = q.modelli.filter(m => m.costo_input_per_milione == null || m.costo_output_per_milione == null).length;
+      corpo.replaceChildren(h("div", { class: "carta" },
+        h("div", { class: "nome" }, "Catalogo modelli e modello dei dialoghi"),
+        h("p", { class: "aiuto" }, "«Importa» aggiunge tutti i modelli di chat dei fornitori con chiave attiva. I prezzi (per milione di token, dal listino del fornitore) vanno inseriti qui: senza prezzo la spesa risulta zero e la scelta del più economico si basa solo sul livello. Con «dialoghi automatici» ogni agente usa per parlare il modello più economico adatto (con chiave attiva, garanzie sui dati sufficienti e, se ha il web, un modello Anthropic)."),
+        msg,
+        h("div", { class: "azioni" },
+          h("button", { class: "p", onclick: async (e) => { e.currentTarget.disabled = true; try { const r = await api("POST", "/gestione/modelli/importa"); msg.replaceChildren(avviso(Object.entries(r).map(([k, v]) => k + ": " + (v.errore ? "errore (" + v.errore + ")" : v.nuovi + " nuovi su " + v.totale)).join(" · "), "ok")); await ricarica(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Importa tutti i modelli"),
+          h("button", { class: "s", onclick: async () => { if (!confirm("Togliere le scelte manuali del modello dei dialoghi a tutti gli agenti?")) return; try { const r = await api("POST", "/gestione/dialoghi-modello-economico"); msg.replaceChildren(avviso("Aggiornati " + r.agenti_aggiornati + " agenti.", "ok")); carica(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Il più economico a tutti")),
+        h("div", { class: "interruttore" }, auto, h("span", {}, "Dialoghi automatici: modello più economico per ogni agente")),
+        senzaPrezzo ? avviso(senzaPrezzo + " modelli senza prezzo.", "avv") : null,
+        h("table", { class: "tabella" }, h("thead", {}, h("tr", {}, ["Modello", "Fornitore", "Livello", "€/$ input", "€/$ output", "Dialoghi", ""].map(t => h("th", {}, t)))), h("tbody", {}, righe)),
+        h("p", { class: "sotto" }, "Modello dei dialoghi ora: " + q.piano.map(p => p.nome + " → " + (p.modello || "—")).join(" · "))));
+    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return corpo;
+}
+
+
+function bloccoSilenzio() {
+  const corpo = h("div");
+  const carica = async () => {
+    try {
+      const q = await api("GET", "/gestione/sistema/silenzio");
+      const attivo = h("input", { type: "checkbox" }); attivo.checked = q.attivo;
+      const da = h("input", { type: "time", value: q.da }); const a = h("input", { type: "time", value: q.a });
+      const msg = h("div");
+      corpo.replaceChildren(h("div", { class: "carta" },
+        h("p", { class: "aiuto" }, "Nelle ore di silenzio (ora italiana) ricevi su telefono e Telegram solo le notifiche di massima urgenza (allarmi di sistema, backup, tetto di spesa raggiunto). Le altre aspettano e al mattino arrivano in un unico riepilogo."),
+        h("div", { class: "interruttore" }, attivo, h("span", {}, "Attive" + (q.adesso_in_silenzio ? " (adesso è silenzio)" : ""))),
+        h("div", { class: "riga" }, h("label", {}, "Dalle", da), h("label", {}, "Alle", a)), msg,
+        h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("PUT", "/gestione/sistema/silenzio", { attivo: attivo.checked, da: da.value, a: a.value }); msg.replaceChildren(avviso("Salvato.", "ok")); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Salva"))));
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };
   carica();

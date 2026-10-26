@@ -6,10 +6,10 @@ import json
 
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
-from . import memoria, richieste
+from . import catalogo_modelli, memoria, richieste
 from .riservatezza import anonimizza, puo_uscire
 
-REGOLE = """Stai dialogando con un collega della stessa organizzazione di Lorenzo Zeppa (un altro agente AI).
+REGOLE_ESTESE = """Stai dialogando con un collega della stessa organizzazione di Lorenzo Zeppa (un altro agente AI).
 Regole del dialogo:
 1. Prima di rispondere verifica di aver capito. Se mancano informazioni necessarie NON indovinare: fai domande di chiarimento
    precise e spiega perche' ti servono.
@@ -21,6 +21,19 @@ Regole del dialogo:
    azioni irreversibili, credenziali o scelte di strategia che nessuno di voi puo' prendere.
 6. Se la questione e' completamente chiarita scrivi alla fine [CHIARITO], indicando la decisione presa.
 Rispondi in italiano, in modo completo ma senza giri di parole."""
+
+REGOLE_BREVI = """Stai dialogando con un collega della stessa organizzazione di Lorenzo Zeppa (un altro agente AI). Comunicazione INTERNA: breve e diretta.
+Regole:
+1. Niente saluti, niente presentazioni, niente riepiloghi di cio' che e' gia' stato detto, niente ringraziamenti. Massimo 120 parole.
+2. Vai al punto con questi campi, solo quelli che servono: «Fatto:» (esito), «Serve:» (una domanda precisa o l'azione che chiedi), «Decisione:» (cosa hai scelto e perche', in una riga).
+3. Rimanda per identificativo (task #12, documento #5, progetto «X») invece di ripetere il contenuto. Il ragionamento solo se te lo chiedono.
+4. Se manca un'informazione necessaria NON indovinare: fai UNA domanda precisa. Non inventare dati: se non lo sai, dillo.
+5. RISOLVETE TRA VOI: non rimandare a Lorenzo. Chi e' piu' vicino al tema fornisce o decide; se il dubbio non e' sostanziale scegliete l'ipotesi piu' ragionevole e dichiaratela. Lorenzo si interpella solo per spese, invii all'esterno a suo nome, azioni irreversibili, credenziali o scelte di strategia.
+6. Quando e' tutto chiarito scrivi solo «[CHIARITO] decisione». Se il collega ti scrive solo conferme («ok», «fatto», «grazie») chiudi con [CHIARITO].
+Italiano."""
+
+REGOLE = REGOLE_BREVI
+
 
 MAX_TOKEN_DIALOGO = 2500
 
@@ -72,11 +85,15 @@ def _modello_dialogo(conn, agente_id: int) -> dict:
     """Modello usato per PARLARE (non per lavorare): quello scelto per l'agente o il predefinito economico."""
     riga = conn.execute(
         """SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.attivo, a.fascia_dati_max, a.accesso_web, a.siti_consentiti, a.max_ricerche,
-                  COALESCE(NULLIF(a.modello_dialogo, ''), %(pred)s) AS modello_nome
+                  COALESCE(NULLIF(a.modello_dialogo, ''), %(pred)s) AS modello_nome, COALESCE(a.modello_dialogo, '') AS scelta
            FROM agenti a WHERE a.id = %(id)s""",
         {"id": agente_id, "pred": impostazione(conn, "modello_dialogo_predefinito", "claude-haiku-5-5")}).fetchone()
     if riga is None:
         raise DialogoBloccato("Agente inesistente")
+    if not riga["scelta"] and catalogo_modelli.automatico(conn):
+        auto = catalogo_modelli.scegli_per_dialogo(conn, riga)
+        if auto:
+            riga["modello_nome"] = auto
     m = conn.execute(
         """SELECT m.id AS modello_id, m.costo_input_per_milione AS c_in, m.costo_output_per_milione AS c_out,
                   f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
@@ -98,7 +115,8 @@ def _token_dialoghi_oggi(conn) -> int:
 def _storia(conn, conv_id: int) -> str:
     righe = conn.execute(
         """SELECT m.testo, da.nome AS da FROM messaggi_agenti m LEFT JOIN agenti da ON da.id = m.da_agente_id
-           WHERE m.conversazione_id = %s ORDER BY m.id DESC LIMIT 10""", (conv_id,)).fetchall()
+           WHERE m.conversazione_id = %s ORDER BY m.id DESC LIMIT %s""",
+        (conv_id, max(2, min(int(impostazione(conn, "dialoghi_storia_messaggi", "5") or 5), 20)))).fetchall()
     return "\n\n".join(f"{r['da']}: {r['testo']}" for r in reversed(righe))
 
 
@@ -124,7 +142,7 @@ def _fai_parlare(conn, parlante_id: int, destinatario_id: int, conv_id: int, ist
                VALUES (%s,%s,%s,%s,FALSE,TRUE,%s)""", (parlante_id, p["fornitore_id"], p["modello_id"], fascia, "Dialogo: " + motivo))
         conn.commit()
         raise DialogoBloccato(motivo)
-    sistema = p["istruzioni"] + "\n\n" + REGOLE + richieste.REGOLA
+    sistema = p["istruzioni"] + "\n\n" + (REGOLE_BREVI if impostazione(conn, "dialoghi_stile_breve", "true") == "true" else REGOLE_ESTESE) + richieste.REGOLA
     if memoria._ok({**p}, "interno"):
         note = richieste.decisioni_note(conn)
         if note:

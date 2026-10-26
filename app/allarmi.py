@@ -19,7 +19,7 @@ def _manda(conn, chiave: str, testo: str) -> bool:
     if ultimo and ora - datetime.fromisoformat(ultimo) < ATTESA:
         return False
     conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (k, ora.isoformat()))
-    conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, TRUE)", ("ALLARME: " + testo,))
+    conn.execute("INSERT INTO notifiche (testo, urgente, critica) VALUES (%s, TRUE, TRUE)", ("ALLARME: " + testo,))
     return True
 
 
@@ -33,7 +33,7 @@ def _una_volta(conn, chiave: str, testo: str) -> bool:
     if _imp(conn, k):
         return False
     conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO NOTHING", (k, datetime.now(timezone.utc).isoformat()))
-    conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, TRUE)", ("ALLARME: " + testo,))
+    conn.execute("INSERT INTO notifiche (testo, urgente, critica) VALUES (%s, TRUE, TRUE)", ("ALLARME: " + testo,))
     return True
 
 
