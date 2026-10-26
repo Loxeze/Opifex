@@ -699,18 +699,15 @@ function vistaChatSolo() {
       stato.chatAgente = agente.id;
       let r;
       if (allegati.files.length) {
-        const fd = new FormData(); fd.append("messaggio", testo.value); fd.append("fascia_dati", f.value);
+        const fd = new FormData(); fd.append("messaggio", testo.value); fd.append("fascia_dati", f.value); fd.append("asincrono", "true");
         for (const x of allegati.files) fd.append("file", x);
         r = await api("POST", "/agenti/" + scelta.value + "/chat-allegati", fd);
-      } else r = await api("POST", "/agenti/" + scelta.value + "/chat", { messaggio: testo.value, fascia_dati: f.value });
-      const avvAll = [];
-      if (r.allegati_troncati && r.allegati_troncati.length) avvAll.push("File letti solo in parte perché lunghi: " + r.allegati_troncati.join(", "));
-      stato.conversazione.unshift({ agente: agente.nome, agenteId: agente.id, domanda: testo.value + (r.allegati_letti ? "\n📎 " + r.allegati_letti.join(", ") : ""), risposta: r.risposta, file: r.file_creati || [], t: r.token_input + r.token_output,
-        usati: r.documenti_usati || [], esclusi: r.documenti_esclusi_per_riservatezza || [], avvisi: (r.avvisi || []).concat(avvAll) });
-      testo.value = ""; disegna();
-      if (Voce.leggiRisposte || Voce.viva) {
-        Voce.leggi(r.risposta, () => { if (Voce.viva && stato.vista === "chat" && Voce.avviaAscolto) Voce.avviaAscolto(); });
-      } else if (Voce.viva && Voce.avviaAscolto) Voce.avviaAscolto();
+      } else r = await api("POST", "/agenti/" + scelta.value + "/chat", { messaggio: testo.value, fascia_dati: f.value, asincrono: true });
+      const voce = { agente: agente.nome, agenteId: agente.id, domanda: testo.value + (allegati.files.length ? "\n📎 " + [...allegati.files].map(x => x.name).join(", ") : ""), risposta: "", file: [], t: 0,
+        usati: [], esclusi: [], avvisi: [], attesa: true, codaId: r.coda_id, dal: Date.now() };
+      stato.conversazione.unshift(voce);
+      testo.value = ""; allegati.value = ""; disegna();
+      seguiRisposta(voce);
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); bInvia.disabled = false; bInvia.textContent = "Invia"; Voce.viva = false; }
   };
   bInvia.addEventListener("click", invia);
@@ -736,6 +733,34 @@ function vistaChatSolo() {
   viva.addEventListener("change", () => { Voce.viva = viva.checked; if (viva.checked) ascolta(); else { Voce.ferma(); Voce.fermaLettura(); stile(false); } });
   const vocale = Voce.supportoDettatura || Voce.supportoLettura;
   if (Voce.viva && vocale && !Voce.inAscolto() && !(Voce.supportoLettura && speechSynthesis.speaking)) setTimeout(ascolta, 300);
+  if (!stato.codaRipresa) {
+    stato.codaRipresa = true;   // dopo un ricaricamento della pagina: riprende i messaggi ancora in attesa di risposta
+    api("GET", "/chat-coda").then(el => {
+      let nuovi = 0;
+      for (const q of el) if (!stato.conversazione.some(c => c.codaId === q.id)) { const v = { agente: q.agente, agenteId: q.agente_id, domanda: q.messaggio, risposta: "", file: [], t: 0, usati: [], esclusi: [], avvisi: [], attesa: true, codaId: q.id }; stato.conversazione.push(v); seguiRisposta(v); nuovi++; }
+      if (nuovi && stato.vista === "chat") disegna();
+    }).catch(() => {});
+  }
+  const schedaConv = (c) => {
+    c.ridisegna = schedaConv;
+    const el = c.attesa ? h("div", { class: "carta", style: "margin-top:12px" },
+      h("div", { class: "sotto" }, "Tu → " + c.agente), h("div", { class: "risposta" }, c.domanda),
+      h("div", { class: "sotto", style: "margin-top:10px" }, "⏳ Inviato. " + c.agente + " risponderà appena è libero: puoi continuare a lavorare, la risposta comparirà qui.")) :
+    h("div", { class: "carta", style: "margin-top:12px" },
+
+      h("div", { class: "sotto" }, "Tu → " + c.agente),
+      h("div", { class: "risposta" }, c.domanda),
+      h("div", { class: "sotto", style: "margin-top:10px" }, c.agente + " (" + c.t + " token)"),
+      h("div", { class: "risposta" }, c.risposta),
+      (c.file && c.file.length) ? h("div", { class: "azioni" }, ...c.file.map(x => h("a", { href: x.link || "#", target: "_blank", rel: "noopener", class: "s", style: "text-decoration:none;padding:4px 10px;border:1px solid var(--bordo,#ccc);border-radius:6px" }, "📎 " + x.nome))) : null,
+      c.agenteId ? h("div", { class: "azioni" }, pollici(c.agenteId, "chat", null)) : null,
+      Voce.supportoLettura ? h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => Voce.leggi(c.risposta) }, "🔊 Ascolta")) : null,
+      c.usati.length ? h("div", { class: "sotto", style: "margin-top:8px" }, "Documenti consultati: " + c.usati.join(", ")) : null,
+      c.esclusi.length ? avviso("Non consultati per riservatezza: " + c.esclusi.join(", "), "avv") : null,
+      (c.avvisi || []).map(t => avviso(t, "avv")));
+    c.el = el;
+    return el;
+  };
   return [
     h("h3", {}, "Chat con gli agenti"),
     h("div", { class: "carta" },
@@ -748,18 +773,30 @@ function vistaChatSolo() {
       Voce.supportoDettatura ? h("div", { class: "interruttore" }, viva, h("span", {}, "Vivavoce: parli, il messaggio parte quando smetti, l'agente risponde a voce e riascolta")) : null,
       vocale ? h("label", {}, "Trascrizione della voce", modoVoce) : null,
       vocale ? h("p", { class: "aiuto" }, "Browser: usa il riconoscimento vocale del browser (non funziona su Firefox e Brave). Server: registra e trascrive con OpenAI, richiede la chiave OpenAI e vale per qualsiasi browser. Con il browser: in Chrome l'audio passa dal servizio di Google. Non dettare dati riservati se non vuoi che escano dal tuo computer.") : null),
-    stato.conversazione.map(c => h("div", { class: "carta", style: "margin-top:12px" },
-      h("div", { class: "sotto" }, "Tu → " + c.agente),
-      h("div", { class: "risposta" }, c.domanda),
-      h("div", { class: "sotto", style: "margin-top:10px" }, c.agente + " (" + c.t + " token)"),
-      h("div", { class: "risposta" }, c.risposta),
-      (c.file && c.file.length) ? h("div", { class: "azioni" }, ...c.file.map(x => h("a", { href: x.link || "#", target: "_blank", rel: "noopener", class: "s", style: "text-decoration:none;padding:4px 10px;border:1px solid var(--bordo,#ccc);border-radius:6px" }, "📎 " + x.nome))) : null,
-      c.agenteId ? h("div", { class: "azioni" }, pollici(c.agenteId, "chat", null)) : null,
-      Voce.supportoLettura ? h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => Voce.leggi(c.risposta) }, "🔊 Ascolta")) : null,
-      c.usati.length ? h("div", { class: "sotto", style: "margin-top:8px" }, "Documenti consultati: " + c.usati.join(", ")) : null,
-      c.esclusi.length ? avviso("Non consultati per riservatezza: " + c.esclusi.join(", "), "avv") : null,
-      (c.avvisi || []).map(t => avviso(t, "avv")))),
+    stato.conversazione.map(schedaConv),
   ];
+}
+
+// Segue un messaggio inviato senza attesa: appena l'agente risponde aggiorna la scheda sul posto (senza toccare quello che stai scrivendo).
+function seguiRisposta(voce, tentativi = 0) {
+  setTimeout(async () => {
+    try {
+      const r = await api("GET", "/chat-coda/" + voce.codaId);
+      if (r.stato === "finito" && r.risultato) {
+        const x = r.risultato, avvAll = [];
+        if (x.allegati_troncati && x.allegati_troncati.length) avvAll.push("File letti solo in parte perché lunghi: " + x.allegati_troncati.join(", "));
+        Object.assign(voce, { attesa: false, risposta: x.risposta, file: x.file_creati || [], t: (x.token_input || 0) + (x.token_output || 0), usati: x.documenti_usati || [],
+          esclusi: x.documenti_esclusi_per_riservatezza || [], avvisi: (x.avvisi || []).concat(avvAll) });
+      } else if (r.stato === "errore") {
+        Object.assign(voce, { attesa: false, risposta: "⚠️ " + (r.errore || "Risposta non riuscita"), avvisi: [] });
+      } else if (tentativi < 600) { seguiRisposta(voce, tentativi + 1); return; }
+      else Object.assign(voce, { attesa: false, risposta: "⚠️ Nessuna risposta dopo molto tempo: controlla la Salute degli agenti.", avvisi: [] });
+    } catch (e) { if (tentativi < 600) { seguiRisposta(voce, tentativi + 1); return; } return; }
+    const el = voce.el;
+    if (stato.vista === "chat" && el && el.isConnected && typeof voce.ridisegna === "function") el.replaceWith(voce.ridisegna(voce));
+    if (stato.vista === "chat" && (Voce.leggiRisposte || Voce.viva) && voce.risposta && !voce.risposta.startsWith("⚠️")) Voce.leggi(voce.risposta, () => { if (Voce.viva && Voce.avviaAscolto) Voce.avviaAscolto(); });
+    if (stato.vista !== "chat") stato.chatNuove = (stato.chatNuove || 0) + 1;
+  }, tentativi === 0 ? 2000 : 3000);
 }
 
 // ---------- Briefing ----------

@@ -171,6 +171,8 @@ async def ciclo_vita(app: FastAPI):
             reparti_pronti.aggiungi_nuovi_ruoli(conn)
             from . import prezzi as _prezzi
             _prezzi.applica_listino(conn)
+            from . import chat_coda as _cc
+            _cc.riavvio(conn)
     except Exception:
         pass
     compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari())]

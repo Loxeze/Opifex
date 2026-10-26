@@ -1,8 +1,9 @@
 """Rotte per parlare con gli agenti e per le proposte di sviluppo dell'Architetto tecnico."""
+from fastapi.responses import JSONResponse
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
-from . import registro
+from . import chat_coda, registro
 from .db import connessione
 from .documenti import ESTENSIONI, FileNonLeggibile, estrai_testo
 from .esecuzione import EsecuzioneBloccata, esegui_agente
@@ -17,6 +18,7 @@ router = APIRouter()
 class Domanda(BaseModel):
     messaggio: str
     fascia_dati: str = "interno"
+    asincrono: bool = False   # True: il messaggio viene preso in carico subito e la risposta arriva in sottofondo
 
 
 def _accesso(agente_id: int, utente: dict, fascia_dati: str):
@@ -34,7 +36,7 @@ MAX_ALLEGATI, MAX_BYTE_ALLEGATO, MAX_CARATTERI_ALLEGATO, MAX_CARATTERI_TOTALI = 
 
 
 @router.post("/agenti/{agente_id}/chat-allegati")
-def chat_con_allegati(agente_id: int, messaggio: str = Form(""), fascia_dati: str = Form("interno"),
+def chat_con_allegati(agente_id: int, messaggio: str = Form(""), fascia_dati: str = Form("interno"), asincrono: bool = Form(False),
                       file: list[UploadFile] = File(...), utente: dict = Depends(utente_corrente)):
     """Messaggio con file allegati (PDF, Word, TXT, MD, CSV). Il testo dei file serve solo per questa risposta: non entra nel repository."""
     _accesso(agente_id, utente, fascia_dati)
@@ -60,6 +62,8 @@ def chat_con_allegati(agente_id: int, messaggio: str = Form(""), fascia_dati: st
         totale += len(testo)
         allegati.append((nome, testo))
     domanda = messaggio.strip() or "Leggi gli allegati e dimmi di cosa si tratta e cosa mi serve sapere."
+    if asincrono:
+        return JSONResponse({"coda_id": chat_coda.accoda(agente_id, utente["id"], domanda, fascia_dati, allegati, {"allegati_letti": [n for n, _ in allegati], "allegati_troncati": tagliati})}, status_code=202)
     try:
         r = esegui_agente(agente_id, domanda, fascia_dati, utente["id"], memorizza=True, allegati=allegati)
     except EsecuzioneBloccata as e:
@@ -81,12 +85,32 @@ def chat_con_agente(agente_id: int, d: Domanda, utente: dict = Depends(utente_co
             a = conn.execute("SELECT divisione_id FROM agenti WHERE id = %s", (agente_id,)).fetchone()
         if a is None or a["divisione_id"] not in visibili:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Agente fuori dalle tue divisioni")
+    if d.asincrono:
+        return JSONResponse({"coda_id": chat_coda.accoda(agente_id, utente["id"], d.messaggio, d.fascia_dati)}, status_code=202)
     try:
         return esegui_agente(agente_id, d.messaggio, d.fascia_dati, utente["id"], memorizza=True)
     except EsecuzioneBloccata as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     except (ErroreFornitore, CassaforteNonConfigurata, ErroreNavigazione) as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
+
+
+@router.get("/chat-coda/{coda_id}")
+def stato_coda(coda_id: int, utente: dict = Depends(utente_corrente)):
+    """Stato di un messaggio inviato senza attesa; quando e' finito contiene la risposta."""
+    with connessione() as conn:
+        r = conn.execute("SELECT id, agente_id, utente_id, stato, risultato, errore, secondi, creato_il FROM chat_coda WHERE id = %s", (coda_id,)).fetchone()
+    if r is None or (r["utente_id"] != utente["id"] and utente.get("ruolo_globale") != "titolare"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Messaggio inesistente")
+    return {"id": r["id"], "stato": r["stato"], "risultato": r["risultato"], "errore": r["errore"], "secondi": float(r["secondi"]) if r["secondi"] is not None else None}
+
+
+@router.get("/chat-coda")
+def in_corso(utente: dict = Depends(utente_corrente)):
+    """I messaggi dell'utente ancora in attesa di risposta (per riprendere dopo un ricaricamento della pagina)."""
+    with connessione() as conn:
+        return conn.execute("""SELECT c.id, c.agente_id, a.nome AS agente, c.messaggio, c.stato FROM chat_coda c JOIN agenti a ON a.id = c.agente_id
+                               WHERE c.utente_id = %s AND c.stato IN ('in_coda','in_lavoro') AND c.creato_il > NOW() - INTERVAL '2 hours' ORDER BY c.id""", (utente["id"],)).fetchall()
 
 
 class NuovaProposta(BaseModel):
