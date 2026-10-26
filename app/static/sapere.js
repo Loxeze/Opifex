@@ -87,6 +87,13 @@ function vistaBiblioteca() {
         d.formatore_id ? null : avviso("Padre Casati non è presente tra gli agenti: viene creato dall'aggiornamento 1.16.0.", "avv"),
         h("h3", {}, "Da approvare" + (d.da_approvare ? " (" + d.da_approvare + ")" : "")),
         !proposti.length && !bozze.length ? h("p", { class: "sotto" }, "Niente in attesa.") : null,
+        proposti.length > 1 ? h("div", { class: "azioni" }, h("button", { class: "p", onclick: async (e) => {
+          const siti = [...new Set(proposti.map(c => { try { return new URL(c.url).hostname; } catch (x) { return "?"; } }))];
+          if (!confirm("Scarico tutti i " + proposti.length + " documenti in attesa da: " + siti.join(", ") + "?")) return;
+          e.currentTarget.disabled = true;
+          try { const r = await api("POST", "/gestione/biblioteca/coda/approva-tutti"); msg.replaceChildren(avviso("Scarico di " + r.avviati + " documenti avviato: vanno uno alla volta, la lista si aggiorna da sola.", "ok"));
+            const giro = async () => { await carica(); const n = (await api("GET", "/gestione/biblioteca")).coda.filter(c => c.stato === "proposto").length; if (n && stato.vista === "impostazioni") setTimeout(giro, 4000); }; setTimeout(giro, 4000); }
+          catch (er) { msg.replaceChildren(avviso(er.message, "no")); e.currentTarget.disabled = false; } } }, "Scarica tutto (" + proposti.length + ")")) : null,
         proposti.map(c => h("div", { class: "carta", style: "margin-bottom:8px" },
           h("div", { class: "nome" }, c.titolo),
           h("div", { class: "sotto" }, [c.autori, c.anno, c.archivio, c.licenza ? "licenza: " + c.licenza : "licenza non indicata", c.proposto_da ? "proposto da " + c.proposto_da : "indicato da te"].filter(Boolean).join(" · ")),

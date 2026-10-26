@@ -1,4 +1,6 @@
 """Biblioteca di Padre Casati: documenti di studio, coda dei download da approvare, dispense da approvare. Solo titolare."""
+import threading
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -60,6 +62,36 @@ def decidi_coda(coda_id: int, d: Decisione, u: dict = Depends(solo_titolare)):
         registro.registra(conn, u, "biblioteca", {"scaricato": "download approvato", "respinto": "download respinto", "errore": "download approvato ma non riuscito"}[r["stato"]],
                           titolo, "biblioteca_coda", coda_id, r.get("errore", ""))
     return r
+
+
+_in_corso = threading.Lock()
+
+
+def _scarica_tutto(ids: list[int], u: dict):
+    try:
+        for cid in ids:
+            try:
+                with connessione() as conn:
+                    r = casati.decidi_download(conn, cid, True, u["id"])
+                    titolo = (conn.execute("SELECT titolo FROM biblioteca_coda WHERE id = %s", (cid,)).fetchone() or {}).get("titolo", "")
+                    registro.registra(conn, u, "biblioteca", "download approvato (tutti)" if r["stato"] == "scaricato" else "download approvato ma non riuscito", titolo, "biblioteca_coda", cid, r.get("errore", ""))
+            except Exception:  # noqa: BLE001 - un documento che non va non ferma gli altri
+                continue
+    finally:
+        _in_corso.release()
+
+
+@router.post("/coda/approva-tutti", status_code=202)
+def approva_tutti(u: dict = Depends(solo_titolare)):
+    """Un solo via libera per tutte le proposte in attesa: scarica in sottofondo, una dopo l'altra; gli errori restano visibili per ciascuna."""
+    with connessione() as conn:
+        ids = [r["id"] for r in conn.execute("SELECT id FROM biblioteca_coda WHERE stato = 'proposto' ORDER BY id").fetchall()]
+    if not ids:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Nessun download in attesa")
+    if not _in_corso.acquire(blocking=False):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Un download multiplo e' gia' in corso")
+    threading.Thread(target=_scarica_tutto, args=(ids, u), daemon=True).start()
+    return {"avviati": len(ids)}
 
 
 @router.get("/dispense/{doc_id}")
