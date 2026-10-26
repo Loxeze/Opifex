@@ -37,6 +37,7 @@ from .rotte_brevo import router as router_brevo
 from .rotte_canva import router as router_canva
 from .allineamento import router as router_allineamento
 from .rotte_sentinelle import router as router_sentinelle
+from .rotte_siti import router as router_siti
 from .rotte_costi import router as router_costi
 from . import etichetta
 from .rotte_plaud import router as router_plaud
@@ -226,6 +227,7 @@ app.include_router(router_brevo)
 app.include_router(router_canva)
 app.include_router(router_allineamento)
 app.include_router(router_sentinelle)
+app.include_router(router_siti)
 app.include_router(router_costi)
 app.include_router(router_plaud)
 app.include_router(router_iniziative)

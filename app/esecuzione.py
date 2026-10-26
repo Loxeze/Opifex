@@ -10,7 +10,7 @@ from .db import connessione
 from .fornitori import ErroreFornitore, Risposta, chiama_modello
 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
-from . import canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti
+from . import siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
@@ -225,7 +225,8 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             _sent = bool(conn.execute("SELECT sentinella FROM agenti WHERE id = %s", (agente_id,)).fetchone()["sentinella"])
             costi_tool = bool(ok_int and (_sent or a["nome"] == "Aurora") and costi.richiesta_costi(messaggio, _sent))
             pm_tool = bool(conn.execute("SELECT 1 FROM progetti WHERE pm_agente_id = %s", (agente_id,)).fetchone())
-            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or costi_tool:
+            siti_tool = bool(ok_int and siti_hosting.ha_siti(conn, agente_id))
+            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or costi_tool or siti_tool:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -323,6 +324,13 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     gcv = canva.gestore(connessione)
                     for s_ in canva.STRUMENTI:
                         gestori[s_["name"]] = gcv
+                if siti_tool:
+                    extra.extend(siti_hosting.STRUMENTI)
+                    with connessione() as c_s:
+                        avviso_extra += siti_hosting.avviso_per(c_s, agente_id)
+                    gsh = siti_hosting.gestore(connessione, agente_id)
+                    for s_ in siti_hosting.STRUMENTI:
+                        gestori[s_["name"]] = gsh
                 if pm_tool:
                     extra.extend(pm_strumenti.STRUMENTI)
                     avviso_extra += pm_strumenti.AVVISO + f" Oggi e' {__import__("datetime").date.today().isoformat()}."
