@@ -36,6 +36,7 @@ from .rotte_memoria import router as router_memoria
 from .rotte_brevo import router as router_brevo
 from .rotte_canva import router as router_canva
 from .allineamento import router as router_allineamento
+from .rotte_sentinelle import router as router_sentinelle
 from .rotte_costi import router as router_costi
 from . import etichetta
 from .rotte_plaud import router as router_plaud
@@ -110,7 +111,7 @@ def _passo(nome: str, f):
 async def _manutenzione():
     """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Ogni passo e' isolato dagli altri."""
     import asyncio
-    from . import allarmi, backup, crm_schede, plaud, prova_ripristino, sintesi_memoria, studio
+    from . import allarmi, backup, crm_schede, plaud, proposte_sentinelle, prova_ripristino, sintesi_memoria, studio
 
     def giro():
         _passo("backup", lambda c: backup.esegui(c) if backup.da_fare(c) else None)
@@ -120,6 +121,7 @@ async def _manutenzione():
         _passo("prova ripristino", lambda c: prova_ripristino.prova(c) if prova_ripristino.da_fare(c) else None)
         _passo("studi", lambda c: studio.rileva_e_segna(c) if studio.da_fare(c) else None)
         _passo("promemoria CRM", crm_schede.promemoria)
+        _passo("proposte sentinelle", lambda c: proposte_sentinelle.scansiona(c) if proposte_sentinelle.da_fare(c) else None)
     await asyncio.sleep(90)
     while True:
         try:
@@ -223,6 +225,7 @@ app.include_router(router_memoria)
 app.include_router(router_brevo)
 app.include_router(router_canva)
 app.include_router(router_allineamento)
+app.include_router(router_sentinelle)
 app.include_router(router_costi)
 app.include_router(router_plaud)
 app.include_router(router_iniziative)
