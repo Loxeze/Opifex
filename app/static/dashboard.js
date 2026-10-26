@@ -33,6 +33,20 @@ function vistaDashboard() {
         : h("p", { class: "sotto" }, "Nessuna richiesta aperta. Gli agenti hanno tutto ciò che serve."));
     } catch (e) { boxRic.replaceChildren(avviso(e.message, "no")); }
   };
+  const boxIni = h("div", { class: "pan-corpo" });
+  const caricaIniziative = async () => {
+    try {
+      const d = await api("GET", "/gestione/iniziative");
+      const aperte = d.iniziative.filter(i => i.stato === "da_approvare" || i.stato === "in_corso");
+      if (boxIni.contains(document.activeElement)) return;
+      riempi(boxIni, aperte.length ? aperte.slice(0, 4).map(i => {
+        const decidi = async (azione, btn) => { btn.disabled = true; try { await api("POST", "/gestione/iniziative/" + i.id + "/decisione", { azione }); caricaIniziative(); } catch (x) { alert(x.message); btn.disabled = false; } };
+        return h("div", { class: "voce" }, h("div", { class: "nome" }, (i.stato === "da_approvare" ? "DA APPROVARE · " : "In corso · ") + i.titolo),
+          h("div", { class: "sotto" }, (i.aperta_da || "?") + " · " + i.rami_fatti + "/" + i.rami + " task" + (i.budget_token ? " · stima " + i.budget_token.toLocaleString("it-IT") + " token" : "")),
+          i.stato === "da_approvare" ? h("div", { class: "riga-inline" }, h("button", { class: "p", onclick: (e) => decidi("approva", e.currentTarget) }, "Approva"), h("button", { class: "s", onclick: (e) => decidi("rifiuta", e.currentTarget) }, "Rifiuta")) : null);
+      }) : h("p", { class: "sotto" }, "Nessuna iniziativa aperta."));
+    } catch (e) { boxIni.replaceChildren(avviso(e.message, "no")); }
+  };
   const caricaProgetti = async () => {
     try {
       const d = await api("GET", "/gestione/progetti");
@@ -86,10 +100,10 @@ function vistaDashboard() {
     stato.agenti.some(a => !a.attivo) ? h("p", { class: "sotto" }, stato.agenti.filter(a => !a.attivo).length + " agenti spenti.") : null);
   const daFare = pannelloDaFare();
   let cicli = 0;
-  caricaRichieste(); caricaProgetti();
-  stato.timer2 = setInterval(() => { aggiornaChat(); if (++cicli % 3 === 0) { caricaRichieste(); caricaProgetti(); aggiornaStat(); daFare.ricarica(); } }, 3000);
+  caricaRichieste(); caricaProgetti(); caricaIniziative();
+  stato.timer2 = setInterval(() => { aggiornaChat(); if (++cicli % 3 === 0) { caricaRichieste(); caricaProgetti(); caricaIniziative(); aggiornaStat(); daFare.ricarica(); } }, 3000);
   return h("div", { class: "dashboard" }, barra,
-    h("div", { class: "colonna col-sx" }, h("div", { class: "azioni" }, bottoneAllinea(), bottoneDemo()), daFare.el, pannello("Richieste degli agenti", boxRic), pannello("Progetti", boxPro, h("button", { class: "s", onclick: () => vai("progetti") }, "Apri"))),
+    h("div", { class: "colonna col-sx" }, h("div", { class: "azioni" }, bottoneAllinea(), bottoneDemo()), daFare.el, pannello("Richieste e iniziative", h("div", { class: "pan-corpo" }, boxRic, h("h4", { style: "margin:8px 0 4px" }, "Iniziative dei manager"), boxIni), h("button", { class: "s", onclick: () => vai("richieste") }, "Apri tutto")), pannello("Progetti", boxPro, h("button", { class: "s", onclick: () => vai("progetti") }, "Apri"))),
     scena,
     h("div", { class: "colonna col-dx" }, pannello("Chat dell'organizzazione · in diretta", boxChat), pannello("Avvisi", boxAvvisi)));
 }

@@ -76,7 +76,7 @@ function mostraAccesso(errore) {
 const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["crm", "CRM"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
 const VISTE_COLLABORATORE = [["task", "Task"], ["progetti", "Progetti"], ["iniziative", "Iniziative"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Collegamenti (Google, posta)"], ["connessioni", "Connessioni a siti e app"],
-  ["canali", "Canali (Telegram)"], ["social", "Social"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["iniziative", "Iniziative"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["sistema", "Backup e costi"]];
+  ["canali", "Canali (Telegram)"], ["social", "Social"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["sistema", "Backup e costi"]];
 
 function vai(vista, sezione) { if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "social" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
@@ -489,9 +489,18 @@ function vistaRichieste() {
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
   carica();
-  return h("div", {}, h("h2", {}, "Informazioni che servono agli agenti"),
-    h("p", { class: "aiuto" }, "Gli agenti non inventano mai: se manca un dato lo chiedono al superiore e, se serve, a te. Le richieste compaiono anche nei briefing."),
-    selFiltro, msg, lista);
+  const iniz = h("div");
+  const caricaIniz = async () => {
+    try {
+      const d = await api("GET", "/gestione/iniziative");
+      riempi(iniz, [schedaSoglie(d, caricaIniz), d.iniziative.length ? d.iniziative.map(i => cartaIniziativa(i, caricaIniz)) : h("p", { class: "sotto" }, "Nessuna iniziativa ancora. Le apre un manager quando vede un'opportunità.")]);
+    } catch (e) { iniz.replaceChildren(avviso(e.message, "no")); }
+  };
+  caricaIniz();
+  return h("div", {}, h("h2", {}, "Richieste e iniziative"),
+    h("p", { class: "aiuto" }, "Gli agenti non inventano mai: se manca un dato lo chiedono al superiore e, se serve, a te. Le iniziative sopra soglia aspettano qui il tuo via libera."),
+    h("h3", {}, "Informazioni che servono agli agenti"), selFiltro, msg, lista,
+    h("h3", {}, "Iniziative dei manager"), iniz);
 }
 
 // ---------- Dialoghi ----------
