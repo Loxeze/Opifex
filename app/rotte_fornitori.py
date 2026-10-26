@@ -131,7 +131,7 @@ def verifica(_: dict = Depends(solo_titolare)):
 
 
 # ---------- Catalogo modelli (1.24.3) ----------
-from . import catalogo_modelli, prezzi  # noqa: E402
+from . import catalogo_modelli, modello_economico, prezzi  # noqa: E402
 
 
 @router.post("/modelli/importa")
@@ -198,6 +198,26 @@ def imposta_automatico(d: Automatico, _: dict = Depends(solo_titolare)):
         conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('dialoghi_modello_automatico', %s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore",
                      ("true" if d.attivo else "false",))
     return {"automatico": d.attivo}
+
+
+@router.get("/modelli-economici")
+def anteprima_economici(_: dict = Depends(solo_titolare)):
+    """Che cosa cambierebbe: per ogni agente il modello attuale e quello proposto."""
+    with connessione() as conn:
+        return {"piano": modello_economico.piano(conn)}
+
+
+@router.post("/modelli-economici")
+def tutti_economici(u: dict = Depends(solo_titolare)):
+    """Ogni agente passa al modello piu' economico adatto ai suoi dati (e alla ricerca web o ai siti, se li usa). Si puo' annullare."""
+    with connessione() as conn:
+        return modello_economico.applica(conn, u)
+
+
+@router.post("/modelli-economici/ripristina")
+def ripristina_modelli(u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return modello_economico.ripristina(conn, u)
 
 
 @router.post("/dialoghi-modello-economico")

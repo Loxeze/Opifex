@@ -1,4 +1,5 @@
 """Punto di ingresso dell'API della piattaforma agenti AI."""
+import os
 from contextlib import asynccontextmanager
 
 from pathlib import Path
@@ -172,6 +173,9 @@ async def ciclo_vita(app: FastAPI):
             reparti_pronti.aggiungi_nuovi_ruoli(conn)
             from . import prezzi as _prezzi
             _prezzi.applica_listino(conn)
+            from . import modello_economico as _me
+            if not os.environ.get("OPIFEX_SENZA_MODELLO_ECONOMICO"):   # le prove automatiche preparano i modelli a mano
+                _me.una_volta(conn)
             from . import chat_coda as _cc
             _cc.riavvio(conn)
     except Exception:
