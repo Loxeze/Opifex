@@ -176,6 +176,8 @@ async def ciclo_vita(app: FastAPI):
             from . import modello_economico as _me
             if not os.environ.get("OPIFEX_SENZA_MODELLO_ECONOMICO"):   # le prove automatiche preparano i modelli a mano
                 _me.una_volta(conn)
+            from . import siti_hosting as _sh
+            _sh.accesso_totale_al_capo(conn)
             from . import chat_coda as _cc
             _cc.riavvio(conn)
     except Exception:

@@ -4,7 +4,7 @@
 const TIPI_SITO = { sftp: "SFTP / SSH", ftp: "FTPS (FTP su TLS)", wordpress: "WordPress (password applicazione)", pannello: "Pannello hosting (solo custodia)", api: "Chiave API (solo custodia)" };
 
 function vistaSiti() {
-  const lista = h("div"), attesa = h("div"), msg = h("div");
+  const lista = h("div"), attesa = h("div"), msg = h("div"), tutti = h("div");
   const carica = async () => {
     try {
       const d = await api("GET", "/gestione/siti");
@@ -16,13 +16,23 @@ function vistaSiti() {
           h("details", {}, h("summary", {}, "Vedi il nuovo contenuto"), h("pre", { style: "white-space:pre-wrap;max-height:300px;overflow:auto" }, x.contenuto)),
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: (e) => decidi(true, e.currentTarget) }, "Approva e applica"), h("button", { class: "s", onclick: (e) => decidi(false, e.currentTarget) }, "Respingi")));
       })] : []);
+      riempi(tutti, blocchiTutti(d.accesso_totale || [], msg, carica));
       riempi(lista, d.siti.length ? d.siti.map(s => schedaSito(s, carica, msg)) : h("p", { class: "sotto" }, "Nessun sito ancora. Aggiungi il primo qui sotto."));
     } catch (e) { lista.replaceChildren(avviso(e.message, "no")); }
   };
   carica();
   return [h("h2", {}, "Siti e hosting"),
     h("p", { class: "aiuto" }, "Le password e le chiavi sono cifrate sul server e non vengono mai mostrate, nemmeno a te: puoi solo sostituirle. Gli agenti autorizzati lavorano sul sito tramite strumenti (elenca, leggi, scrivi) senza vedere il segreto. Sui siti in produzione ogni modifica aspetta il tuo via libera e prima si conserva una copia. Meglio usare chiavi SSH o utenti FTP limitati, e la «password applicazione» di WordPress."),
-    msg, attesa, lista, formSito(null, carica, msg)];
+    tutti, msg, attesa, lista, formSito(null, carica, msg)];
+}
+
+function blocchiTutti(ids, msg, ricarica) {
+  const sel = (stato.agenti || []).filter(a => a.attivo);
+  const caselle = sel.map(a => { const c = h("input", { type: "checkbox" }); c.checked = ids.includes(a.id); return [a.id, c, h("label", { style: "display:inline-block;margin-right:12px" }, c, " " + a.nome)]; });
+  return h("div", { class: "carta" }, h("div", { class: "nome" }, "Agenti che vedono tutti i siti"),
+    h("p", { class: "sotto" }, "Questi agenti conoscono tutti i siti salvati qui (anche quelli che aggiungerai dopo), senza doverli assegnare uno per uno. Di solito basta il Capo sviluppo."),
+    h("div", {}, caselle.map(c => c[2])),
+    h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => { try { await api("PUT", "/gestione/siti/accesso-totale", { agenti: caselle.filter(c => c[1].checked).map(c => c[0]) }); msg.replaceChildren(avviso("Salvato.", "ok")); ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva")));
 }
 
 function schedaSito(s, ricarica, msg) {

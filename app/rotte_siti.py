@@ -36,7 +36,8 @@ def elenco(_: dict = Depends(solo_titolare)):
         for r in conn.execute("SELECT sito_id, agente_id FROM siti_agenti").fetchall():
             ag.setdefault(r["sito_id"], []).append(r["agente_id"])
         return {"siti": [_pubblica(r, ag.get(r["id"], [])) for r in conn.execute("SELECT * FROM siti_hosting ORDER BY nome").fetchall()],
-                "attesa": conn.execute("SELECT count(*) AS n FROM siti_scritture WHERE stato='in_attesa'").fetchone()["n"]}
+                "attesa": conn.execute("SELECT count(*) AS n FROM siti_scritture WHERE stato='in_attesa'").fetchone()["n"],
+                "accesso_totale": [r["id"] for r in conn.execute("SELECT id FROM agenti WHERE siti_tutti ORDER BY nome").fetchall()]}
 
 
 def _pulisci(d: Scheda) -> dict:
@@ -64,6 +65,19 @@ def crea(d: Scheda, u: dict = Depends(solo_titolare)):
                            (c["nome"], c["tipo"], c["url"], c["host"], c["porta"], c["utente"], _cifra(d.segreto), c["percorso_base"], c["produzione"], c["note"], d.attivo)).fetchone()["id"]
         registra(conn, u, "siti", "sito aggiunto", c["nome"], "siti_hosting", sid, "")
         return {"id": sid}
+
+
+class AccessoTotale(BaseModel):
+    agenti: list[int]
+
+
+@router.put("/accesso-totale")
+def accesso_totale(d: AccessoTotale, u: dict = Depends(solo_titolare)):
+    """Gli agenti indicati vedono tutti i siti salvati (compresi quelli aggiunti dopo), senza assegnarli uno per uno."""
+    with connessione() as conn:
+        conn.execute("UPDATE agenti SET siti_tutti = (id = ANY(%s))", (list(set(d.agenti)),))
+        registra(conn, u, "siti", "agenti con accesso a tutti i siti aggiornati", "Tutti i siti", dettagli={"agenti": len(set(d.agenti))})
+        return {"accesso_totale": [r["id"] for r in conn.execute("SELECT id FROM agenti WHERE siti_tutti").fetchall()]}
 
 
 @router.put("/{sid}")

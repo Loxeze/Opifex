@@ -333,11 +333,12 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     for s_ in canva.STRUMENTI:
                         gestori[s_["name"]] = gcv
                 if siti_tool:
-                    extra.extend(siti_hosting.STRUMENTI)
                     with connessione() as c_s:
                         avviso_extra += siti_hosting.avviso_per(c_s, agente_id)
+                        strumenti_siti = siti_hosting.strumenti_per(c_s, agente_id)
+                    extra.extend(strumenti_siti)
                     gsh = siti_hosting.gestore(connessione, agente_id)
-                    for s_ in siti_hosting.STRUMENTI:
+                    for s_ in strumenti_siti:
                         gestori[s_["name"]] = gsh
                 if pm_tool:
                     extra.extend(pm_strumenti.STRUMENTI)
