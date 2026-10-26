@@ -6,7 +6,7 @@ import json
 
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
-from . import catalogo_modelli, codici, memoria, richieste
+from . import catalogo_modelli, codici, memoria, misure, richieste
 from .riservatezza import anonimizza, puo_uscire
 
 REGOLE_ESTESE = """Stai dialogando con un collega della stessa organizzazione di Lorenzo Zeppa (un altro agente AI).
@@ -177,6 +177,8 @@ def _fai_parlare(conn, parlante_id: int, destinatario_id: int, conv_id: int, ist
                  (parlante_id, p["modello_nome"], r.token_input, r.token_output, costo))
     conn.execute("INSERT INTO registro_uscite (agente_id, fornitore_id, modello_id, fascia_dati, anonimizzato, token_input, bloccato) VALUES (%s,%s,%s,%s,TRUE,%s,FALSE)",
                  (parlante_id, p["fornitore_id"], p["modello_id"], fascia, r.token_input))
+    misure.registra(conn, parlante_id, p["modello_nome"], "Domande tra agenti", r.token_input, r.token_output, costo, 1, None, 0, bool(web),
+                    len(sistema), 0, len(istruzione), {"storia": len(storia), "documenti": len(doc_ctx or "")})
     _salva_messaggio(conn, conv_id, parlante_id, destinatario_id, r.testo, p["modello_nome"], r.token_input, r.token_output)
     richieste.estrai_e_salva(conn, parlante_id, r.testo)
     return r.testo

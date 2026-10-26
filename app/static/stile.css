@@ -211,3 +211,6 @@ header{padding-top:max(12px,env(safe-area-inset-top))}
 .demo-area .dashboard{height:100%}
 .demo-area .scena-pagina,.demo-area .scena{height:100%}
 .demo-largo{max-width:1200px;margin:0 auto}
+.griglia-numeri{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0}
+.tabscorri{overflow-x:auto;margin:6px 0 14px}
+.barra{min-width:80px;background:rgba(255,255,255,.08);border-radius:4px}
