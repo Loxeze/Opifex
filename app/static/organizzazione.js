@@ -33,25 +33,56 @@ function calcolaLayout(dati) {   // piani per azienda
   };
   let x = 0;
   for (const f of interni) { const w = Math.PI * 2 * f.peso / pesoTot; angolo(f, x, x + w); x += w; }
-  const maxD = Math.max(1, ...nodi.filter(n => !esterno(n) && !n.centro).map(n => n.depth));
-  const raggio = (d) => d <= 0 ? 0 : 1.5 + (d - 1) * 1.1;
+  const sottoSent = new Set();   // chi risponde a una sentinella sta con lei, fuori dagli anelli interni
+  const raccogli = (n) => n.figli.forEach(f => { sottoSent.add(f); raccogli(f); });
+  supervisori.forEach(raccogli);
+  const maxD = Math.max(1, ...nodi.filter(n => !esterno(n) && !n.centro && !sottoSent.has(n)).map(n => n.depth));
   supervisori.forEach((s, i) => { s.depth = maxD + 1; s.ang = Math.PI * 2 * (i + 0.5) / supervisori.length; s.esterno = true; foglie(s); });
-  nodi.forEach((n, i) => {
-    n.r = n.esterno ? raggio(maxD) + 1.2 : raggio(n.depth);
-    if (n.esterno) n.depth = maxD + 1;
-    n.sub = !n.esterno && n.depth > 0 ? n : n;
-    n.x = n.r * Math.cos(n.ang || 0); n.z = n.r * Math.sin(n.ang || 0);
-    n.y = 0.12 * Math.sin(i * 2.399 + n.depth);
-  });
   // Piani: uno per azienda, impilati; gli agenti senza azienda stanno sul piano "Trasversali" in alto;
   // chi serve piu' aziende sta tra i suoi piani; le sentinelle girano attorno a tutti i piani.
   const aziendeAttive = (dati.aziende || []).filter(z => z.attiva);
   const trasv = nodi.some(n => !n.centro && !n.esterno && !(n.aziende || []).some(id => aziendeAttive.some(z => z.id === id)));
-  const gap = 1.35;
+  const gap = 1.7;
   const piani = [];
   if (trasv) piani.push({ id: 0, nome: "Trasversali", colore: "#94a3b8" });
   aziendeAttive.forEach(z => piani.push({ id: z.id, nome: z.nome, colore: z.colore || "#f3b54a" }));
   piani.forEach((pi, k) => { pi.y = (k - (piani.length - 1) / 2) * gap; });
+  // Distribuzione: per ogni piano e per ogni livello i soggetti stanno su un anello, a distanza uguale tra loro.
+  // Il raggio dell'anello cresce quando i soggetti sono tanti (in ogni piano) e, se sono molti, si alternano un po' dentro e un po' fuori.
+  // chi sta alla stessa altezza (stesso piano, o tra gli stessi piani) divide lo stesso anello
+  const pianoDi = (n) => {
+    const ys = (n.aziende || []).map(id => (piani.find(pi => pi.id === id) || {}).y).filter(v => v !== undefined);
+    const y0 = ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : (trasv ? piani[0].y : 0);
+    return Math.round(y0 * 100) / 100;
+  };
+  const gruppi = new Map();
+  for (const n of nodi) if (!n.centro && !n.esterno && !sottoSent.has(n)) { const k = pianoDi(n) + "|" + n.depth; if (!gruppi.has(k)) gruppi.set(k, []); gruppi.get(k).push(n); }
+  const maxPer = {};
+  for (const l of gruppi.values()) maxPer[l[0].depth] = Math.max(maxPer[l[0].depth] || 0, l.length);
+  const ARCO_MIN = 0.62, SFALSA = 0.28, MOLTI = 8;
+  const R = {}; let prec = 0, precSf = false;
+  for (let d = 1; d <= maxD; d++) {
+    const nmax = maxPer[d] || 0, sf = nmax > MOLTI;
+    R[d] = Math.max(d === 1 ? 1.5 : prec + (sf || precSf ? 1.4 : 1.1), nmax * ARCO_MIN / (Math.PI * 2));
+    prec = R[d]; precSf = sf;
+  }
+  const raggioDi = (d) => d <= 0 ? 0 : (R[d] !== undefined ? R[d] : R[maxD]);
+  let gi = 0;
+  for (const l of gruppi.values()) {
+    gi++;
+    l.sort((a, b) => a.ang - b.ang || String(a.nome).localeCompare(String(b.nome)));
+    const d = l[0].depth, N = l.length, sf = (maxPer[d] || 0) > MOLTI && N > 1;
+    const fase = ((gi * 0.618) % 1) * Math.PI * 2 / N;   // gruppi a quote vicine non si mettono sulla stessa linea
+    l.forEach((n, i) => { n.ang = Math.PI * 2 * (i + 0.5) / N + fase; n.r = raggioDi(d) + (sf ? (i % 2 ? SFALSA : -SFALSA) : 0); });
+  }
+  const rEst = (R[maxD] || 1.5) + (((maxPer[maxD] || 0) > MOLTI) ? SFALSA : 0) + 1.5;
+  const nSent = supervisori.length, sfS = nSent > MOLTI;
+  supervisori.forEach((s, i) => { s.r = rEst + (sfS ? (i % 2 ? SFALSA : -SFALSA) : 0); });
+  nodi.forEach((n, i) => {
+    if (n.centro) { n.r = 0; n.x = 0; n.z = 0; n.y = 0; return; }
+    n.x = n.r * Math.cos(n.ang || 0); n.z = n.r * Math.sin(n.ang || 0);
+    n.y = 0.06 * Math.sin(i * 2.399 + n.depth);
+  });
   const yPiano = (id) => (piani.find(pi => pi.id === id) || {}).y;
   const sentinelle = nodi.filter(n => n.esterno && !n.superiore_id);
   nodi.forEach((n) => {
@@ -67,7 +98,9 @@ function calcolaLayout(dati) {   // piani per azienda
   const sposta = (n) => n.figli.forEach((f, k) => { f.esterno = n.esterno; f.r = n.r + 0.9 * (k + 1) / (n.figli.length + 1) + 0.4;
     f.ang = n.ang + (k - (n.figli.length - 1) / 2) * 0.25; f.x = f.r * Math.cos(f.ang); f.z = f.r * Math.sin(f.ang); sposta(f); });
   supervisori.forEach(sposta);
-  return { nodi, per, piani, rMax, raggi: [...new Set(nodi.filter(n => !n.centro && !n.esterno).map(n => Math.round(n.r * 100) / 100))] };
+  const estensione = Math.max(rMax, ...nodi.filter(n => n.esterno).map(n => n.r)) + 0.6;
+  // se la struttura cresce, la scena si rimpicciolisce per restare tutta nel riquadro
+  return { nodi, per, piani, rMax, estensione, k: Math.min(1, 5.0 / estensione), raggi: Object.values(R) };
 }
 
 function vistaOrganigramma(incorniciata) {
@@ -80,7 +113,7 @@ function vistaOrganigramma(incorniciata) {
   const legenda = h("div", { class: "legenda" });
   let dati = null, layout = null, azienda = "", progetto = "", scelto = null;
   let impulsi = [], dopo = null, giro = 0;
-  let rotY = 0.4, rotX = 0.5, zoom = 1, auto = true, trascina = false, ultimo = null, mossa = 0, pinch = 0;
+  let rotY = 0.4, rotX = 0.62, zoom = 1, auto = true, trascina = false, ultimo = null, mossa = 0, pinch = 0;
   let W = 360, H = 640, DPR = 1;
   const cx = cv.getContext("2d");
   const stelle = Array.from({ length: 120 }, () => ({ x: (Math.random() * 2 - 1) * 9, y: (Math.random() * 2 - 1) * 9, z: (Math.random() * 2 - 1) * 9 }));
@@ -94,7 +127,7 @@ function vistaOrganigramma(incorniciata) {
     const x1 = x * cy - z * sy, z1 = x * sy + z * cy;
     const y2 = y * cxr - z1 * sxr, z2 = y * sxr + z1 * cxr;
     const f = 5.5 / (5.5 + z2 + 3.2);
-    const s = Math.min(W, H) * 0.098 * zoom;
+    const s = Math.min(W, H) * 0.125 * zoom * (layout ? layout.k : 1);
     return { px: W / 2 + x1 * s * f, py: H / 2 + y2 * s * f, f, z: z2 };
   };
 
@@ -149,8 +182,9 @@ function vistaOrganigramma(incorniciata) {
     cx.globalAlpha = 1;
     disegnaImpulsi();
     const ord = layout.nodi.slice().sort((a, b) => b.p.z - a.p.z);
+    const daEtichettare = [];
     for (const n of ord) {
-      const r = Math.max((n.centro ? 13 : 5 + (n.livello === "manager" ? 2.5 : 0) + (n.carico || 0) / 100 * 4) * n.p.f * 1.5 * zoom, 3);
+      const r = Math.max((n.centro ? 13 : 5 + (n.livello === "manager" ? 2.5 : 0) + (n.carico || 0) / 100 * 4) * n.p.f * 1.5 * zoom * (0.55 + 0.45 * layout.k), 3);
       const c = colore(n);
       cx.globalAlpha = visibile(n) ? 1 : 0.15;
       cx.shadowColor = c; cx.shadowBlur = n.attivo ? 14 : 0; cx.fillStyle = c;
@@ -158,10 +192,25 @@ function vistaOrganigramma(incorniciata) {
       const az = n.aziende && n.aziende.length ? aziendaNome(n.aziende[0]) : null;
       if (az) { cx.strokeStyle = az.colore; cx.lineWidth = 2; cx.beginPath(); cx.arc(n.p.px, n.p.py, r + 3, 0, Math.PI * 2); cx.stroke(); }
       if (scelto === n.id) { cx.strokeStyle = "#fff"; cx.lineWidth = 2; cx.beginPath(); cx.arc(n.p.px, n.p.py, r + 7, 0, Math.PI * 2); cx.stroke(); }
-      cx.fillStyle = "rgba(230,237,243," + Math.min(1, 0.5 + n.p.f * 0.5) + ")";
-      cx.font = Math.round(10 + n.p.f * 3) + "px monospace"; cx.textAlign = "center";
-      cx.fillText(n.nome, n.p.px, n.p.py - r - 8);
+      // etichette: solo se non coprono altre gia' scritte (chi e' scelto, il centro e i capi hanno la precedenza)
+      n.etichetta = { x: n.p.px, y: n.p.py - r - 8, r, f: n.p.f };
+      if (n.centro || n.id === scelto || n.livello === "manager" || n.esterno) daEtichettare.unshift(n); else daEtichettare.push(n);
       if (n.richieste) { cx.fillStyle = n.bloccanti ? "#e8795a" : "#f3b54a"; cx.beginPath(); cx.arc(n.p.px + r, n.p.py - r, 5, 0, Math.PI * 2); cx.fill(); }
+    }
+    // le etichette si scrivono dopo i punti, dal piu' importante al piu' vicino, saltando quelle che si sovrapporrebbero
+    const occupati = [];
+    const prio = (n) => n.id === scelto ? 0 : n.centro ? 1 : (n.livello === "manager" || n.esterno) ? 2 : 3;
+    daEtichettare.sort((a, b) => prio(a) - prio(b) || b.p.f - a.p.f);
+    for (const n of daEtichettare) {
+      const e = n.etichetta, px = Math.round(10 + e.f * 3);
+      cx.font = px + "px monospace";
+      const w = cx.measureText(n.nome).width + 4, x0 = e.x - w / 2, y0 = e.y - px;
+      const urta = occupati.some(o => x0 < o.x1 && x0 + w > o.x0 && y0 < o.y1 && y0 + px + 2 > o.y0);
+      if (urta && prio(n) > 1) continue;
+      occupati.push({ x0, x1: x0 + w, y0, y1: y0 + px + 2 });
+      cx.globalAlpha = visibile(n) ? 1 : 0.15;
+      cx.textAlign = "center"; cx.lineJoin = "round"; cx.lineWidth = 3; cx.strokeStyle = "rgba(8,12,18,0.85)"; cx.strokeText(n.nome, e.x, e.y);
+      cx.fillStyle = "rgba(230,237,243," + Math.min(1, 0.5 + e.f * 0.5) + ")"; cx.fillText(n.nome, e.x, e.y);
     }
     cx.globalAlpha = 1;
   };
