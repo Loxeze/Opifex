@@ -3,13 +3,22 @@ from datetime import datetime, timezone
 
 from . import costi
 
-DATA_LISTINO = "2026-10-26"
+DATA_LISTINO = "2026-10-26"  # Anthropic, OpenAI e xAI da listini ufficiali
 # (prefisso del nome modello, USD per milione di token in ingresso, in uscita). INDICATIVI: da verificare sulle pagine ufficiali dei fornitori.
 LISTINO = [
-    ("claude-sonnet-5-5", 2.0, 10.0),
-    ("gpt-6-luna", 0.10, 0.50),
-    ("gpt-6.1-sol", 2.0, 10.0),
-    ("gpt-6-astra", 10.0, 50.0),
+    # Anthropic: pagina ufficiale dei prezzi (platform.claude.com/docs/en/about-claude/pricing), prezzo standard, prompt brevi
+    ("claude-fable-5", 10.0, 50.0), ("claude-mythos-5", 10.0, 50.0),
+    ("claude-opus-5-5", 4.0, 20.0), ("claude-opus-5", 5.0, 25.0),
+    ("claude-opus-4-5", 5.0, 25.0), ("claude-opus-4-6", 5.0, 25.0), ("claude-opus-4-7", 5.0, 25.0), ("claude-opus-4-8", 5.0, 25.0),
+    ("claude-opus-4-1", 15.0, 75.0), ("claude-opus-4-0", 15.0, 75.0), ("claude-opus-4-2025", 15.0, 75.0),
+    ("claude-sonnet-5", 2.0, 10.0), ("claude-sonnet-4", 3.0, 15.0),
+    ("claude-haiku-5", 0.10, 0.50),   # oltre 100K token di prompt: 0,50 / 2,50
+    ("claude-haiku-4-5", 1.0, 5.0),
+    # OpenAI: listino ufficiale (developers.openai.com/api/docs/pricing), standard, contesto breve
+    ("gpt-6-luna", 0.10, 0.50), ("gpt-6.1-sol", 2.0, 10.0), ("gpt-6-astra", 10.0, 50.0),
+    ("gpt-5.6-sol", 4.0, 20.0), ("gpt-5.6-cyber", 12.5, 75.0), ("gpt-rosalind", 5.0, 25.0), ("chat-latest", 5.0, 30.0), ("gpt-5.3-codex", 1.75, 14.0),
+    # xAI: contesto breve
+    ("grok-4.7", 2.0, 6.0), ("grok-4.6", 2.0, 6.0), ("grok-4.5", 2.0, 6.0), ("grok-4.3", 1.25, 2.5), ("grok-4.20", 1.25, 2.5), ("grok-build-0.1", 1.0, 2.0),
 ]
 
 
