@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from . import chat_coda, registro
 from .db import connessione
-from .documenti import ESTENSIONI, FileNonLeggibile, estrai_testo
+from .documenti import ELENCO_FORMATI, ESTENSIONI, FileNonLeggibile, estrai_testo, lettore_visivo
 from .esecuzione import EsecuzioneBloccata, esegui_agente
 from .cassaforte import CassaforteNonConfigurata
 from .fornitori import ErroreFornitore
@@ -38,7 +38,7 @@ MAX_ALLEGATI, MAX_BYTE_ALLEGATO, MAX_CARATTERI_ALLEGATO, MAX_CARATTERI_TOTALI = 
 @router.post("/agenti/{agente_id}/chat-allegati")
 def chat_con_allegati(agente_id: int, messaggio: str = Form(""), fascia_dati: str = Form("interno"), asincrono: bool = Form(False),
                       file: list[UploadFile] = File(...), utente: dict = Depends(utente_corrente)):
-    """Messaggio con file allegati (PDF, Word, TXT, MD, CSV). Il testo dei file serve solo per questa risposta: non entra nel repository."""
+    """Messaggio con file allegati (PDF, Word, Excel, PowerPoint, immagini, testo e altri). Il testo dei file serve solo per questa risposta: non entra nel repository."""
     _accesso(agente_id, utente, fascia_dati)
     if not file or len(file) > MAX_ALLEGATI:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Allega da 1 a {MAX_ALLEGATI} file")
@@ -46,12 +46,12 @@ def chat_con_allegati(agente_id: int, messaggio: str = Form(""), fascia_dati: st
     for f in file:
         nome = (f.filename or "allegato").strip()[:120]
         if not nome.lower().endswith(ESTENSIONI):
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"«{nome}»: formato non supportato (usa PDF, Word, TXT, MD o CSV)")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"«{nome}»: formato non supportato (usa {ELENCO_FORMATI})")
         dati = f.file.read(MAX_BYTE_ALLEGATO + 1)
         if len(dati) > MAX_BYTE_ALLEGATO:
             raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"«{nome}» supera i 10 MB")
         try:
-            testo = estrai_testo(nome, dati)
+            testo = estrai_testo(nome, dati, lettore_visivo(fascia_dati))
         except FileNonLeggibile as e:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"«{nome}»: {e}")
         limite = min(MAX_CARATTERI_ALLEGATO, MAX_CARATTERI_TOTALI - totale)

@@ -284,7 +284,7 @@ function modulo(a) {
     try { stato.documenti = await api("GET", "/gestione/documenti"); } catch (e) { sezioneDoc.replaceChildren(avviso(e.message, "no")); return; }
     const miei = stato.documenti.filter(x => x.assegnazioni.some(y => y.agente_id === a.id));
     const sotto = discendentiDi(a.id);
-    const file = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.txt,.md,.csv" });
+    const file = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,.html,.htm,.json,.xml,.eml,.txt,.md,.csv,.tsv,.png,.jpg,.jpeg,.webp,.gif" });
     const fasciaDoc = h("select", {}, Object.entries(ETICHETTA_FASCIA).map(([v, t]) => h("option", { value: v }, t))); fasciaDoc.value = "interno";
     const elenco = miei.map(x => {
       const mia = x.assegnazioni.find(y => y.agente_id === a.id);
@@ -680,7 +680,7 @@ function vistaChatSolo() {
   const testo = h("textarea", { placeholder: "Scrivi il messaggio o premi il microfono e parla…" });
   const msg = h("div");
   const bInvia = h("button", { class: "p" }, "Invia");
-  const allegati = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.txt,.md,.csv" });
+  const allegati = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,.html,.htm,.json,.xml,.eml,.txt,.md,.csv,.tsv,.png,.jpg,.jpeg,.webp,.gif" });
   const elencoAll = h("div", { class: "sotto" });
   allegati.addEventListener("change", () => { elencoAll.textContent = allegati.files.length ? "Allegati: " + [...allegati.files].map(x => x.name).join(", ") : ""; });
   const modoVoce = h("select", {}, h("option", { value: "browser" }, "Browser (gratuito)"), h("option", { value: "server" }, "Server con OpenAI (più affidabile)"));

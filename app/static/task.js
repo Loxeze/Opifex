@@ -128,7 +128,7 @@ async function schedaTask(id, padreId, dopo) {
   const msg = h("div");
   const sup = h("select", {}, h("option", { value: "" }, "Nessuno"), (o.manager || []).map(m => h("option", { value: m.id }, m.nome + (m.dipartimento ? " — " + m.dipartimento : "") + " — " + m.ruolo)));
   sup.value = d.supporto_agente_id ?? ""; sup.disabled = lettura;
-  const nuoviFile = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.txt,.md,.csv" });
+  const nuoviFile = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,.html,.htm,.json,.xml,.eml,.txt,.md,.csv,.tsv,.png,.jpg,.jpeg,.webp,.gif" });
   const boxDoc = h("div");
   const disegnaDoc = () => riempi(boxDoc, (d.documenti || []).length ? d.documenti.map(x => h("div", { class: "sotto" }, "📎 " + x.nome)) : h("p", { class: "sotto" }, "Nessun documento associato."));
   let chiudi;

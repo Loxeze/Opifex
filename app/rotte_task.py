@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from . import consigli_task, etichetta, registro
 from .db import connessione
-from .documenti import ESTENSIONI, MAX_BYTE, FileNonLeggibile, dividi_in_pezzi, estrai_testo
+from .documenti import ELENCO_FORMATI, ESTENSIONI, MAX_BYTE, FileNonLeggibile, dividi_in_pezzi, estrai_testo, lettore_visivo
 from .permessi import divisioni_visibili, utente_corrente
 
 router = APIRouter(prefix="/task")
@@ -355,12 +355,12 @@ def carica_documenti(tid: int, file: list[UploadFile] = File(...), u: dict = Dep
         for f in file:
             nome = (f.filename or "documento").strip()[:200]
             if not nome.lower().endswith(ESTENSIONI):
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"«{nome}»: formato non supportato (PDF, Word, TXT, MD, CSV)")
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"«{nome}»: formato non supportato ({ELENCO_FORMATI})")
             dati = f.file.read(MAX_BYTE + 1)
             if len(dati) > MAX_BYTE:
                 raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"«{nome}» e' troppo grande (massimo 15 MB)")
             try:
-                testo = estrai_testo(nome, dati)
+                testo = estrai_testo(nome, dati, lettore_visivo("interno"))
             except FileNonLeggibile as e:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"«{nome}»: {e}")
             r = conn.execute("INSERT INTO documenti (nome, nome_file, fascia_dati, per_tutti, caratteri, caricato_da) VALUES (%s,%s,'interno',FALSE,%s,%s) RETURNING id",

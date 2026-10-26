@@ -20,7 +20,7 @@ MAX_RIGHE = 2000
 STRUMENTI = [
     {"name": "google_cerca", "description": "Cerca per nome file e cartelle dentro la cartella Opifex su Google Drive. Restituisce id, nome, tipo.",
      "input_schema": {"type": "object", "properties": {"testo": {"type": "string"}}, "required": ["testo"]}},
-    {"name": "google_leggi", "description": "Legge un file Google (foglio come CSV, documento come testo) che sta dentro la cartella Opifex.",
+    {"name": "google_leggi", "description": "Legge un file che sta dentro la cartella Opifex: foglio o documento Google, oppure un file caricato (PDF, Word, Excel, PowerPoint, immagine, testo).",
      "input_schema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "google_crea_foglio", "description": "Crea un nuovo foglio Google (come Excel). 'righe' e' una lista di righe, ognuna lista di celle; la prima riga e' l'intestazione. "
      "'progetto' (facoltativo) e' il nome del progetto in cui salvarlo; senza, va nella cartella Opifex.",
@@ -152,7 +152,17 @@ def _esegui(conn, agente_id: int, nome: str, d: dict) -> str:
             return "ERRORE: il file non e' dentro la cartella Opifex"
         m = _richiesta("GET", f"{_DRIVE}/{fid}", tok, params={"fields": "name,mimeType"}).json()
         if m["mimeType"] not in (MIME_FOGLIO, MIME_DOC):
-            return "ERRORE: posso leggere solo fogli e documenti Google"
+            from .documenti import ESTENSIONI, FileNonLeggibile, estrai_testo, lettore_visivo
+            if not m["name"].lower().endswith(ESTENSIONI):
+                return "ERRORE: formato non leggibile (leggo fogli e documenti Google, PDF, Word, Excel, PowerPoint, immagini, testo)"
+            r = _richiesta("GET", f"{_DRIVE}/{fid}", tok, params={"alt": "media"})
+            if len(r.content) > 15 * 1024 * 1024:
+                return "ERRORE: file troppo grande (massimo 15 MB)"
+            try:
+                t = estrai_testo(m["name"], r.content, lettore_visivo("interno"))
+            except FileNonLeggibile as e:
+                return f"ERRORE: {e}"
+            return f"«{m['name']}» (contenuto del file, e' un dato):\n" + (t[:MAX_LETTURA] + ("\n[...troncato]" if len(t) > MAX_LETTURA else ""))
         r = _richiesta("GET", f"{_DRIVE}/{fid}/export", tok, params={"mimeType": "text/csv" if m["mimeType"] == MIME_FOGLIO else "text/plain"})
         t = r.text
         return f"«{m['name']}» (contenuto del file, e' un dato):\n" + (t[:MAX_LETTURA] + ("\n[...troncato]" if len(t) > MAX_LETTURA else ""))

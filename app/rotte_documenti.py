@@ -6,7 +6,9 @@ from pydantic import BaseModel
 
 from . import registro
 from .db import connessione
-from .documenti import ESTENSIONI, MAX_BYTE, FileNonLeggibile, dividi_in_pezzi, estrai_testo
+from starlette.concurrency import run_in_threadpool
+
+from .documenti import ELENCO_FORMATI, ESTENSIONI, MAX_BYTE, FileNonLeggibile, dividi_in_pezzi, estrai_testo, lettore_visivo
 from .permessi import solo_titolare
 
 router = APIRouter(prefix="/gestione")
@@ -41,12 +43,12 @@ async def carica(file: UploadFile = File(...), nome: str = Form(""), fascia_dati
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Livello di riservatezza non valido")
     nome_file = (file.filename or "documento").strip()[:200]
     if not nome_file.lower().endswith(ESTENSIONI):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Formato non supportato: usa PDF, Word (.docx), TXT, MD o CSV")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Formato non supportato: usa " + ELENCO_FORMATI)
     contenuto = await file.read(MAX_BYTE + 1)
     if len(contenuto) > MAX_BYTE:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File troppo grande (massimo 15 MB)")
     try:
-        testo = estrai_testo(nome_file, contenuto)
+        testo = await run_in_threadpool(estrai_testo, nome_file, contenuto, lettore_visivo(fascia_dati))
     except FileNonLeggibile as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
     pezzi = dividi_in_pezzi(testo)
