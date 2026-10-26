@@ -112,6 +112,20 @@ function bloccoPosta() {
 }
 
 // Backup cifrato, tetto di spesa e allarmi
+function schedaDatabase(db) {
+  if (!db) return h("p", { class: "sotto" }, "Informazioni non disponibili.");
+  if (db.errore) return avviso("Non riesco a leggere le informazioni del database (" + db.errore + ").", "no");
+  const MB = (n) => (n / 1024 / 1024).toFixed(1) + " MB";
+  const riga = (k, v) => h("div", { class: "sotto" }, h("b", {}, k + ": "), v);
+  return h("div", { class: "carta" },
+    db.compatibile ? avviso("PostgreSQL " + db.postgres + ": compatibile (serve la " + db.minima + " o più recente).", "ok")
+                   : avviso("PostgreSQL " + db.postgres + ": troppo vecchio, Opifex richiede la " + db.minima + " o più recente.", "no"),
+    riga("Versione di Opifex", db.versione_app),
+    riga("Database", db.nome + " · " + db.tabelle + " tabelle · " + MB(db.dimensione)),
+    riga("Aggiornamenti dello schema", db.migrazioni ? db.migrazioni.applicate + " applicati, l'ultimo è " + db.migrazioni.ultima + (db.migrazioni.quando ? " (" + new Date(db.migrazioni.quando).toLocaleString("it-IT") + ")" : "") : "tabella delle versioni non presente"),
+    h("p", { class: "aiuto" }, "Sono solo informazioni di lettura. L'ultimo aggiornamento dello schema dovrebbe essere l'ultimo file SQL della versione installata."));
+}
+
 function vistaSistema() {
   const corpo = h("div");
   const carica = async () => {
@@ -125,6 +139,8 @@ function vistaSistema() {
       const u = b.ultimo;
       riempi(corpo, [
         h("h2", {}, "Backup e costi"),
+        h("h3", {}, "Database e versione"),
+        schedaDatabase(d.database),
         h("h3", {}, "Backup automatico"),
         h("div", { class: "carta" },
           !b.chiave_creata ? avviso("Prima di tutto crea la chiave di backup: senza, il backup non parte.", "avv") : null,

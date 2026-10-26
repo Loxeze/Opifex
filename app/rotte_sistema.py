@@ -2,17 +2,43 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from . import allarmi, backup, cassaforte, prova_ripristino, registro, spesa
+from . import allarmi, backup, cassaforte, prova_ripristino, registro, spesa, versione
 from .db import connessione
 from .permessi import solo_titolare
 
 router = APIRouter(prefix="/gestione/sistema")
 
 
+MINIMA_POSTGRES = 12   # colonne generate per la ricerca testuale (documenti, memoria di lavoro, dossier)
+
+
+def info_database(conn) -> dict:
+    """Versione di PostgreSQL, nome e peso del database, migrazioni applicate. Solo lettura, nessun dato degli utenti."""
+    out: dict = {"versione_app": versione.versione_corrente(), "minima": MINIMA_POSTGRES}
+    try:
+        v = conn.execute("SHOW server_version").fetchone()
+        num = int(conn.execute("SHOW server_version_num").fetchone()["server_version_num"])
+        out["postgres"] = v["server_version"]
+        out["postgres_numero"] = num
+        out["compatibile"] = num // 10000 >= MINIMA_POSTGRES
+        out["nome"] = conn.execute("SELECT current_database() AS n").fetchone()["n"]
+        out["dimensione"] = int(conn.execute("SELECT pg_database_size(current_database()) AS d").fetchone()["d"])
+        out["tabelle"] = int(conn.execute("SELECT count(*) AS n FROM information_schema.tables WHERE table_schema = 'public'").fetchone()["n"])
+    except Exception as e:   # noqa: BLE001 - e' una pagina informativa: non deve mai rompere lo stato del sistema
+        out["errore"] = type(e).__name__
+        return out
+    if conn.execute("SELECT to_regclass('public.schema_migrazioni') AS t").fetchone()["t"] is None:
+        out["migrazioni"] = None   # la tabella la crea lo script di aggiornamento: puo' mancare in un'installazione di sviluppo
+    else:
+        r = conn.execute("SELECT count(*) AS n, max(nome) AS ultima, max(applicata_il) AS quando FROM schema_migrazioni").fetchone()
+        out["migrazioni"] = {"applicate": int(r["n"]), "ultima": r["ultima"], "quando": r["quando"].isoformat(timespec="minutes") if r["quando"] else None}
+    return out
+
+
 @router.get("")
 def stato(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        return {"backup": {**backup.stato(conn), "ripristino": prova_ripristino.stato(conn)}, "spesa": {"limiti": spesa.limiti(conn), "consumo": spesa.consumo(conn),
+        return {"database": info_database(conn), "backup": {**backup.stato(conn), "ripristino": prova_ripristino.stato(conn)}, "spesa": {"limiti": spesa.limiti(conn), "consumo": spesa.consumo(conn),
                                                         "modelli_senza_prezzo": spesa.modelli_senza_prezzo(conn)}}
 
 
