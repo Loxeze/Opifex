@@ -160,6 +160,12 @@ async def ciclo_vita(app: FastAPI):
                 pm.crea_mancanti(conn)   # un project manager per ogni progetto esistente
     except Exception:
         pass
+    try:
+        from . import reparti_pronti
+        with connessione() as conn:
+            reparti_pronti.aggiungi_nuovi_ruoli(conn)
+    except Exception:
+        pass
     compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari())]
     yield
     for c in compiti:
