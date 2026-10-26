@@ -22,20 +22,38 @@ LISTINO = [
 ]
 
 
-def prezzo_listino(nome: str):
-    c = [r for r in LISTINO if nome.startswith(r[0])]
+# Modelli precedenti: prezzi noti dai listini storici, NON riletti oggi sulle pagine ufficiali. Segnati «stimato».
+STORICO = [
+    ("claude-3-haiku", 0.25, 1.25), ("claude-3-5-haiku", 0.80, 4.0), ("claude-3-opus", 15.0, 75.0), ("claude-3-5-sonnet", 3.0, 15.0),
+    ("claude-3-7-sonnet", 3.0, 15.0), ("claude-sonnet-4-5", 3.0, 15.0), ("claude-opus-4-1", 15.0, 75.0),
+    ("gpt-3.5-turbo", 0.5, 1.5), ("gpt-4-turbo", 10.0, 30.0), ("gpt-4o-mini", 0.15, 0.6), ("gpt-4o", 2.5, 10.0), ("chatgpt-4o", 5.0, 15.0),
+    ("gpt-4.1-nano", 0.1, 0.4), ("gpt-4.1-mini", 0.4, 1.6), ("gpt-4.1", 2.0, 8.0), ("gpt-4", 30.0, 60.0),
+    ("gpt-5-nano", 0.05, 0.4), ("gpt-5-mini", 0.25, 2.0), ("gpt-5.1", 1.25, 10.0), ("gpt-5.2", 1.75, 14.0), ("gpt-5", 1.25, 10.0),
+    ("o1-mini", 1.1, 4.4), ("o1", 15.0, 60.0), ("o3-mini", 1.1, 4.4), ("o3", 2.0, 8.0), ("o4-mini", 1.1, 4.4),
+    ("grok-code-fast", 0.2, 1.5), ("grok-4-fast", 0.2, 0.5), ("grok-4", 3.0, 15.0), ("grok-3-mini", 0.3, 0.5), ("grok-3", 3.0, 15.0), ("grok-2", 2.0, 10.0),
+]
+
+
+def prezzo_listino(nome: str, solo_ufficiali: bool = False):
+    """(prefisso, input, output, origine) del prefisso piu' lungo che corrisponde, o None."""
+    c = [(*r, "indicativo") for r in LISTINO if nome.startswith(r[0])]
+    if not c and not solo_ufficiali and "-pro" not in nome:   # le varianti «pro» costano molto di piu': meglio nessun prezzo che uno sbagliato
+        c = [(*r, "stimato") for r in STORICO if nome.startswith(r[0])]
     return max(c, key=lambda r: len(r[0])) if c else None
 
 
-def applica_listino(conn) -> int:
-    """Imposta il prezzo indicativo ai soli modelli senza prezzo. Non tocca nulla di impostato dall'utente o gia' presente."""
-    n = 0
-    for m in conn.execute("SELECT nome FROM modelli_ai WHERE costo_input_per_milione IS NULL AND costo_output_per_milione IS NULL").fetchall():
+def applica_listino(conn) -> dict:
+    """Imposta il prezzo ai soli modelli senza prezzo. Non tocca nulla di impostato dall'utente o gia' presente.
+    Ritorna quanti ne ha compilati e l'elenco di quelli per cui non c'e' ancora un prezzo."""
+    n, mancanti = 0, []
+    for m in conn.execute("SELECT nome FROM modelli_ai WHERE costo_input_per_milione IS NULL AND costo_output_per_milione IS NULL ORDER BY nome").fetchall():
         p = prezzo_listino(m["nome"])
         if p:
-            conn.execute("UPDATE modelli_ai SET costo_input_per_milione=%s, costo_output_per_milione=%s, prezzo_origine='indicativo' WHERE nome=%s", (p[1], p[2], m["nome"]))
+            conn.execute("UPDATE modelli_ai SET costo_input_per_milione=%s, costo_output_per_milione=%s, prezzo_origine=%s WHERE nome=%s", (p[1], p[2], p[3], m["nome"]))
             n += 1
-    return n
+        else:
+            mancanti.append(m["nome"])
+    return {"aggiornati": n, "senza_prezzo": mancanti}
 
 
 def segna_manuale(conn, nome: str):

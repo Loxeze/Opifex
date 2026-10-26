@@ -87,6 +87,7 @@ def costi_modello(nome: str, d: Costi, _: dict = Depends(solo_titolare)):
                          (d.costo_input_per_milione, d.costo_output_per_milione, nome)).fetchone()
         if r is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Modello inesistente")
+        prezzi.segna_manuale(conn, nome)
     return {"stato": "ok"}
 
 
@@ -178,7 +179,7 @@ def impostazioni_modello(nome: str, d: ImpostazioniModello, _: dict = Depends(so
 @router.post("/modelli/prezzi/listino")
 def applica_listino(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        return {"aggiornati": prezzi.applica_listino(conn), "data_listino": prezzi.DATA_LISTINO}
+        return {**prezzi.applica_listino(conn), "data_listino": prezzi.DATA_LISTINO}
 
 
 @router.post("/modelli/prezzi/calibra")
