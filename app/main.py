@@ -17,6 +17,7 @@ from .rotte_agenti import router as router_agenti
 from .rotte_briefing import router as router_briefing
 from .rotte_accessi import router as router_accessi
 from .rotte_progetti import router as router_progetti
+from .rotte_scheda import router as router_scheda
 from .rotte_utenti import router as router_utenti, gestione as gestione_utenti
 from .rotte_dialoghi import router as router_dialoghi
 from .rotte_richieste import router as router_richieste
@@ -217,6 +218,7 @@ app.include_router(router_documenti)
 app.include_router(router_accessi)
 app.include_router(router_utenti)
 app.include_router(router_progetti)
+app.include_router(router_scheda)
 app.include_router(gestione_utenti)
 app.include_router(router_dialoghi)
 app.include_router(router_richieste)

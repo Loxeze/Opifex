@@ -38,6 +38,7 @@ function vistaProgetto() {
           h("div", { style: "margin:10px 0 4px;height:8px;border-radius:99px;background:var(--bordo);overflow:hidden" }, h("div", { style: "height:100%;width:" + perc + "%;background:linear-gradient(90deg,#f3b54a,#e58bd0)" })),
           h("div", { class: "sotto" }, perc + "% completato · " + fatte + " task chiuse su " + tot + (d.in_ritardo ? " · ⚠ " + d.in_ritardo + " in ritardo" : "")),
           p.allineamento ? h("details", { style: "margin-top:8px" }, h("summary", {}, "Documento di allineamento"), h("pre", { style: "white-space:pre-wrap" }, p.allineamento)) : null),
+        bloccoScheda(p.id),
         tit ? [h("h3", {}, "Manager di riferimento"),
           h("div", { class: "riga" }, [d.pm ? { ambito: "Project management", id: d.pm.id, nome: d.pm.nome } : null, ...d.manager].filter(Boolean).map(m => h("div", { class: "carta", style: "flex:0 1 220px" },
             h("div", { class: "sotto" }, m.ambito), h("div", { class: "nome" }, m.nome), h("div", { class: "azioni" }, h("button", { class: "p", onclick: () => parla(m.id) }, "Parla con lui"))))),
@@ -64,4 +65,63 @@ function vistaProgetto() {
   };
   carica();
   return [h("h2", {}, "Progetto"), corpo];
+}
+
+
+// Scheda del progetto: la memoria condivisa che leggono e aggiornano tutti gli agenti assegnati.
+function bloccoScheda(pid) {
+  const corpo = h("div");
+  const carica = async () => {
+    try {
+      const s = await api("GET", "/progetti/" + pid + "/scheda");
+      const msg = h("div"), mod = s.puo_modificare;
+      const campi = Object.entries(s.campi).map(([k, et]) => ({ k, et, t: h("textarea", { style: "min-height:90px", maxlength: 3000, disabled: !mod, placeholder: et }) }));
+      campi.forEach(c => { c.t.value = s[c.k] || ""; });
+      const nuovaDec = h("input", { type: "text", maxlength: 600, placeholder: "Nuova decisione presa" });
+      const file = h("input", { type: "file" });
+      const fascia = h("select", {}, ["interno", "pubblico", "riservato"].map(x => h("option", { value: x }, x)));
+      const scelta = h("select", {}, h("option", { value: "" }, "— allega un documento già caricato —"));
+      if (mod) api("GET", "/gestione/progetti/" + pid + "/documenti-disponibili").then(l => l.forEach(d => scelta.appendChild(h("option", { value: d.id }, d.nome)))).catch(() => {});
+      const dec = s.decisioni.filter(d => !d.superata), vecchie = s.decisioni.filter(d => d.superata);
+      const chi = x => x.agente ? "🤖 " + x.agente : (x.persona ? "👤 " + x.persona : "");
+      const NOMI = s.campi;
+      riempi(corpo, [
+        h("h3", {}, "Scheda del progetto"),
+        h("p", { class: "aiuto" }, "È la memoria condivisa: la leggono a ogni richiesta tutti gli agenti assegnati e la aggiornano loro stessi quando decidono o scoprono qualcosa." + (s.scheda_il ? " Ultimo aggiornamento: " + new Date(s.scheda_il).toLocaleString("it-IT") : "")),
+        h("div", { class: "carta" },
+          campi.map(c => h("label", {}, c.et, c.t)),
+          mod ? h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
+            try { const body = {}; campi.forEach(c => { body[c.k] = c.t.value; }); const r = await api("PUT", "/gestione/progetti/" + pid + "/scheda", body);
+              msg.replaceChildren(avviso(r.cambiati.length ? "Scheda salvata." : "Nessuna modifica.", "ok")); if (r.cambiati.length) carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva la scheda")) : null,
+          msg),
+        h("h3", {}, "Decisioni prese"),
+        dec.length ? dec.map(d => h("div", { class: "carta", style: "margin-bottom:6px" }, h("div", {}, d.testo),
+          h("div", { class: "sotto" }, new Date(d.creata_il).toLocaleDateString("it-IT") + " · " + chi(d)),
+          mod ? h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => { try { await api("DELETE", "/gestione/progetti/" + pid + "/decisioni/" + d.id); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Segna come superata")) : null))
+          : h("p", { class: "sotto" }, "Nessuna decisione registrata."),
+        mod ? h("div", { class: "riga" }, h("label", {}, "Registra una decisione", nuovaDec), h("button", { class: "p", style: "align-self:flex-end", onclick: async () => {
+          try { await api("POST", "/gestione/progetti/" + pid + "/decisioni", { testo: nuovaDec.value }); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Aggiungi")) : null,
+        vecchie.length ? h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer" }, "Decisioni superate (" + vecchie.length + ")"), vecchie.map(d => h("div", { class: "sotto", style: "text-decoration:line-through" }, d.testo))) : null,
+        h("h3", {}, "Documentazione di base"),
+        h("p", { class: "aiuto" }, "I documenti allegati qui li possono leggere e consultare tutti gli agenti assegnati al progetto (PDF, Word, Excel, immagini…). Il livello di riservatezza decide quali modelli possono riceverli."),
+        s.documenti.length ? s.documenti.map(d => h("div", { class: "carta", style: "margin-bottom:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap" },
+          h("div", { style: "flex:1" }, h("div", { class: "nome" }, d.nome), h("div", { class: "sotto" }, d.nome_file + " · " + d.caratteri + " caratteri · " + d.fascia_dati)),
+          mod ? h("button", { class: "s", onclick: async () => { try { await api("DELETE", "/gestione/progetti/" + pid + "/documenti/" + d.id); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Stacca dal progetto") : null))
+          : h("p", { class: "sotto" }, "Nessun documento allegato."),
+        mod ? h("div", { class: "carta" }, h("label", {}, "Carica un documento", file), h("label", {}, "Riservatezza", fascia),
+          h("div", { class: "azioni" }, h("button", { class: "p", onclick: async (e) => {
+            if (!file.files.length) { msg.replaceChildren(avviso("Scegli un file.", "avv")); return; }
+            e.currentTarget.disabled = true;
+            try { const fd = new FormData(); fd.append("file", file.files[0]); fd.append("nome", ""); fd.append("fascia_dati", fascia.value); await api("POST", "/gestione/progetti/" + pid + "/documenti", fd); carica(); }
+            catch (x) { msg.replaceChildren(avviso(x.message, "no")); e.currentTarget.disabled = false; } } }, "Carica e allega")),
+          h("div", { class: "azioni" }, scelta, h("button", { class: "s", onclick: async () => { if (!scelta.value) return;
+            try { await api("POST", "/gestione/progetti/" + pid + "/documenti/" + scelta.value); carica(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Allega"))) : null,
+        mod && s.versioni && s.versioni.length ? h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer;margin-top:10px" }, "Storico delle modifiche (" + s.versioni.length + ")"),
+          s.versioni.map(v => h("div", { class: "sotto", style: "padding:6px 0;border-top:1px solid var(--bordo)" },
+            new Date(v.creata_il).toLocaleString("it-IT") + " · " + (v.agente ? "🤖 " + v.agente : "👤 " + (v.persona || "?")) + " · " + (NOMI[v.campo] || v.campo),
+            h("div", { style: "white-space:pre-wrap;color:var(--testo)" }, (v.dopo || "").slice(0, 400))))) : null]);
+    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return corpo;
 }

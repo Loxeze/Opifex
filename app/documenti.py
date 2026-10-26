@@ -295,7 +295,11 @@ def pezzi_pertinenti(conn, agente_id: int, messaggio: str, limite: int = 4) -> l
              AND (d.per_tutti OR EXISTS (
                     SELECT 1 FROM documenti_agenti da
                     WHERE da.documento_id = d.id
-                      AND da.agente_id IN (SELECT id FROM sotto)))
+                      AND da.agente_id IN (SELECT id FROM sotto))
+                 OR EXISTS (
+                    SELECT 1 FROM progetti_documenti pd JOIN progetti_agenti pa ON pa.progetto_id = pd.progetto_id
+                    JOIN progetti pr ON pr.id = pd.progetto_id AND NOT pr.archiviato AND pr.eliminato_il IS NULL
+                    WHERE pd.documento_id = d.id AND pa.agente_id IN (SELECT id FROM sotto)))
            ORDER BY punteggio DESC LIMIT %(l)s""",
         {"q": q, "a": agente_id, "l": limite},
     ).fetchall()

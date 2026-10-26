@@ -109,6 +109,9 @@ def documenti_visibili(conn, agente_id: int) -> list[dict]:
         """WITH RECURSIVE sotto(id) AS (SELECT %(a)s::int UNION SELECT a.id FROM agenti a JOIN sotto s ON a.superiore_id = s.id)
            SELECT d.id, d.nome, d.fascia_dati FROM documenti d
            WHERE d.per_tutti OR EXISTS (SELECT 1 FROM documenti_agenti da WHERE da.documento_id = d.id AND da.agente_id IN (SELECT id FROM sotto))
+              OR EXISTS (SELECT 1 FROM progetti_documenti pd JOIN progetti_agenti pa ON pa.progetto_id = pd.progetto_id
+                         JOIN progetti pr ON pr.id = pd.progetto_id AND NOT pr.archiviato AND pr.eliminato_il IS NULL
+                         WHERE pd.documento_id = d.id AND pa.agente_id IN (SELECT id FROM sotto))
            ORDER BY d.nome""", {"a": agente_id}).fetchall()
 
 
