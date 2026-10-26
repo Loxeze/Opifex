@@ -34,6 +34,7 @@ from .rotte_sistema import router as router_sistema
 from .rotte_voce import router as router_voce
 from .rotte_memoria import router as router_memoria
 from .rotte_brevo import router as router_brevo
+from .rotte_canva import router as router_canva
 from . import etichetta
 from .rotte_plaud import router as router_plaud
 from .rotte_iniziative import router as router_iniziative
@@ -210,6 +211,7 @@ app.include_router(router_sistema)
 app.include_router(router_voce)
 app.include_router(router_memoria)
 app.include_router(router_brevo)
+app.include_router(router_canva)
 app.include_router(router_plaud)
 app.include_router(router_iniziative)
 app.include_router(router_biblioteca)

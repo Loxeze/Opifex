@@ -10,7 +10,7 @@ from .db import connessione
 from .fornitori import ErroreFornitore, Risposta, chiama_modello
 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
-from . import casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti
+from . import canva, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
@@ -36,7 +36,7 @@ def _carica_agente(conn, agente_id: int) -> dict:
         """
         SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.tipo, a.fascia_dati_max, a.attivo,
                a.modello AS modello_richiesto,
-               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.crm_attivo, a.ruolo_speciale, a.usa_biblioteca, a.sandbox_attivo, a.controllore_id, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
+               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.crm_attivo, a.canva_attivo, a.ruolo_speciale, a.usa_biblioteca, a.sandbox_attivo, a.controllore_id, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
                m.id AS modello_id, m.nome AS modello_nome,
                m.costo_input_per_milione, m.costo_output_per_milione,
                f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
@@ -214,6 +214,7 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             mem_tool = bool(ok_int)   # lo strumento di memoria si aggiunge agli agenti che usano comunque degli strumenti
             email_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["email_attivo"] and brevo_email.collegato(conn))
             crm_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["crm_attivo"])
+            canva_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["canva_attivo"] and canva.collegato(conn))
             iniz_tool = bool(ok_int and colleghi_ok and a["livello"] in ("manager", "referente")
                              and not conn.execute("SELECT sentinella FROM agenti WHERE id = %s", (agente_id,)).fetchone()["sentinella"])
             spec_tool = a["ruolo_speciale"] if (ok_int and a["ruolo_speciale"] in ("formatore", "cerimoniere")) else None
@@ -221,7 +222,7 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             sb_tool = bool(ok_int and a["sandbox_attivo"] and sandbox._impostazione(conn, "sandbox_attiva") == "true")
             rev_tool = bool(ok_int and a["controllore_id"])
             pm_tool = bool(conn.execute("SELECT 1 FROM progetti WHERE pm_agente_id = %s", (agente_id,)).fetchone())
-            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool:
+            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -309,6 +310,12 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                         gestori[s_["name"]] = gcm
                 with connessione() as c4:
                     avviso_extra += pm.contesto(c4, agente_id)
+                if canva_tool:
+                    extra.extend(canva.STRUMENTI)
+                    avviso_extra += canva.AVVISO
+                    gcv = canva.gestore(connessione)
+                    for s_ in canva.STRUMENTI:
+                        gestori[s_["name"]] = gcv
                 if pm_tool:
                     extra.extend(pm_strumenti.STRUMENTI)
                     avviso_extra += pm_strumenti.AVVISO + f" Oggi e' {__import__("datetime").date.today().isoformat()}."

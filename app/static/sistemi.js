@@ -168,3 +168,33 @@ function vistaSistema() {
   carica();
   return corpo;
 }
+
+
+function bloccoCanva() {
+  const corpo = h("div");
+  const carica = async () => {
+    try {
+      const s = await api("GET", "/gestione/canva");
+      const cid = h("input", { type: "text", value: s.client_id || "", maxlength: 300, placeholder: "ID client dell'app Canva" });
+      const sec = h("input", { type: "password", autocomplete: "off", placeholder: s.client_configurato ? "•••••• (già salvato)" : "Segreto client" });
+      const msg = h("div");
+      const mostra = (t, tipo) => msg.replaceChildren(avviso(t, tipo));
+      if (s.esito && s.esito.startsWith("ok:")) mostra("Canva collegato: " + s.esito.slice(3), "ok");
+      else if (s.esito) mostra(s.esito, "no");
+      if (s.errore) mostra(s.errore, "no");
+      corpo.replaceChildren(h("div", { class: "carta" },
+        h("p", { class: "sotto" }, s.collegato ? "Collegato" + (s.nome ? " come " + s.nome : "") + "." : "Non collegato."),
+        msg,
+        s.collegato ? h("div", { class: "azioni" },
+          h("button", { class: "s", onclick: async () => { try { mostra((await api("POST", "/gestione/canva/prova")).esito, "ok"); } catch (x) { mostra(x.message, "no"); } } }, "Prova"),
+          h("button", { class: "s", onclick: async () => { if (!confirm("Scollegare Canva?")) return; try { await api("DELETE", "/gestione/canva"); carica(); } catch (x) { mostra(x.message, "no"); } } }, "Scollega")) : null,
+        h("p", { class: "aiuto" }, "1. Su canva.com/developers crea un'integrazione (Connect API) e attiva i permessi: design:meta:read, design:content:read, design:content:write, asset:read, asset:write, profile:read. 2. Come URL di reindirizzamento inserisci: " + s.redirect + " 3. Incolla qui ID e segreto (il segreto viene cifrato), poi premi «Collega Canva». Serve un account Canva a pagamento; i design si creano e si esportano, non si riempiono in automatico. Poi abilita Canva sugli agenti che devono usarlo, nella loro scheda."),
+        h("label", {}, "ID client", cid), h("label", {}, "Segreto client", sec),
+        h("div", { class: "azioni" },
+          h("button", { class: "s", onclick: async () => { try { await api("PUT", "/gestione/canva/client", { client_id: cid.value.trim(), client_secret: sec.value.trim() || null }); carica(); } catch (x) { mostra(x.message, "no"); } } }, "Salva credenziali"),
+          s.client_configurato ? h("button", { class: "p", onclick: async () => { try { window.location.href = (await api("POST", "/gestione/canva/autorizza")).url; } catch (x) { mostra(x.message, "no"); } } }, s.collegato ? "Ricollega Canva" : "Collega Canva") : null)));
+    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return corpo;
+}

@@ -137,7 +137,8 @@ function vistaCollegamenti() {
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("PUT", "/gestione/google/client", { client_id: cid.value.trim(), client_secret: sec.value.trim() || null }); carica(); } catch (x) { mostra(x.message, "no"); } } }, "Salva credenziali"))),
         bloccoPosta(),
         h("h3", {}, "Altri servizi"),
-        h("div", { class: "carta" }, h("div", { class: "sotto" }, "Prossimi: Brevo (email marketing), Canva, Plaud e altri tramite chiave API.")),
+        h("h3", {}, "Canva"),
+        bloccoCanva(),
       ]);
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };

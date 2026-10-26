@@ -217,6 +217,7 @@ function modulo(a) {
   const socialAttivo = h("input", { type: "checkbox" }); socialAttivo.checked = !!d.social_attivo;
   const emailAttivo = h("input", { type: "checkbox" }); emailAttivo.checked = !!d.email_attivo;
   const crmAttivo = h("input", { type: "checkbox" }); crmAttivo.checked = !!d.crm_attivo;
+  const canvaAttivo = h("input", { type: "checkbox" }); canvaAttivo.checked = !!d.canva_attivo;
   const driveAttivo = h("input", { type: "checkbox" }); driveAttivo.checked = !!d.drive_attivo;
   const conn = stato.connessioni.map(c => {
     const cb = h("input", { type: "checkbox", value: c.id }); cb.checked = d.connessioni.includes(c.id);
@@ -264,7 +265,7 @@ function modulo(a) {
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,
       fasi: fasi.filter(f => f.titolo.trim()).map(f => ({ ...f, titolo: f.titolo.trim() })),
-      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, email_attivo: emailAttivo.checked, crm_attivo: crmAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null,
+      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, email_attivo: emailAttivo.checked, crm_attivo: crmAttivo.checked, canva_attivo: canvaAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null,
       connessioni: conn.filter(([, cb]) => cb.checked).map(([c]) => c.id),
     };
     try {
@@ -354,6 +355,7 @@ function modulo(a) {
       h("div", { class: "interruttore" }, vedeTutto, h("span", {}, "Vede cosa fai e cosa ti dicono gli altri agenti (sintesi recente, nei limiti di riservatezza)")),
       h("label", {}, "Casella di posta che gestisce (legge e prepara bozze, non invia)", gmailSel),
       h("div", { class: "interruttore" }, socialAttivo, h("span", {}, "Può preparare post per i social via Buffer (non pubblica: li approvi tu dalla pagina Social)")),
+      h("div", { class: "interruttore" }, canvaAttivo, h("span", {}, "Può creare ed esportare design su Canva (serve Canva collegato in Collegamenti)")),
       h("div", { class: "interruttore" }, crmAttivo, h("span", {}, "Può consultare i conteggi del CRM (solo numeri aggregati, mai nomi o recapiti)")),
       h("div", { class: "interruttore" }, emailAttivo, h("span", {}, "Può preparare campagne email via Brevo (non invia: le approvi tu dalla pagina Email)")),
       h("div", { class: "interruttore" }, driveAttivo, h("span", {}, "Può creare e modificare fogli e documenti Google nella cartella Opifex (non può cancellare)")),
