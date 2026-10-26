@@ -81,6 +81,7 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                   allegati: list[tuple[str, str]] | None = None) -> dict:
     """memorizza=True: lo scambio entra nella cronologia della chat con questo utente (e l'agente la rivede alla volta dopo)."""
     with connessione() as conn:
+        t_inizio = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
         a = _carica_agente(conn, agente_id)
 
         a["istruzioni"] = a["istruzioni"] + richieste.REGOLA + percorsi_blocco(conn, agente_id)
@@ -236,7 +237,7 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                                   "input_schema": {"type": "object", "properties": {"destinatario": {"type": "string"},
                                                    "domanda": {"type": "string"}}, "required": ["destinatario", "domanda"]}})
                     avviso_extra += ("\n\nCOLLEGHI: ognuno ha una scheda (nome — dipartimento — azienda — compito): scegli a chi chiedere in base a quella. Se non hai chiaro cosa ti viene chiesto o ti servono informazioni di altri, usa chiedi_a_agente "
-                                     "invece di indovinare. Nella domanda spiega chi sei, cosa stai facendo, a che punto sei e cosa ti serve esattamente. "
+                                     "invece di indovinare. Scrivi la domanda breve e iniziala con un codice (#R richiesta, #D dubbio, #I informazione senza risposta, #E eseguito): solo cio' che serve al collega, con gli identificativi di task e documenti. "
                                      f"Puoi fare al massimo {max_domande} domande per compito.")
 
                     def _chiedi(nome, dati):
@@ -446,8 +447,10 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             (agente_id, utente_id),
         )
         n_richieste = richieste.estrai_e_salva(conn, agente_id, ris.testo)
+        file_creati = [dict(r) for r in conn.execute(
+            "SELECT nome, tipo, link FROM file_google_agenti WHERE agente_id = %s AND creato_il >= %s ORDER BY creato_il", (agente_id, t_inizio)).fetchall()]
         if memorizza:
-            memoria.registra_scambio(conn, agente_id, utente_id, messaggio_originale, ris.testo, fascia_dati)
-    return {"agente": a["nome"], "risposta": ris.testo, "richieste_create": n_richieste,
+            memoria.registra_scambio(conn, agente_id, utente_id, messaggio_originale, ris.testo, fascia_dati, file_creati or None)
+    return {"agente": a["nome"], "risposta": ris.testo, "file_creati": file_creati, "richieste_create": n_richieste,
             "token_input": ris.token_input, "token_output": ris.token_output,
             "documenti_usati": usati, "documenti_esclusi_per_riservatezza": esclusi, "avvisi": avvisi}

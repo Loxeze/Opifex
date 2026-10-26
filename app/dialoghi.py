@@ -6,7 +6,7 @@ import json
 
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
-from . import catalogo_modelli, memoria, richieste
+from . import catalogo_modelli, codici, memoria, richieste
 from .riservatezza import anonimizza, puo_uscire
 
 REGOLE_ESTESE = """Stai dialogando con un collega della stessa organizzazione di Lorenzo Zeppa (un altro agente AI).
@@ -22,14 +22,14 @@ Regole del dialogo:
 6. Se la questione e' completamente chiarita scrivi alla fine [CHIARITO], indicando la decisione presa.
 Rispondi in italiano, in modo completo ma senza giri di parole."""
 
-REGOLE_BREVI = """Stai dialogando con un collega della stessa organizzazione di Lorenzo Zeppa (un altro agente AI). Comunicazione INTERNA: breve e diretta.
+REGOLE_BREVI = """Stai dialogando con un collega della stessa organizzazione di Lorenzo Zeppa (un altro agente AI). Comunicazione INTERNA: brevissima.
+Ogni messaggio INIZIA con un codice: """ + codici.LEGENDA + """
 Regole:
-1. Niente saluti, niente presentazioni, niente riepiloghi di cio' che e' gia' stato detto, niente ringraziamenti. Massimo 120 parole.
-2. Vai al punto con questi campi, solo quelli che servono: «Fatto:» (esito), «Serve:» (una domanda precisa o l'azione che chiedi), «Decisione:» (cosa hai scelto e perche', in una riga).
-3. Rimanda per identificativo (task #12, documento #5, progetto «X») invece di ripetere il contenuto. Il ragionamento solo se te lo chiedono.
-4. Se manca un'informazione necessaria NON indovinare: fai UNA domanda precisa. Non inventare dati: se non lo sai, dillo.
-5. RISOLVETE TRA VOI: non rimandare a Lorenzo. Chi e' piu' vicino al tema fornisce o decide; se il dubbio non e' sostanziale scegliete l'ipotesi piu' ragionevole e dichiaratela. Lorenzo si interpella solo per spese, invii all'esterno a suo nome, azioni irreversibili, credenziali o scelte di strategia.
-6. Quando e' tutto chiarito scrivi solo «[CHIARITO] decisione». Se il collega ti scrive solo conferme («ok», «fatto», «grazie») chiudi con [CHIARITO].
+1. Dopo il codice, solo l'essenziale (massimo 80 parole): niente saluti, presentazioni, riepiloghi di cio' che e' gia' stato detto, ringraziamenti. Se il codice basta, scrivi solo il codice (es. «#E» oppure «#A»).
+2. Rimanda per identificativo (task #12, documento #5, progetto «X») invece di ripetere il contenuto. Il ragionamento solo se te lo chiedono.
+3. Se manca un'informazione necessaria NON indovinare: «#D» con UNA domanda precisa. Non inventare dati: se non lo sai, dillo.
+4. RISOLVETE TRA VOI: non rimandare a Lorenzo. Chi e' piu' vicino al tema fornisce o decide; se il dubbio non e' sostanziale scegliete l'ipotesi piu' ragionevole e dichiaratela («#C decisione»). Lorenzo si interpella solo per spese, invii all'esterno a suo nome, azioni irreversibili, credenziali o scelte di strategia («#B»).
+5. Se il collega ti scrive #E, #C, #A o #I non devi rispondere con altro che «#A», e solo se serve.
 Italiano."""
 
 REGOLE = REGOLE_BREVI
@@ -221,6 +221,11 @@ def domanda_a_collega(da_id: int, nome_dest: str, domanda: str, conv_id: int | N
                 raise DialogoBloccato("Conversazione inesistente")
         _salva_messaggio(conn, conv_id, da_id, dest["id"], domanda)
         conn.commit()
+        if codici.chiude(domanda) and not dest.get("ruolo_speciale"):
+            # informazione o conferma (#I, #E, #C, #A): nessuna risposta da generare, niente chiamata al modello
+            _salva_messaggio(conn, conv_id, dest["id"], da_id, "#A")
+            conn.commit()
+            return "#A ricevuto", conv_id
         if dest.get("ruolo_speciale"):
             return _risposta_speciale(conn, dest, da_id, conv_id, domanda, fascia, utente_id), conv_id
         risposta = _fai_parlare(conn, dest["id"], da_id, conv_id,
@@ -260,6 +265,6 @@ def _scambia(conn, conv_id, parlante, altro, argomento, messaggi, fascia, utente
                              else "Rispondi al collega. Se non e' chiaro chiedi chiarimenti precisi."))
             testo = _fai_parlare(conn, parlante, altro, conv_id, istruzione, fascia, utente_id)
             conn.commit()
-            if "[CHIARITO]" in testo:
+            if codici.chiude(testo):
                 break
             parlante, altro = altro, parlante

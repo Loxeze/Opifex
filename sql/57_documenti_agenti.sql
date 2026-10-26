@@ -1,0 +1,5 @@
+ALTER TABLE agenti ADD COLUMN IF NOT EXISTS drive_cartella_id TEXT;
+ALTER TABLE file_google_agenti ADD COLUMN IF NOT EXISTS link TEXT;
+ALTER TABLE file_google_agenti ADD COLUMN IF NOT EXISTS cartella_id TEXT;
+ALTER TABLE file_google_agenti ADD COLUMN IF NOT EXISTS stato TEXT NOT NULL DEFAULT 'ok';
+ALTER TABLE chat_messaggi ADD COLUMN IF NOT EXISTS allegati JSONB;

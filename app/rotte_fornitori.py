@@ -130,7 +130,7 @@ def verifica(_: dict = Depends(solo_titolare)):
 
 
 # ---------- Catalogo modelli (1.24.3) ----------
-from . import catalogo_modelli  # noqa: E402
+from . import catalogo_modelli, prezzi  # noqa: E402
 
 
 @router.post("/modelli/importa")
@@ -146,7 +146,7 @@ def importa_modelli(u: dict = Depends(solo_titolare)):
 def elenco_modelli(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         modelli = conn.execute(
-            """SELECT m.nome, f.nome AS fornitore, m.fascia, m.costo_input_per_milione, m.costo_output_per_milione, m.usa_per_dialoghi, m.importato
+            """SELECT m.nome, f.nome AS fornitore, m.fascia, m.costo_input_per_milione, m.costo_output_per_milione, m.usa_per_dialoghi, m.importato, m.prezzo_origine
                FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id ORDER BY f.nome, m.nome""").fetchall()
         return {"modelli": [{**m, "costo_input_per_milione": float(m["costo_input_per_milione"]) if m["costo_input_per_milione"] is not None else None,
                              "costo_output_per_milione": float(m["costo_output_per_milione"]) if m["costo_output_per_milione"] is not None else None} for m in modelli],
@@ -156,6 +156,8 @@ def elenco_modelli(_: dict = Depends(solo_titolare)):
 class ImpostazioniModello(BaseModel):
     usa_per_dialoghi: bool | None = None
     fascia: str | None = Field(default=None, pattern="^(economico|standard|avanzato)$")
+    costo_input_per_milione: float | None = Field(default=None, ge=0)
+    costo_output_per_milione: float | None = Field(default=None, ge=0)
 
 
 @router.put("/modelli/{nome:path}/impostazioni")
@@ -167,7 +169,22 @@ def impostazioni_modello(nome: str, d: ImpostazioniModello, _: dict = Depends(so
             conn.execute("UPDATE modelli_ai SET usa_per_dialoghi = %s WHERE nome = %s", (d.usa_per_dialoghi, nome))
         if d.fascia:
             conn.execute("UPDATE modelli_ai SET fascia = %s WHERE nome = %s", (d.fascia, nome))
+        if d.costo_input_per_milione is not None and d.costo_output_per_milione is not None:
+            conn.execute("UPDATE modelli_ai SET costo_input_per_milione=%s, costo_output_per_milione=%s WHERE nome=%s", (d.costo_input_per_milione, d.costo_output_per_milione, nome))
+            prezzi.segna_manuale(conn, nome)
     return {"stato": "ok"}
+
+
+@router.post("/modelli/prezzi/listino")
+def applica_listino(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return {"aggiornati": prezzi.applica_listino(conn), "data_listino": prezzi.DATA_LISTINO}
+
+
+@router.post("/modelli/prezzi/calibra")
+def calibra_prezzi(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return prezzi.calibra(conn)
 
 
 class Automatico(BaseModel):

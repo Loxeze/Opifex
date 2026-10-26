@@ -91,7 +91,21 @@ def _cartella_destinazione(conn, tok: str, radice: str, progetto: str | None, ag
             if cand:
                 return cand
         raise ErroreGoogle(f"Il progetto «{progetto}» non ha ancora una cartella su Drive (sincronizzalo dalla pagina Progetti)")
-    return radice
+    return cartella_agente(conn, tok, radice, agente_id)
+
+
+def cartella_agente(conn, tok: str, radice: str, agente_id: int) -> str:
+    """Cartella dell'agente dentro «Opifex» (la crea se manca, la ritrova se spostata/rinominata)."""
+    a = conn.execute("SELECT nome, drive_cartella_id FROM agenti WHERE id = %s", (agente_id,)).fetchone()
+    if a is None:
+        return radice
+    try:
+        cid = google.cartella(tok, a["nome"], radice, a["drive_cartella_id"])
+    except ErroreGoogle:
+        return radice  # il file va comunque creato: l'allineamento lo sposta quando la cartella e' disponibile
+    if cid != a["drive_cartella_id"]:
+        conn.execute("UPDATE agenti SET drive_cartella_id = %s WHERE id = %s", (cid, agente_id))
+    return cid
 
 
 def _file_proprio(conn, file_id: str, tipo: str) -> None:
@@ -146,7 +160,8 @@ def _esegui(conn, agente_id: int, nome: str, d: dict) -> str:
         dest = _cartella_destinazione(conn, tok, radice, d.get("progetto"), agente_id)
         titolo = str(d.get("titolo", "")).strip() or "Foglio senza titolo"
         f = _crea_con_contenuto(tok, titolo, MIME_FOGLIO, "text/csv", _csv(d.get("righe")), dest)
-        conn.execute("INSERT INTO file_google_agenti (file_id, agente_id, nome, tipo) VALUES (%s,%s,%s,'foglio')", (f["id"], agente_id, f["name"]))
+        conn.execute("INSERT INTO file_google_agenti (file_id, agente_id, nome, tipo, link, cartella_id) VALUES (%s,%s,%s,'foglio',%s,%s)",
+                     (f["id"], agente_id, f["name"], f.get("webViewLink"), dest))
         conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli) VALUES (%s,'google_file_creato',%s::jsonb)",
                      (agente_id, json.dumps({"file": f["name"], "tipo": "foglio"})))
         return f"Foglio creato: «{f['name']}» id {f['id']} link {f.get('webViewLink', '')}"
@@ -156,7 +171,8 @@ def _esegui(conn, agente_id: int, nome: str, d: dict) -> str:
         import html
         corpo = "".join(f"<p>{html.escape(p).replace(chr(10), '<br>')}</p>" for p in str(d.get("testo", "")).split("\n\n") if p.strip())
         f = _crea_con_contenuto(tok, titolo, MIME_DOC, "text/html", f"<html><body>{corpo}</body></html>", dest)
-        conn.execute("INSERT INTO file_google_agenti (file_id, agente_id, nome, tipo) VALUES (%s,%s,%s,'documento')", (f["id"], agente_id, f["name"]))
+        conn.execute("INSERT INTO file_google_agenti (file_id, agente_id, nome, tipo, link, cartella_id) VALUES (%s,%s,%s,'documento',%s,%s)",
+                     (f["id"], agente_id, f["name"], f.get("webViewLink"), dest))
         conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli) VALUES (%s,'google_file_creato',%s::jsonb)",
                      (agente_id, json.dumps({"file": f["name"], "tipo": "documento"})))
         return f"Documento creato: «{f['name']}» id {f['id']} link {f.get('webViewLink', '')}"

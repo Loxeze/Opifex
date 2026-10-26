@@ -2,6 +2,7 @@
 e documenti consultabili. Ogni brano che sta per uscire verso il fornitore passa dal controllo di riservatezza."""
 from .documenti import pezzi_pertinenti
 from .riservatezza import puo_uscire
+import json
 
 MAX_STORIA = 10
 MAX_BRANO = 1500
@@ -16,11 +17,11 @@ def _taglia(t: str, n: int) -> str:
     return t if len(t) <= n else t[:n] + "…"
 
 
-def registra_scambio(conn, agente_id: int, utente_id: int | None, domanda: str, risposta: str, fascia: str):
+def registra_scambio(conn, agente_id: int, utente_id: int | None, domanda: str, risposta: str, fascia: str, allegati: list | None = None):
     conn.execute("INSERT INTO chat_messaggi (agente_id, utente_id, ruolo, testo, fascia_dati) VALUES (%s,%s,'utente',%s,%s)",
                  (agente_id, utente_id, domanda, fascia))
-    conn.execute("INSERT INTO chat_messaggi (agente_id, utente_id, ruolo, testo, fascia_dati) VALUES (%s,%s,'agente',%s,%s)",
-                 (agente_id, utente_id, risposta, fascia))
+    conn.execute("INSERT INTO chat_messaggi (agente_id, utente_id, ruolo, testo, fascia_dati, allegati) VALUES (%s,%s,'agente',%s,%s,%s::jsonb)",
+                 (agente_id, utente_id, risposta, fascia, json.dumps(allegati) if allegati else None))
 
 
 MAX_SCAMBI = 6

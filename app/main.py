@@ -35,6 +35,7 @@ from .rotte_voce import router as router_voce
 from .rotte_memoria import router as router_memoria
 from .rotte_brevo import router as router_brevo
 from .rotte_canva import router as router_canva
+from .allineamento import router as router_allineamento
 from .rotte_costi import router as router_costi
 from . import etichetta
 from .rotte_plaud import router as router_plaud
@@ -165,6 +166,8 @@ async def ciclo_vita(app: FastAPI):
         from . import reparti_pronti
         with connessione() as conn:
             reparti_pronti.aggiungi_nuovi_ruoli(conn)
+            from . import prezzi as _prezzi
+            _prezzi.applica_listino(conn)
     except Exception:
         pass
     compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari())]
@@ -219,6 +222,7 @@ app.include_router(router_voce)
 app.include_router(router_memoria)
 app.include_router(router_brevo)
 app.include_router(router_canva)
+app.include_router(router_allineamento)
 app.include_router(router_costi)
 app.include_router(router_plaud)
 app.include_router(router_iniziative)

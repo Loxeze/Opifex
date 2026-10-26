@@ -205,3 +205,9 @@ header{padding-top:max(12px,env(safe-area-inset-top))}
   .menu-imp{flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
   .menu-imp button{flex:none}
 }
+.demo-sfondo{position:fixed;inset:0;z-index:50;background:var(--sfondo,#0b0f14);display:flex;flex-direction:column}
+.demo-barra{display:flex;gap:8px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--bordo)}
+.demo-area{flex:1;min-height:0;overflow:auto;padding:10px}
+.demo-area .dashboard{height:100%}
+.demo-area .scena-pagina,.demo-area .scena{height:100%}
+.demo-largo{max-width:1200px;margin:0 auto}

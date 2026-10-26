@@ -500,9 +500,11 @@ function vistaDialoghi(senzaTitoli) {
   const colonnaConv = h("div");
   const dettaglio = h("div");
   let ultimoId = 0, primo = true;
+  const CODICI_MSG = { R: "Richiesta", E: "Eseguito", C: "Chiarito", D: "Dubbio", A: "D'accordo", N: "Rifiuto", B: "Bloccato", P: "In corso", I: "Informazione" };
+  const testoCodice = (t) => { const x = /^\s*#([RECDANBPI])(?=$|[\s:.,;\-—–])/.exec(t || ""); return x ? "[" + x[1] + " · " + CODICI_MSG[x[1]] + "]" + (t.slice(x[0].length) ? " " + t.slice(x[0].length).trim() : "") : t; };
   const messaggioFeed = (m) => h("div", { style: "margin-bottom:12px" },
     h("div", { class: "sotto" }, (m.da || "?") + " → " + (m.a || "?") + " · " + new Date(m.creato_il).toLocaleTimeString("it-IT") + " · " + m.titolo),
-    h("div", { class: "risposta" }, m.testo));
+    h("div", { class: "risposta" }, testoCodice(m.testo)));
   const aggiornaFeed = async () => {
     try {
       const nuovi = await api("GET", "/gestione/dialoghi/feed" + (primo ? "" : "?dopo_id=" + ultimoId));
@@ -526,7 +528,7 @@ function vistaDialoghi(senzaTitoli) {
         h("div", { class: "nome" }, c.titolo), h("div", { class: "sotto" }, "Dati: " + ETICHETTA_FASCIA[c.fascia_dati].toLowerCase()),
         c.messaggi.map(m => h("div", { style: "margin-top:12px" },
           h("div", { class: "sotto" }, m.da + " → " + m.a + " · " + new Date(m.creato_il).toLocaleString("it-IT") + (m.modello ? " · " + m.modello : "")),
-          h("div", { class: "risposta" }, m.testo))),
+          h("div", { class: "risposta" }, testoCodice(m.testo)))),
         h("div", { class: "azioni" }, h("button", { class: "s", onclick: () => dettaglio.replaceChildren() }, "Chiudi"))));
       dettaglio.scrollIntoView({ behavior: "smooth" });
     } catch (e) { dettaglio.replaceChildren(avviso(e.message, "no")); }
@@ -654,7 +656,7 @@ function vistaChat() {
     } catch (e) { /* riprova */ }
   };
   aggiorna(); stato.timer2 = setInterval(aggiorna, 6000);
-  return [h("h2", {}, "Chat"), pannelloRichieste(aggiorna), pannelloMemoria(), riep, lavoro,
+  return [h("div", { class: "azioni" }, h("h2", { style: "flex:1;margin:0" }, "Chat"), bottoneAllinea()), pannelloRichieste(aggiorna), pannelloMemoria(), riep, lavoro,
     h("div", { class: "chat-doppia" }, h("div", { class: "chat-sx" }, vistaChatSolo()), h("div", { class: "chat-dx" }, vistaDialoghi(true)))];
 }
 
@@ -694,7 +696,7 @@ function vistaChatSolo() {
       } else r = await api("POST", "/agenti/" + scelta.value + "/chat", { messaggio: testo.value, fascia_dati: f.value });
       const avvAll = [];
       if (r.allegati_troncati && r.allegati_troncati.length) avvAll.push("File letti solo in parte perché lunghi: " + r.allegati_troncati.join(", "));
-      stato.conversazione.unshift({ agente: agente.nome, agenteId: agente.id, domanda: testo.value + (r.allegati_letti ? "\n📎 " + r.allegati_letti.join(", ") : ""), risposta: r.risposta, t: r.token_input + r.token_output,
+      stato.conversazione.unshift({ agente: agente.nome, agenteId: agente.id, domanda: testo.value + (r.allegati_letti ? "\n📎 " + r.allegati_letti.join(", ") : ""), risposta: r.risposta, file: r.file_creati || [], t: r.token_input + r.token_output,
         usati: r.documenti_usati || [], esclusi: r.documenti_esclusi_per_riservatezza || [], avvisi: (r.avvisi || []).concat(avvAll) });
       testo.value = ""; disegna();
       if (Voce.leggiRisposte || Voce.viva) {
@@ -742,6 +744,7 @@ function vistaChatSolo() {
       h("div", { class: "risposta" }, c.domanda),
       h("div", { class: "sotto", style: "margin-top:10px" }, c.agente + " (" + c.t + " token)"),
       h("div", { class: "risposta" }, c.risposta),
+      (c.file && c.file.length) ? h("div", { class: "azioni" }, ...c.file.map(x => h("a", { href: x.link || "#", target: "_blank", rel: "noopener", class: "s", style: "text-decoration:none;padding:4px 10px;border:1px solid var(--bordo,#ccc);border-radius:6px" }, "📎 " + x.nome))) : null,
       c.agenteId ? h("div", { class: "azioni" }, pollici(c.agenteId, "chat", null)) : null,
       Voce.supportoLettura ? h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => Voce.leggi(c.risposta) }, "🔊 Ascolta")) : null,
       c.usati.length ? h("div", { class: "sotto", style: "margin-top:8px" }, "Documenti consultati: " + c.usati.join(", ")) : null,
