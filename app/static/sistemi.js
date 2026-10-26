@@ -198,3 +198,25 @@ function bloccoCanva() {
   carica();
   return corpo;
 }
+
+
+function bloccoCosti() {
+  const corpo = h("div");
+  const carica = async () => {
+    try {
+      const q = await api("GET", "/gestione/costi");
+      const msg = h("div");
+      const campo = (f, nome) => {
+        const i = h("input", { type: "password", autocomplete: "off", placeholder: q.chiavi[f] ? "•••••• (già salvata)" : "Chiave admin " + nome });
+        return h("label", {}, "Chiave admin " + nome, i, h("div", { class: "azioni" },
+          h("button", { class: "s", onclick: async () => { try { await api("PUT", "/gestione/costi/chiavi", { fornitore: f, chiave: i.value.trim() || null }); carica(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, i.value ? "Salva" : "Salva / rimuovi")));
+      };
+      corpo.replaceChildren(h("div", { class: "carta" },
+        h("pre", { class: "sotto", style: "white-space:pre-wrap" }, q.testo),
+        h("p", { class: "aiuto" }, "Per vedere la spesa reale (non solo la stima) inserisci le chiavi ADMIN dei fornitori: Anthropic (console → Settings → Admin keys) e OpenAI (Organization → Admin keys). Sono diverse dalle chiavi normali, sono solo di lettura sui costi e vengono cifrate. Aurora e le sentinelle le usano per consultare i costi."),
+        msg, campo("anthropic", "Anthropic"), campo("openai", "OpenAI")));
+    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return corpo;
+}

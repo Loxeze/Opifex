@@ -137,6 +137,8 @@ function vistaCollegamenti() {
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("PUT", "/gestione/google/client", { client_id: cid.value.trim(), client_secret: sec.value.trim() || null }); carica(); } catch (x) { mostra(x.message, "no"); } } }, "Salva credenziali"))),
         bloccoPosta(),
         h("h3", {}, "Altri servizi"),
+        h("h3", {}, "Costi dai fornitori"),
+        bloccoCosti(),
         h("h3", {}, "Canva"),
         bloccoCanva(),
       ]);

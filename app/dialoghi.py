@@ -165,7 +165,7 @@ def _fai_parlare(conn, parlante_id: int, destinatario_id: int, conv_id: int, ist
 
 
 def _controlli_generali(conn, conv_id: int | None):
-    if _token_dialoghi_oggi(conn) >= int(impostazione(conn, "dialoghi_budget_token_giornaliero", "1000000")):
+    if _token_dialoghi_oggi(conn) >= int(impostazione(conn, "dialoghi_budget_token_giornaliero", "30000000")):
         raise DialogoBloccato("Budget giornaliero dei dialoghi esaurito")
     if conv_id is not None:
         n = conn.execute("SELECT count(*) AS n FROM messaggi_agenti WHERE conversazione_id = %s", (conv_id,)).fetchone()["n"]

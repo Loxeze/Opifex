@@ -10,7 +10,7 @@ from .db import connessione
 from .fornitori import ErroreFornitore, Risposta, chiama_modello
 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
-from . import canva, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti
+from . import canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
@@ -221,8 +221,10 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             bib_tool = bool(ok_int and a["usa_biblioteca"])
             sb_tool = bool(ok_int and a["sandbox_attivo"] and sandbox._impostazione(conn, "sandbox_attiva") == "true")
             rev_tool = bool(ok_int and a["controllore_id"])
+            _sent = bool(conn.execute("SELECT sentinella FROM agenti WHERE id = %s", (agente_id,)).fetchone()["sentinella"])
+            costi_tool = bool(ok_int and (_sent or a["nome"] == "Aurora") and costi.richiesta_costi(messaggio, _sent))
             pm_tool = bool(conn.execute("SELECT 1 FROM progetti WHERE pm_agente_id = %s", (agente_id,)).fetchone())
-            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool:
+            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or costi_tool:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -310,6 +312,10 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                         gestori[s_["name"]] = gcm
                 with connessione() as c4:
                     avviso_extra += pm.contesto(c4, agente_id)
+                if costi_tool:
+                    extra.append(costi.STRUMENTO)
+                    avviso_extra += costi.AVVISO
+                    gestori["costi_consulta"] = costi.gestore(connessione)
                 if canva_tool:
                     extra.extend(canva.STRUMENTI)
                     avviso_extra += canva.AVVISO
