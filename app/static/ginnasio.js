@@ -31,6 +31,8 @@ function vistaGinnasio() {
           h("div", { class: "riga" }, h("label", { style: "flex:0 0 auto" }, "Budget giornaliero (token)", budget),
             h("button", { class: "s", style: "align-self:flex-end", onclick: azione(() => api("PUT", "/gestione/ginnasio/impostazioni", { budget: Number(budget.value) })) }, "Salva budget"),
             h("button", { class: im.attivo ? "s" : "p", style: "align-self:flex-end", onclick: azione(() => api("PUT", "/gestione/ginnasio/impostazioni", { attivo: !im.attivo })) }, im.attivo ? "Metti in pausa" : "Attiva la formazione")),
+          h("label", { style: "display:flex;gap:8px;align-items:center;margin-top:6px" }, h("input", { type: "checkbox", checked: im.pausa_studio, onchange: azione(() => api("PUT", "/gestione/ginnasio/impostazioni", { pausa_studio: !im.pausa_studio })) }),
+            h("span", { class: "sotto" }, "Fermati dopo lo studio e fammi leggere gli appunti prima della stesura (consigliato all'inizio)")),
           h("p", { class: "aiuto" }, "In pausa nulla parte da solo: puoi provare una richiesta alla volta con «Esegui ora» e vedere quanto costa. Costi stimati per livello: " +
             [1, 2, 3, 4, 5].map(n => NOMI[n] + " ≈ " + Number(d.stime[n]).toLocaleString("it-IT")).join(" · ") + " token. Il Master parte solo con il tuo via libera.")),
         msg,
@@ -61,8 +63,8 @@ function vistaGinnasio() {
             h("button", { class: "p", style: "align-self:flex-end", onclick: async () => {
               try { const r = await api("POST", "/gestione/ginnasio/richieste", { competenza: comp.value, livello: Number(liv.value), agente_id: ag.value ? Number(ag.value) : null, motivo: mot.value, progetto_id: prog.value ? Number(prog.value) : null, urgenza: Number(urg.value) });
                 comp.value = mot.value = ""; msg.replaceChildren(avviso(r.assegnata ? "La competenza esisteva già: assegnata subito." : r.unita ? "Unita a una richiesta già in coda." : "Messa in coda.", "ok")); await carica(); } catch (e) { errore(e); } } }, "Metti in coda"))),
-        d.recenti.length ? h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer;margin-top:10px" }, "Ultime formazioni (" + d.recenti.length + ")"), d.recenti.map(x => h("div", { class: "sotto", style: "padding:4px 0" },
-          x.competenza_nome + " liv. " + x.livello + (x.agente ? " · " + x.agente : "") + " · " + ({ in_corso: "in corso" + (x.fase ? " (" + ({ ricerca: "1/3 ricerca e download", studio: "2/3 studio", stesura: "3/3 stesura" })[x.fase] + ")" : "") + "…", conclusa: "conclusa", errore: "non riuscita", annullata: "annullata" })[x.stato] + (x.token_usati ? " · " + x.token_usati.toLocaleString("it-IT") + " token" : "") + (x.errore ? " · " + x.errore : "")))) : null,
+        h("h4", {}, "Formazioni in corso e recenti"),
+        d.recenti.length ? d.recenti.map(x => avanzamento(x, carica, errore)) : h("p", { class: "sotto" }, "Nessuna formazione ancora."),
         h("h4", {}, "Competenze"),
         d.competenze.length ? d.competenze.map(c => schedaCompetenza(c, d, carica, errore)) : h("p", { class: "sotto" }, "Nessuna competenza ancora: nasce dalla prima formazione approvata."),
         h("h4", {}, "Livello di formazione degli agenti"),
@@ -112,4 +114,35 @@ function schedaCompetenza(c, d, ricarica, errore) {
         if (visto.style.display === "none") { try { visto.textContent = (await api("GET", "/gestione/ginnasio/livelli/" + l.id)).corpo; visto.style.display = "block"; } catch (e) { errore(e); } } else visto.style.display = "none"; } }, "Leggi il livello")) : null,
     c.agenti.length ? h("div", { class: "azioni" }, c.agenti.map(a => h("button", { class: "s", title: "Toglie la competenza", onclick: async () => { if (!confirm("Togliere «" + c.nome + "» a " + a.nome + "?")) return;
       try { await api("DELETE", "/gestione/ginnasio/assegna/" + a.id + "/" + c.id); ricarica(); } catch (e) { errore(e); } } }, "Togli a " + a.nome))) : null);
+}
+
+const STATO_FORMAZIONE = { in_corso: "in corso", appunti_pronti: "appunti pronti: aspetta il tuo via libera", da_approvare: "bozza da approvare", conclusa: "conclusa", errore: "non riuscita", annullata: "annullata" };
+const NOME_FASE = { ricerca: "1 · Ricerca e download", studio: "2 · Studio", stesura: "3 · Stesura" };
+const ICONA_FASE = { finita: "✅", in_corso: "⏳", in_attesa: "⚪", saltata: "↪️", interrotta: "⛔" };
+
+// Avanzamento di una formazione: tappe, documenti scaricati, appunti e passaggi di Padre Casati
+function avanzamento(x, carica, errore) {
+  const corpo = h("div", { class: "sotto" }, "Apri per vedere a che punto è.");
+  let timer = null, caricato = false;
+  const carica_ = async () => {
+    try {
+      const a = await api("GET", "/gestione/ginnasio/richieste/" + x.id + "/avanzamento");
+      riempi(corpo, [
+        h("div", { style: "display:flex;gap:10px;flex-wrap:wrap;margin:6px 0" }, a.fasi.map(f => h("div", { class: "carta", style: "padding:6px 10px;flex:1;min-width:140px" },
+          h("div", {}, ICONA_FASE[f.stato] + " " + NOME_FASE[f.nome]), h("div", { class: "sotto" }, ({ finita: "finita", in_corso: "in corso…", in_attesa: "in attesa", saltata: "già fatta", interrotta: "interrotta" })[f.stato] + (f.token ? " · " + f.token.toLocaleString("it-IT") + " token" : "") + (f.durata_ms ? " · " + Math.round(f.durata_ms / 1000) + " s" : ""))))),
+        a.errore ? h("div", { class: "sotto", style: "color:#c44" }, "Motivo: " + a.errore) : null,
+        h("div", { class: "nome" }, "Documenti scaricati (" + a.materiali.length + ")"),
+        a.materiali.length ? a.materiali.map(m => { let sito = "?"; try { sito = new URL(m.fonte_url).hostname; } catch (e) {}
+          return h("div", { class: "sotto" }, "📄 " + m.nome + (m.autori ? " — " + m.autori : "") + (m.anno ? " (" + m.anno + ")" : "") + " · " + sito + " · " + Math.round(m.byte / 1024) + " KB" + (m.licenza ? " · " + m.licenza : "")); })
+          : h("div", { class: "sotto" }, "Nessuno finora."),
+        a.ricerche.length ? h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer" }, "Ricerche fatte (" + a.ricerche.length + ")"), a.ricerche.map(r => h("div", { class: "sotto" }, "🔎 " + r.replace(/^cerca_fonti: /, "")))) : null,
+        a.appunti ? h("details", { open: x.stato === "appunti_pronti" }, h("summary", { class: "nome", style: "cursor:pointer" }, "Appunti di studio"), h("div", { class: "sotto", style: "white-space:pre-wrap;max-height:320px;overflow:auto" }, a.appunti)) : null,
+        x.stato === "appunti_pronti" ? h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("POST", "/gestione/ginnasio/richieste/" + x.id + "/stesura"); await carica(); } catch (e) { errore(e); } } }, "Procedi alla stesura")) : null,
+        a.passaggi.length ? h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer" }, "Passaggi di Padre Casati (" + a.passaggi.length + ")"), a.passaggi.map(p => h("div", { class: "sotto" }, new Date(p.creato_il).toLocaleTimeString("it-IT") + " · " + p.dettaglio))) : null]);
+    } catch (e) { corpo.replaceChildren(h("div", { class: "sotto" }, e.message)); }
+  };
+  const det = h("details", { open: x.stato === "in_corso" || x.stato === "appunti_pronti", ontoggle: () => { if (det.open && !caricato) { caricato = true; carica_(); } } },
+    h("summary", { style: "cursor:pointer;padding:4px 0" }, h("b", {}, x.competenza_nome + " · liv. " + x.livello), (x.agente ? " · " + x.agente : "") + " · " + STATO_FORMAZIONE[x.stato] + (x.token_usati ? " · " + x.token_usati.toLocaleString("it-IT") + " token" : "")), corpo);
+  if (det.open) { caricato = true; carica_(); if (x.stato === "in_corso") timer = setInterval(() => { if (!document.body.contains(det)) { clearInterval(timer); return; } carica_(); }, 6000); }
+  return det;
 }

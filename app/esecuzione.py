@@ -11,7 +11,7 @@ from .db import connessione
 from .fornitori import ErroreFornitore, Risposta, chiama_modello
 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
-from . import ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti
+from . import eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
@@ -78,6 +78,27 @@ def _costo(a: dict, t_in: int, t_out: int) -> float:
 
 
 def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
+                  utente_id: int | None = None, memorizza: bool = False, max_token: int | None = None,
+                  allegati: list[tuple[str, str]] | None = None) -> dict:
+    """Registra gli eventi di lavoro (inizio, strumenti, fine o errore) attorno all'esecuzione vera: costo zero in token."""
+    prec = eventi.CONTESTO.get()
+    richiesta = prec.get("richiesta") if prec and prec.get("agente") == agente_id else None
+    tk = eventi.CONTESTO.set({"agente": agente_id, "richiesta": richiesta})
+    t0 = time.monotonic()
+    eventi.registra(agente_id, "inizio", " ".join(str(messaggio or "").split())[:150], richiesta_id=richiesta)
+    try:
+        out = _esegui_agente_interno(agente_id, messaggio, fascia_dati, utente_id, memorizza, max_token, allegati)
+    except Exception as e:  # noqa: BLE001 - si registra e si rilancia: il comportamento non cambia
+        eventi.registra(agente_id, "errore", f"{type(e).__name__}: {str(e)[:200]}", richiesta_id=richiesta, durata_ms=int((time.monotonic() - t0) * 1000))
+        raise
+    else:
+        eventi.registra(agente_id, "fine", "risposta scritta", richiesta_id=richiesta, token=out.get("token_input", 0) + out.get("token_output", 0), durata_ms=int((time.monotonic() - t0) * 1000))
+        return out
+    finally:
+        eventi.CONTESTO.reset(tk)
+
+
+def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                   utente_id: int | None = None, memorizza: bool = False, max_token: int | None = None,
                   allegati: list[tuple[str, str]] | None = None) -> dict:
     """memorizza=True: lo scambio entra nella cronologia della chat con questo utente (e l'agente la rivede alla volta dopo)."""

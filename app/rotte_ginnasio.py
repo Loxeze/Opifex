@@ -24,7 +24,7 @@ def stato(_: dict = Depends(solo_titolare)):
                                 FROM competenze_livelli l JOIN competenze c ON c.id = l.competenza_id LEFT JOIN richieste_formazione f ON f.livello_id = l.id AND f.stato = 'da_approvare'
                                 LEFT JOIN agenti a ON a.id = f.agente_id WHERE l.stato = 'bozza' ORDER BY l.id""").fetchall()
         recenti = conn.execute("""SELECT f.id, f.competenza_nome, f.livello, f.stato, f.token_usati, f.errore, f.fase, f.conclusa_il, a.nome AS agente FROM richieste_formazione f LEFT JOIN agenti a ON a.id = f.agente_id
-                                  WHERE f.stato IN ('in_corso','conclusa','errore','annullata') ORDER BY f.id DESC LIMIT 15""").fetchall()
+                                  WHERE f.stato IN ('in_corso','appunti_pronti','conclusa','errore','annullata','da_approvare') ORDER BY f.id DESC LIMIT 15""").fetchall()
         agenti = conn.execute("SELECT id, nome, ruolo, livello FROM agenti WHERE attivo AND ruolo_speciale IS NULL ORDER BY id").fetchall()
         for a in agenti:
             a["livello_formazione"] = g.livello_agente(conn, a["id"])
@@ -36,6 +36,7 @@ def stato(_: dict = Depends(solo_titolare)):
 
 class Impostazioni(BaseModel):
     attivo: bool | None = None
+    pausa_studio: bool | None = None
     budget: int | None = Field(default=None, ge=1000, le=2000000)
 
 
@@ -46,6 +47,8 @@ def imposta(d: Impostazioni, _: dict = Depends(solo_titolare)):
             g.imposta(conn, "ginnasio_attivo", "1" if d.attivo else "0")
         if d.budget is not None:
             g.imposta(conn, "ginnasio_budget_giornaliero", str(d.budget))
+        if d.pausa_studio is not None:
+            g.imposta(conn, "ginnasio_pausa_studio", "1" if d.pausa_studio else "0")
         return g.stato_generale(conn)
 
 
@@ -89,6 +92,25 @@ def esegui(rid: int, _: dict = Depends(solo_titolare)):
         except g.ErroreGinnasio as e:
             _err(e)
     return {"ok": True}
+
+
+@router.post("/richieste/{rid}/stesura", status_code=202)
+def stesura(rid: int, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            g.procedi_stesura(conn, rid)
+        except g.ErroreGinnasio as e:
+            _err(e)
+    return {"ok": True}
+
+
+@router.get("/richieste/{rid}/avanzamento")
+def avanzamento(rid: int, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            return g.avanzamento(conn, rid)
+        except g.ErroreGinnasio as e:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
 
 
 @router.post("/richieste/{rid}/via-libera")

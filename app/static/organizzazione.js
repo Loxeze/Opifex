@@ -243,6 +243,7 @@ function vistaOrganigramma(incorniciata) {
       h("div", { class: "sotto" }, "Risponde a: " + sup + (dip ? " · " + dip : "")),
       h("div", { class: "sotto" }, "Progetti: " + ((n.progetti || []).map(i => (dati.progetti || []).find(z => z.id === i)?.nome).filter(Boolean).join(", ") || "nessuno")),
       h("div", { class: "sotto" }, "Aziende: " + (nomiAz.join(", ") || "tutte (trasversale)") + (n.categoria === "sentinella" ? " · Sentinella" : "")),
+      bloccoAttivita(n.id),
       h("div", { class: "azioni" },
         h("button", { class: "p", onclick: () => { const a = stato.agenti.find(x => x.id === n.id); if (a) modulo(a); } }, "Apri scheda"),
         h("button", { class: "s", onclick: () => vai("chat") }, "Parla"))]);
@@ -536,4 +537,30 @@ function vistaCanali() {
   };
   carica();
   return [h("h2", {}, "Canali"), corpo];
+}
+
+// «Cosa sta facendo»: stato e ultimi passaggi dell'agente, letti dagli eventi gia' registrati (nessun costo in token)
+function bloccoAttivita(agenteId) {
+  const corpo = h("div", { class: "attivita" }, h("div", { class: "sotto" }, "Carico lo stato di lavoro…"));
+  let timer = null;
+  const quando = (iso) => { const sec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000)); return sec < 90 ? sec + " s fa" : sec < 5400 ? Math.round(sec / 60) + " min fa" : new Date(iso).toLocaleString("it-IT"); };
+  const aggiorna = async () => {
+    if (!document.body.contains(corpo)) { clearInterval(timer); return; }
+    try {
+      const d = await api("GET", "/agenti/" + agenteId + "/attivita");
+      const ora = d.adesso;
+      riempi(corpo, [
+        h("div", { class: "nome", style: "margin-top:8px" }, ora.al_lavoro ? "🟢 Sta lavorando" : "⚪ A riposo"),
+        ora.al_lavoro ? h("div", { class: "sotto" }, (ora.attivita || "") + " · da " + ora.da_secondi + " s") : (ora.ultimo_lavoro ? h("div", { class: "sotto" }, "Ultimo lavoro: " + quando(ora.ultimo_lavoro)) : null),
+        h("div", { class: "sotto" }, "Task: " + d.task.aperte + " aperte, " + d.task.chiuse + " chiuse" + (d.task.in_ritardo ? ", " + d.task.in_ritardo + " in ritardo" : "")),
+        d.task_aperte.length ? h("div", { class: "sotto" }, d.task_aperte.slice(0, 4).map(t => "• " + t.titolo + (t.progetto ? " (" + t.progetto + ")" : "")).join("\n")) : null,
+        d.kpi.length ? h("div", { class: "sotto" }, d.kpi.map(k => "🎯 " + k.nome + ": " + (k.valore ?? "—") + (k.valore_obiettivo != null ? "/" + k.valore_obiettivo : "") + (k.esito ? " [" + k.esito + "]" : "")).join("\n")) : null,
+        d.ultimo_errore ? h("div", { class: "sotto", style: "color:#c44" }, "Ultimo errore (" + quando(d.ultimo_errore.creato_il) + "): " + d.ultimo_errore.dettaglio) : null,
+        d.eventi.length ? h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer" }, "Ultimi passaggi (" + d.eventi.length + ")"),
+          d.eventi.map(e => h("div", { class: "sotto", style: "padding:2px 0" }, quando(e.creato_il) + " · " + ({ inizio: "inizia", strumento: "usa", errore_strumento: "strumento in errore", fine: "finisce", errore: "ERRORE", fase: "fase", fase_fine: "fase finita" })[e.tipo] + " — " + e.dettaglio + (e.token ? " (" + e.token + " token)" : "")))) : null]);
+    } catch (e) { corpo.replaceChildren(h("div", { class: "sotto" }, "Stato di lavoro non disponibile.")); }
+  };
+  aggiorna();
+  timer = setInterval(aggiorna, 8000);
+  return corpo;
 }

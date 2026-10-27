@@ -169,3 +169,17 @@ def decidi_proposta(proposta_id: int, d: Decisione, utente: dict = Depends(solo_
         )
         registro.registra(conn, utente, "proposta_sviluppo", d.decisione, riga.get("titolo") or f"Proposta {proposta_id}", "proposta", proposta_id, d.note or "")
     return {"stato": d.decisione}
+
+
+@router.get("/agenti/{agente_id}/attivita")
+def attivita_agente(agente_id: int, utente: dict = Depends(utente_corrente)):
+    """«Cosa sta facendo»: stato attuale, ultimi passaggi, task e KPI. Si ricava dagli eventi gia' registrati, senza chiamare il modello."""
+    from . import eventi
+    with connessione() as conn:
+        a = conn.execute("SELECT id, nome, ruolo, divisione_id FROM agenti WHERE id = %s", (agente_id,)).fetchone()
+        if a is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Agente non trovato")
+        visibili = divisioni_visibili(utente)
+        if visibili is not None and a["divisione_id"] not in visibili:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Agente non trovato")
+        return {"agente": {"id": a["id"], "nome": a["nome"], "ruolo": a["ruolo"]}, **eventi.attivita(conn, agente_id)}

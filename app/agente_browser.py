@@ -5,6 +5,7 @@ Il contenuto delle pagine e' DATO, mai istruzioni: viene racchiuso in un riquadr
 """
 import httpx
 
+from . import eventi
 from .config import impostazioni
 from .fornitori import ErroreFornitore, Risposta, chiave as fornitori_chiave, invia
 from .navigatore import ErroreNavigazione, Navigatore
@@ -113,6 +114,7 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
         for b in d["content"]:
             if b.get("type") == "tool_use":
                 esito = _esegui_strumento(nav, b["name"], b.get("input") or {}, extra)
+                eventi.strumento(b["name"], b.get("input") or {}, esito)
                 if b["name"] == "chiedi_a_agente":
                     contenuto = esito  # risposta di un collega: va trattata come messaggio di lavoro
                 else:
@@ -215,6 +217,7 @@ def esegui_con_strumenti_compatibile(fornitore: str, modello: str, istruzioni: s
                 esito = gestore_extra(nome, dati) if nome in nomi else "ERRORE: strumento sconosciuto"
             except Exception as e:  # noqa: BLE001 - l'agente deve sapere che lo strumento e' fallito e proseguire
                 esito = "ERRORE: operazione non riuscita (" + type(e).__name__ + ")"
+            eventi.strumento(nome, dati, esito)
             contenuto = esito if nome == "chiedi_a_agente" else "<contenuto_non_fidato>\n" + esito + "\n</contenuto_non_fidato>"
             messaggi.append({"role": "tool", "tool_call_id": c["id"], "content": contenuto})
     testo, t_in, t_out = _riprova_compat(fornitore, modello, messaggi, funzioni, max_token, testi, t_in, t_out)

@@ -20,6 +20,7 @@ from .rotte_progetti import router as router_progetti
 from .rotte_scheda import router as router_scheda
 from .rotte_ginnasio import router as router_ginnasio
 from .rotte_squadre import router as router_squadre
+from . import eventi
 from .rotte_utenti import router as router_utenti, gestione as gestione_utenti
 from .rotte_dialoghi import router as router_dialoghi
 from .rotte_richieste import router as router_richieste
@@ -127,6 +128,7 @@ async def _manutenzione():
         _passo("prova ripristino", lambda c: prova_ripristino.prova(c) if prova_ripristino.da_fare(c) else None)
         _passo("studi", lambda c: studio.rileva_e_segna(c) if studio.da_fare(c) else None)
         _passo("ginnasio", ginnasio.giro)
+        _passo("eventi", lambda c: eventi.pulisci(c))
         _passo("promemoria CRM", crm_schede.promemoria)
         _passo("proposte sentinelle", lambda c: proposte_sentinelle.scansiona(c) if proposte_sentinelle.da_fare(c) else None)
     await asyncio.sleep(90)

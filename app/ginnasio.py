@@ -3,9 +3,10 @@ Le richieste arrivano da manager, project manager, segnali automatici o da Loren
 graduatoria (riordinabile) decidono cosa si forma oggi. Una competenza scritta da Padre Casati e' una bozza: arriva a un agente solo dopo l'approvazione."""
 import re
 import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 
-from . import casati
+from . import casati, eventi
 from .db import connessione
 from .memoria_lavoro import SEGRETO
 
@@ -189,7 +190,7 @@ def usati_oggi(conn) -> int:
 def stato_generale(conn) -> dict:
     budget = int(impostazione(conn, "ginnasio_budget_giornaliero", "30000") or 30000)
     usati = usati_oggi(conn)
-    return {"attivo": impostazione(conn, "ginnasio_attivo", "0") == "1", "budget": budget, "usati_oggi": usati, "residuo": max(0, budget - usati),
+    return {"attivo": impostazione(conn, "ginnasio_attivo", "0") == "1", "pausa_studio": impostazione(conn, "ginnasio_pausa_studio", "1") == "1", "budget": budget, "usati_oggi": usati, "residuo": max(0, budget - usati),
             "in_corso": conn.execute("SELECT count(*) AS n FROM richieste_formazione WHERE stato = 'in_corso'").fetchone()["n"]}
 
 
@@ -226,6 +227,42 @@ def avvia_manuale(conn, rid: int):
     conn.execute("UPDATE richieste_formazione SET stato = 'in_corso', avviata_il = NOW(), via_libera = TRUE WHERE id = %s", (rid,))
     conn.commit()
     avvia(rid)
+
+
+def procedi_stesura(conn, rid: int):
+    """Dopo la pausa sugli appunti: Lorenzo da' il via alla stesura della competenza."""
+    r = conn.execute("SELECT stato FROM richieste_formazione WHERE id = %s FOR UPDATE", (rid,)).fetchone()
+    if r is None or r["stato"] != "appunti_pronti":
+        raise ErroreGinnasio("La richiesta non e' in attesa di via libera sugli appunti")
+    if conn.execute("SELECT 1 FROM richieste_formazione WHERE stato = 'in_corso'").fetchone():
+        raise ErroreGinnasio("C'e' gia' una formazione in corso: aspetta che finisca")
+    conn.execute("UPDATE richieste_formazione SET stato = 'in_corso' WHERE id = %s", (rid,))
+    conn.commit()
+    avvia(rid)
+
+
+def avanzamento(conn, rid: int) -> dict:
+    """Tutto cio' che serve per capire a che punto e' una formazione: tappe, ricerche, documenti scaricati, appunti, passaggi."""
+    r = conn.execute("""SELECT f.*, a.nome AS agente FROM richieste_formazione f LEFT JOIN agenti a ON a.id = f.agente_id WHERE f.id = %s""", (rid,)).fetchone()
+    if r is None:
+        raise ErroreGinnasio("Richiesta inesistente")
+    ev = conn.execute("SELECT tipo, dettaglio, token, durata_ms, creato_il FROM eventi_lavoro WHERE richiesta_id = %s ORDER BY id", (rid,)).fetchall()
+    fasi = []
+    for nome in ("ricerca", "studio", "stesura"):
+        inizio = [e for e in ev if e["tipo"] == "fase" and e["dettaglio"] == nome]
+        fine = [e for e in ev if e["tipo"] == "fase_fine" and e["dettaglio"] == nome]
+        stato = "finita" if fine else ("in_corso" if inizio and r["stato"] == "in_corso" else ("saltata" if not inizio and r["appunti"] and nome != "stesura" else "in_attesa"))
+        if inizio and not fine and r["stato"] == "errore":
+            stato = "interrotta"
+        fasi.append({"nome": nome, "stato": stato, "token": fine[-1]["token"] if fine else 0, "durata_ms": fine[-1]["durata_ms"] if fine else None})
+    materiali = conn.execute("""SELECT d.id, d.nome, d.autori, d.anno, d.licenza, d.fonte_url, m.byte FROM formazione_materiale m JOIN documenti d ON d.id = m.documento_id
+                                 WHERE m.richiesta_id = %s ORDER BY m.scaricato_il""", (rid,)).fetchall()
+    passaggi = [e for e in ev if e["tipo"] in ("strumento", "errore_strumento", "errore")]
+    bozza = conn.execute("SELECT id, livello, corpo FROM competenze_livelli WHERE id = %s", (r["livello_id"],)).fetchone() if r["livello_id"] else None
+    return {"id": r["id"], "competenza": r["competenza_nome"], "livello": r["livello"], "agente": r["agente"], "stato": r["stato"], "fase": r["fase"], "errore": r["errore"], "token_usati": r["token_usati"],
+            "fasi": fasi, "materiali": materiali, "appunti": r["appunti"], "passaggi": passaggi[-60:],
+            "ricerche": [e["dettaglio"] for e in passaggi if e["dettaglio"].startswith("cerca_fonti")],
+            "bozza": bozza["corpo"] if bozza else None}
 
 
 def avvia(rid: int):
@@ -300,34 +337,54 @@ def _lavora(rid: int):
             return
         prompt_ricerca = _prompt_ricerca(conn, r)
         conn.commit()
-    token_tot = 0
+    token_tot = int(r["token_usati"] or 0)
+    ha_appunti = bool((r["appunti"] or "").strip())
+    cid = cas["id"]
 
     def fase(nome, prompt, max_token, scarica=False):
         nonlocal token_tot
         with connessione() as conn:
             conn.execute("UPDATE richieste_formazione SET fase = %s, token_usati = %s WHERE id = %s", (nome, token_tot, rid))
+        eventi.registra(cid, "fase", nome, richiesta_id=rid)
+        prima, t0 = token_tot, time.monotonic()
+        ctx = eventi.CONTESTO.set({"agente": cid, "richiesta": rid})
         tk = casati.FORMAZIONE.set({"richiesta": rid, "n": 0, "byte": 0}) if scarica else casati.FORMAZIONE.set(None)
         try:
-            o = esegui_agente(cas["id"], prompt, "interno", None, max_token=max_token)
+            o = esegui_agente(cid, prompt, "interno", None, max_token=max_token)
         finally:
             casati.FORMAZIONE.reset(tk)
+            eventi.CONTESTO.reset(ctx)
         token_tot += o["token_input"] + o["token_output"]
+        eventi.registra(cid, "fase_fine", nome, richiesta_id=rid, token=token_tot - prima, durata_ms=int((time.monotonic() - t0) * 1000))
         return o["risposta"]
 
     try:
-        ricerca = fase("ricerca", prompt_ricerca, MAX_TOKEN_RICERCA, scarica=True)
+        if not ha_appunti:
+            ricerca = fase("ricerca", prompt_ricerca, MAX_TOKEN_RICERCA, scarica=True)
+            with connessione() as conn:
+                r = conn.execute("SELECT * FROM richieste_formazione WHERE id = %s", (rid,)).fetchone()
+                prompt_studio = _prompt_studio(conn, r, ricerca)
+            appunti = fase("studio", prompt_studio, MAX_TOKEN_STUDIO)
+            with connessione() as conn:
+                conn.execute("UPDATE richieste_formazione SET appunti = %s WHERE id = %s", (appunti[:20000], rid))
+                if impostazione(conn, "ginnasio_pausa_studio", "1") == "1":
+                    # pausa: Lorenzo legge gli appunti e decide se far scrivere la competenza
+                    conn.execute("UPDATE richieste_formazione SET stato = 'appunti_pronti', fase = 'studio', token_usati = %s WHERE id = %s", (token_tot, rid))
+                    conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
+                                 (f"Padre Casati ha finito di studiare «{r['competenza_nome']}»: leggi gli appunti nel Ginnasio e decidi se farla scrivere.",))
+                    return
+        else:
+            with connessione() as conn:
+                appunti = conn.execute("SELECT appunti FROM richieste_formazione WHERE id = %s", (rid,)).fetchone()["appunti"]
+                r = conn.execute("SELECT * FROM richieste_formazione WHERE id = %s", (rid,)).fetchone()
         with connessione() as conn:
-            r = conn.execute("SELECT * FROM richieste_formazione WHERE id = %s", (rid,)).fetchone()
-            prompt_studio = _prompt_studio(conn, r, ricerca)
-        appunti = fase("studio", prompt_studio, MAX_TOKEN_STUDIO)
-        with connessione() as conn:
-            conn.execute("UPDATE richieste_formazione SET appunti = %s WHERE id = %s", (appunti[:20000], rid))
             prompt_stesura = _prompt(conn, r, appunti)
         testo_finale = fase("stesura", prompt_stesura, MAX_TOKEN_ESECUZIONE[r["livello"]])
         out = {"risposta": testo_finale, "token_input": token_tot, "token_output": 0}
     except Exception as e:  # noqa: BLE001 - la formazione fallita si vede in pagina e non ferma nulla
         with connessione() as conn:
             conn.execute("UPDATE richieste_formazione SET stato = 'errore', errore = %s, token_usati = %s, conclusa_il = NOW() WHERE id = %s", (str(e)[:300], token_tot, rid))
+        eventi.registra(cid, "errore", f"formazione: {str(e)[:200]}", richiesta_id=rid)
         return
     descr, corpo = _parti(out["risposta"])
     token = token_tot
