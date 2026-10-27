@@ -1,7 +1,7 @@
 "use strict";
 // Sentinelle: coda di proposte da approvare e casi di prova per agente (confronto prima/dopo).
 
-const NOME_SENT = { qualita: "Qualità", costi: "Costi", fonti: "Fonti", evoluzione: "Evoluzione" };
+const NOME_SENT = { qualita: "Qualità", costi: "Costi", fonti: "Fonti", evoluzione: "Evoluzione", usabilita: "Usabilità" };
 
 function vistaSentinelle() {
   const coda = h("div"), prove = h("div"), msg = h("div");
@@ -43,7 +43,7 @@ function vistaSentinelle() {
   scelta.addEventListener("change", caricaProve);
   caricaCoda(); caricaProve();
   return [h("h2", {}, "Sentinelle e casi di prova"),
-    h("p", { class: "aiuto" }, "Le sentinelle (Qualità, Costi, Fonti, Evoluzione) cercano ogni giorno cose da migliorare e te le propongono qui: non cambiano nulla senza il tuo via libera. I casi di prova sono richieste tipiche per ogni agente: lanciali prima e dopo una modifica per vedere se è migliorato. Ogni prova consuma qualche token."),
+    h("p", { class: "aiuto" }, "Le sentinelle (Qualità, Costi, Fonti, Evoluzione, Usabilità: l'Osservatore dell'uso guarda solo quali pagine apri e dove compaiono errori, mai cosa scrivi) cercano ogni giorno cose da migliorare e te le propongono qui: non cambiano nulla senza il tuo via libera. I casi di prova sono richieste tipiche per ogni agente: lanciali prima e dopo una modifica per vedere se è migliorato. Ogni prova consuma qualche token."),
     msg, h("h3", {}, "Proposte in attesa"), h("div", { class: "azioni" }, bScan), coda,
     h("h3", {}, "Casi di prova"), h("label", {}, "Agente", scelta), prove];
 }

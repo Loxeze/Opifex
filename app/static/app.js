@@ -50,7 +50,7 @@ function esci() {
   mostraAccesso();
 }
 
-function avviso(testo, tipo) { return h("div", { class: "messaggio " + (tipo || "avv"), role: "status" }, testo); }
+function avviso(testo, tipo) { if (tipo === "no" && typeof registraUso === "function") registraUso(etichettaVista(), "errore"); return h("div", { class: "messaggio " + (tipo || "avv"), role: "status" }, testo); }
 
 // ---------- Accesso ----------
 function mostraAccesso(errore) {
@@ -85,15 +85,18 @@ function cornice(contenuto) {
     h("header", {}, h("h1", {}, "Opifex ", h("small", {}, "// officina")),
       h("nav", {}, (stato.ruolo === "titolare" ? VISTE : VISTE_COLLABORATORE).map(([id, nome]) =>
         h("button", { class: stato.vista === id || (id === "dashboard" && stato.vista === "richieste") || (id === "progetti" && stato.vista === "progetto") || (id === "crm" && stato.vista === "contatto") ? "attivo" : "", onclick: () => vai(id) },
-          nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : "")))),
+          nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : ""),
+          id === "chat" ? h("span", { id: "badge-chat", class: "badge-chat", style: stato.chatNonLetti ? "" : "display:none" }, stato.chatNonLetti ? String(stato.chatNonLetti) : "") : null))),
       h("button", { class: "s", onclick: esci }, "Esci")),
-    h("main", { class: stato.vista === "dashboard" ? "largo" : "" }, contenuto));
+    h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" ? "largo" : "" }, contenuto));
 }
 
 async function avvia() {
   try {
     const io = await api("GET", "/io");
     stato.ruolo = io.ruolo_globale;
+    ripristinaVista();
+    avviaConteggioChat(); avviaUso();
     if (stato.ruolo !== "titolare") {   // il collaboratore vede solo la chat con gli agenti delle sue divisioni
       stato.agenti = await api("GET", "/agenti");
       if (!VISTE_COLLABORATORE.some(([id]) => id === stato.vista)) stato.vista = "chat";
@@ -123,6 +126,7 @@ function disegna() {
   if (stato.timer) { clearInterval(stato.timer); stato.timer = null; }
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
+  if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
   const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
@@ -647,156 +651,6 @@ function pannelloRichieste(dopo) {
   carica(true);
   stato.timerRich = setInterval(() => { if (!document.body.contains(box)) { clearInterval(stato.timerRich); return; } carica(false); }, 8000);
   return box;
-}
-
-// ---------- Chat (pagina unica: chat con l'agente + dialoghi tra agenti) ----------
-function vistaChat() {
-  const riep = h("div", { class: "riga", style: "margin-bottom:12px" });
-  const num = (v, et) => h("div", { class: "carta", style: "text-align:center" }, h("div", { class: "nome" }, String(v)), h("div", { class: "sotto" }, et));
-  const lavoro = h("div");
-  const aggiorna = async () => {
-    try {
-      const r = await api("GET", "/gestione/dialoghi/riepilogo");
-      riempi(riep, [num(r.conversazioni + " (" + r.aperte + " aperte)", "conversazioni"), num(r.messaggi + " (" + r.messaggi_oggi + " oggi)", "messaggi tra agenti"),
-        num(r.token_oggi.toLocaleString("it-IT") + " / " + r.budget_token.toLocaleString("it-IT"), "token dialoghi oggi / budget"),
-        num(r.secondi_medi_tra_messaggi === null ? "–" : r.secondi_medi_tra_messaggi + " s", "tempo medio tra messaggi (7 giorni)")]);
-      const l = await api("GET", "/gestione/richieste/lavoro");
-      riempi(lavoro, l.length ? l.map(x => avviso(x.agente + " sta lavorando… (" + x.da_secondi + " s) · " + x.motivo, "ok")) : []);
-    } catch (e) { /* riprova */ }
-  };
-  aggiorna(); stato.timer2 = setInterval(aggiorna, 6000);
-  return [h("div", { class: "azioni" }, h("h2", { style: "flex:1;margin:0" }, "Chat"), bottoneAllinea()), pannelloRichieste(aggiorna), pannelloMemoria(), riep, lavoro,
-    h("div", { class: "chat-doppia" }, h("div", { class: "chat-sx" }, vistaChatSolo()), h("div", { class: "chat-dx" }, vistaDialoghi(true)))];
-}
-
-function vistaChatSolo() {
-  const attivi = stato.agenti.filter(a => a.attivo);
-  const scelta = h("select", {}, attivi.map(a => h("option", { value: a.id }, a.etichetta || (a.nome + " — " + a.ruolo))));
-  if (stato.chatAgente && attivi.some(a => a.id === stato.chatAgente)) scelta.value = stato.chatAgente;
-  scelta.addEventListener("change", () => { stato.chatAgente = Number(scelta.value); });
-  const f = h("select", {}, Object.entries(ETICHETTA_FASCIA).map(([v, t]) => h("option", { value: v }, t)));
-  f.value = stato.chatFascia || "pubblico";
-  f.addEventListener("change", () => { stato.chatFascia = f.value; });
-  const testo = h("textarea", { placeholder: "Scrivi il messaggio o premi il microfono e parla…" });
-  const msg = h("div");
-  const bInvia = h("button", { class: "p" }, "Invia");
-  const allegati = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,.html,.htm,.json,.xml,.eml,.txt,.md,.csv,.tsv,.png,.jpg,.jpeg,.webp,.gif" });
-  const elencoAll = h("div", { class: "sotto" });
-  allegati.addEventListener("change", () => { elencoAll.textContent = allegati.files.length ? "Allegati: " + [...allegati.files].map(x => x.name).join(", ") : ""; });
-  const modoVoce = h("select", {}, h("option", { value: "browser" }, "Browser (gratuito)"), h("option", { value: "server" }, "Server con OpenAI (più affidabile)"));
-  modoVoce.value = Voce.modo;
-  modoVoce.addEventListener("change", () => { Voce.modo = modoVoce.value; });
-  const provaMic = h("div", { class: "sotto" });
-  const bMic = h("button", { class: "s", type: "button", title: "Detta il messaggio con la voce" }, "🎤 Parla");
-  const stile = (ascolto) => { bMic.textContent = ascolto ? "⏹ Smetti di ascoltare" : "🎤 Parla"; bMic.classList.toggle("p", !!ascolto); };
-  const invia = async () => {
-    if (!testo.value.trim() && !allegati.files.length) return;
-    msg.replaceChildren();
-    Voce.ferma();
-    bInvia.disabled = true; bInvia.textContent = "Attendi…";
-    try {
-      const agente = attivi.find(a => a.id === Number(scelta.value));
-      stato.chatAgente = agente.id;
-      let r;
-      if (allegati.files.length) {
-        const fd = new FormData(); fd.append("messaggio", testo.value); fd.append("fascia_dati", f.value); fd.append("asincrono", "true");
-        for (const x of allegati.files) fd.append("file", x);
-        r = await api("POST", "/agenti/" + scelta.value + "/chat-allegati", fd);
-      } else r = await api("POST", "/agenti/" + scelta.value + "/chat", { messaggio: testo.value, fascia_dati: f.value, asincrono: true });
-      const voce = { agente: agente.nome, agenteId: agente.id, domanda: testo.value + (allegati.files.length ? "\n📎 " + [...allegati.files].map(x => x.name).join(", ") : ""), risposta: "", file: [], t: 0,
-        usati: [], esclusi: [], avvisi: [], attesa: true, codaId: r.coda_id, dal: Date.now() };
-      stato.conversazione.unshift(voce);
-      testo.value = ""; allegati.value = ""; disegna();
-      seguiRisposta(voce);
-    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); bInvia.disabled = false; bInvia.textContent = "Invia"; Voce.viva = false; }
-  };
-  bInvia.addEventListener("click", invia);
-  // dettatura: con «vivavoce» attivo, quando smetti di parlare il messaggio parte da solo
-  const ascolta = () => {
-    const fineAscolto = (t) => { stile(false); if (Voce.viva && t) invia(); else if (Voce.viva && stato.vista === "chat") setTimeout(() => Voce.viva && Voce.avviaAscolto && Voce.avviaAscolto(), 400); };
-    const statoAscolto = (s) => { if (s === null) stile(false); else if (s === "ascolto") { stile(true); msg.replaceChildren(); } else if (s === "trascrivo") msg.replaceChildren(avviso("Trascrivo la registrazione…", "ok")); else if (s) msg.replaceChildren(avviso(s, "avv")); };
-    if (Voce.modo === "server") {
-      if (!Voce.registra(testo, fineAscolto, statoAscolto, f.value)) msg.replaceChildren(avviso("Questo browser non può registrare dal microfono.", "avv"));
-      return;
-    }
-    if (!Voce.ascolta(testo, (t) => { stile(false); if (Voce.viva && t) invia(); else if (Voce.viva && stato.vista === "chat") setTimeout(() => Voce.viva && Voce.avviaAscolto && Voce.avviaAscolto(), 400); },
-      (s) => { if (s === null) stile(false); else if (s === "ascolto") stile(true); else if (s) msg.replaceChildren(avviso(s, "avv")); })) {
-      msg.replaceChildren(avviso("Il tuo browser non supporta la dettatura vocale: usa Chrome, Edge o Safari.", "avv"));
-    }
-  };
-  Voce.avviaAscolto = ascolta;
-  bMic.addEventListener("click", () => { if (Voce.inAscolto()) { Voce.viva = false; Voce.termina(); stile(false); } else ascolta(); });
-  testo.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); invia(); } });
-  const leggi = h("input", { type: "checkbox" }); leggi.checked = Voce.leggiRisposte;
-  leggi.addEventListener("change", () => { Voce.leggiRisposte = leggi.checked; });
-  const viva = h("input", { type: "checkbox" }); viva.checked = Voce.viva;
-  viva.addEventListener("change", () => { Voce.viva = viva.checked; if (viva.checked) ascolta(); else { Voce.ferma(); Voce.fermaLettura(); stile(false); } });
-  const vocale = Voce.supportoDettatura || Voce.supportoLettura;
-  if (Voce.viva && vocale && !Voce.inAscolto() && !(Voce.supportoLettura && speechSynthesis.speaking)) setTimeout(ascolta, 300);
-  if (!stato.codaRipresa) {
-    stato.codaRipresa = true;   // dopo un ricaricamento della pagina: riprende i messaggi ancora in attesa di risposta
-    api("GET", "/chat-coda").then(el => {
-      let nuovi = 0;
-      for (const q of el) if (!stato.conversazione.some(c => c.codaId === q.id)) { const v = { agente: q.agente, agenteId: q.agente_id, domanda: q.messaggio, risposta: "", file: [], t: 0, usati: [], esclusi: [], avvisi: [], attesa: true, codaId: q.id }; stato.conversazione.push(v); seguiRisposta(v); nuovi++; }
-      if (nuovi && stato.vista === "chat") disegna();
-    }).catch(() => {});
-  }
-  const schedaConv = (c) => {
-    c.ridisegna = schedaConv;
-    const el = c.attesa ? h("div", { class: "carta", style: "margin-top:12px" },
-      h("div", { class: "sotto" }, "Tu → " + c.agente), h("div", { class: "risposta" }, c.domanda),
-      h("div", { class: "sotto", style: "margin-top:10px" }, "⏳ Inviato. " + c.agente + " risponderà appena è libero: puoi continuare a lavorare, la risposta comparirà qui.")) :
-    h("div", { class: "carta", style: "margin-top:12px" },
-
-      h("div", { class: "sotto" }, "Tu → " + c.agente),
-      h("div", { class: "risposta" }, c.domanda),
-      h("div", { class: "sotto", style: "margin-top:10px" }, c.agente + " (" + c.t + " token)"),
-      h("div", { class: "risposta" }, c.risposta),
-      (c.file && c.file.length) ? h("div", { class: "azioni" }, ...c.file.map(x => h("a", { href: x.link || "#", target: "_blank", rel: "noopener", class: "s", style: "text-decoration:none;padding:4px 10px;border:1px solid var(--bordo,#ccc);border-radius:6px" }, "📎 " + x.nome))) : null,
-      c.agenteId ? h("div", { class: "azioni" }, pollici(c.agenteId, "chat", null)) : null,
-      Voce.supportoLettura ? h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => Voce.leggi(c.risposta) }, "🔊 Ascolta")) : null,
-      c.usati.length ? h("div", { class: "sotto", style: "margin-top:8px" }, "Documenti consultati: " + c.usati.join(", ")) : null,
-      c.esclusi.length ? avviso("Non consultati per riservatezza: " + c.esclusi.join(", "), "avv") : null,
-      (c.avvisi || []).map(t => avviso(t, "avv")));
-    c.el = el;
-    return el;
-  };
-  return [
-    h("h3", {}, "Chat con gli agenti"),
-    h("div", { class: "carta" },
-      h("div", { class: "riga" }, h("label", {}, "Agente", scelta),
-        h("label", {}, "Tipo di dati nel messaggio", f)),
-      h("label", {}, "Messaggio (Invio per inviare, Maiusc+Invio per andare a capo)", testo),
-      h("label", {}, "Allegati (facoltativi: PDF, Word, TXT, MD, CSV; fino a 5 file, 10 MB ciascuno)", allegati), elencoAll, msg,
-      h("div", { class: "azioni" }, vocale ? bMic : null, provaMicrofono(), h("button", { class: "s", type: "button", onclick: () => { Voce.fermaTutto(); viva.checked = false; stile(false); } }, "⏹ Silenzio"), bInvia),
-      vocale ? h("div", { class: "interruttore" }, leggi, h("span", {}, "Leggi ad alta voce le risposte")) : null,
-      Voce.supportoDettatura ? h("div", { class: "interruttore" }, viva, h("span", {}, "Vivavoce: parli, il messaggio parte quando smetti, l'agente risponde a voce e riascolta")) : null,
-      vocale ? h("label", {}, "Trascrizione della voce", modoVoce) : null,
-      vocale ? h("p", { class: "aiuto" }, "Browser: usa il riconoscimento vocale del browser (non funziona su Firefox e Brave). Server: registra e trascrive con OpenAI, richiede la chiave OpenAI e vale per qualsiasi browser. Con il browser: in Chrome l'audio passa dal servizio di Google. Non dettare dati riservati se non vuoi che escano dal tuo computer.") : null),
-    stato.conversazione.map(schedaConv),
-  ];
-}
-
-// Segue un messaggio inviato senza attesa: appena l'agente risponde aggiorna la scheda sul posto (senza toccare quello che stai scrivendo).
-function seguiRisposta(voce, tentativi = 0) {
-  setTimeout(async () => {
-    try {
-      const r = await api("GET", "/chat-coda/" + voce.codaId);
-      if (r.stato === "finito" && r.risultato) {
-        const x = r.risultato, avvAll = [];
-        if (x.allegati_troncati && x.allegati_troncati.length) avvAll.push("File letti solo in parte perché lunghi: " + x.allegati_troncati.join(", "));
-        Object.assign(voce, { attesa: false, risposta: x.risposta, file: x.file_creati || [], t: (x.token_input || 0) + (x.token_output || 0), usati: x.documenti_usati || [],
-          esclusi: x.documenti_esclusi_per_riservatezza || [], avvisi: (x.avvisi || []).concat(avvAll) });
-      } else if (r.stato === "errore") {
-        Object.assign(voce, { attesa: false, risposta: "⚠️ " + (r.errore || "Risposta non riuscita"), avvisi: [] });
-      } else if (tentativi < 600) { seguiRisposta(voce, tentativi + 1); return; }
-      else Object.assign(voce, { attesa: false, risposta: "⚠️ Nessuna risposta dopo molto tempo: controlla la Salute degli agenti.", avvisi: [] });
-    } catch (e) { if (tentativi < 600) { seguiRisposta(voce, tentativi + 1); return; } return; }
-    const el = voce.el;
-    if (stato.vista === "chat" && el && el.isConnected && typeof voce.ridisegna === "function") el.replaceWith(voce.ridisegna(voce));
-    if (stato.vista === "chat" && (Voce.leggiRisposte || Voce.viva) && voce.risposta && !voce.risposta.startsWith("⚠️")) Voce.leggi(voce.risposta, () => { if (Voce.viva && Voce.avviaAscolto) Voce.avviaAscolto(); });
-    if (stato.vista !== "chat") stato.chatNuove = (stato.chatNuove || 0) + 1;
-  }, tentativi === 0 ? 2000 : 3000);
 }
 
 // ---------- Briefing ----------

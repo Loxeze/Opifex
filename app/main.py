@@ -22,6 +22,7 @@ from .rotte_ginnasio import router as router_ginnasio
 from .rotte_squadre import router as router_squadre
 from .rotte_avatar import router as router_avatar
 from .rotte_custode import router as router_custode
+from .rotte_chat import router as router_chat
 from . import eventi
 from .rotte_utenti import router as router_utenti, gestione as gestione_utenti
 from .rotte_dialoghi import router as router_dialoghi
@@ -232,6 +233,7 @@ app.include_router(router_ginnasio)
 app.include_router(router_squadre)
 app.include_router(router_avatar)
 app.include_router(router_custode)
+app.include_router(router_chat)
 app.include_router(gestione_utenti)
 app.include_router(router_dialoghi)
 app.include_router(router_richieste)

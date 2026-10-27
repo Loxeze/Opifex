@@ -1,4 +1,4 @@
-"""Le sentinelle (Qualita', Costi, Fonti, Evoluzione) osservano e propongono: nulla cambia senza l'approvazione di una persona.
+"""Le sentinelle (Qualita', Costi, Fonti, Evoluzione, Usabilita') osservano e propongono: nulla cambia senza l'approvazione di una persona.
 La ricerca delle proposte e' fatta con controlli sui dati (nessun costo di modello)."""
 from . import costi as _costi
 
@@ -64,8 +64,55 @@ def evoluzione(conn) -> int:
     return n
 
 
+NOMI_VISTE = {"dashboard": "Dashboard", "task": "Task", "agenti": "Agenti", "ginnasio": "Ginnasio", "progetti": "Progetti", "documenti": "Documenti", "chat": "Chat",
+              "crm": "CRM", "riunioni": "Riunioni", "briefing": "Briefing", "impostazioni": "Impostazioni", "iniziative": "Iniziative", "percorsi": "Percorsi", "account": "Il mio account"}
+
+
+def _nome_vista(v: str) -> str:
+    base, _, sez = v.partition(":")
+    return NOMI_VISTE.get(base, base) + (" › " + sez if sez else "")
+
+
+def usabilita(conn) -> int:
+    """L'Osservatore dell'uso: guarda solo i nomi delle pagine aperte e gli errori mostrati (mai i contenuti) e propone comodita'."""
+    n = 0
+    primo = conn.execute("SELECT min(creato_il) AS p FROM uso_eventi").fetchone()["p"]
+    if primo is None:
+        return 0
+    giorni = conn.execute("SELECT EXTRACT(EPOCH FROM NOW() - %s) / 86400 AS g", (primo,)).fetchone()["g"]
+    if giorni >= 3:
+        for r in conn.execute("""WITH e AS (SELECT utente_id, vista, creato_il, LAG(vista, 1) OVER w AS p1, LAG(vista, 2) OVER w AS p2, LAG(creato_il, 2) OVER w AS t2
+                                            FROM uso_eventi WHERE azione = 'vista' AND creato_il > NOW() - INTERVAL '14 days'
+                                            WINDOW w AS (PARTITION BY utente_id ORDER BY creato_il))
+                                 SELECT LEAST(vista, p1) AS a, GREATEST(vista, p1) AS b, count(*) AS n FROM e
+                                 WHERE p2 = vista AND p1 <> vista AND creato_il - t2 < INTERVAL '3 minutes' GROUP BY 1, 2 HAVING count(*) >= 8 ORDER BY n DESC LIMIT 3""").fetchall():
+            n += _nuova(conn, "usabilita", f"avanti_indietro:{r['a']}|{r['b']}", None, f"Tenere vicine «{_nome_vista(r['a'])}» e «{_nome_vista(r['b'])}»",
+                        f"In 14 giorni sei passato {r['n']} volte da «{_nome_vista(r['a'])}» a «{_nome_vista(r['b'])}» e ritorno nel giro di pochi minuti. Idea: mostrarle affiancate o con un collegamento diretto dall'una all'altra.")
+        for r in conn.execute("""WITH e AS (SELECT vista, LEAD(creato_il) OVER (PARTITION BY utente_id ORDER BY creato_il) - creato_il AS d FROM uso_eventi
+                                            WHERE azione = 'vista' AND creato_il > NOW() - INTERVAL '14 days')
+                                 SELECT vista, count(*) AS n, percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM d)) AS med FROM e
+                                 WHERE d IS NOT NULL AND d < INTERVAL '30 minutes' GROUP BY vista
+                                 HAVING count(*) >= 10 AND percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM d)) < 6 ORDER BY n DESC LIMIT 3""").fetchall():
+            n += _nuova(conn, "usabilita", f"lasciata_subito:{r['vista']}", None, f"«{_nome_vista(r['vista'])}» viene aperta e lasciata subito",
+                        f"Negli ultimi 14 giorni l'hai aperta {r['n']} volte restandoci in mediana {round(float(r['med']))} secondi: forse non trovi subito quello che cerchi o ci passi solo per arrivare altrove. Idea: portare l'informazione che ti serve in evidenza o raggiungerla in un passaggio in meno.")
+        for r in conn.execute("""SELECT vista, count(*) AS n FROM uso_eventi WHERE azione = 'errore' AND creato_il > NOW() - INTERVAL '7 days' GROUP BY vista HAVING count(*) >= 5 ORDER BY n DESC LIMIT 3""").fetchall():
+            n += _nuova(conn, "usabilita", f"errori_ripetuti:{r['vista']}", None, f"Errori ripetuti in «{_nome_vista(r['vista'])}»",
+                        f"In 7 giorni sono comparsi {r['n']} messaggi di errore in questa pagina. Idea: rendere piu' chiaro cosa serve prima di agire o prevenire la causa piu' frequente.")
+        lente = conn.execute("""SELECT count(*) FILTER (WHERE secondi > 120) AS lente, count(*) AS tot FROM chat_coda WHERE stato = 'finito' AND creato_il > NOW() - INTERVAL '7 days'""").fetchone()
+        if lente["lente"] >= 5 and lente["lente"] * 4 >= lente["tot"]:
+            n += _nuova(conn, "usabilita", "chat_risposte_lente", None, "Le risposte in chat si fanno attendere",
+                        f"{lente['lente']} risposte su {lente['tot']} nell'ultima settimana hanno impiegato piu' di 2 minuti. Idea: mostrare cosa sta facendo l'agente e un tempo stimato, e avvisarti quando e' pronta.")
+    if giorni >= 21:
+        for r in conn.execute("""SELECT vista, count(*) AS n, max(creato_il) AS ultima FROM uso_eventi WHERE azione = 'vista' GROUP BY vista
+                                 HAVING count(*) >= 3 AND max(creato_il) < NOW() - INTERVAL '21 days' ORDER BY n DESC LIMIT 3""").fetchall():
+            n += _nuova(conn, "usabilita", f"non_usata:{r['vista']}", None, f"«{_nome_vista(r['vista'])}» non viene aperta da tre settimane",
+                        f"L'avevi aperta {r['n']} volte, l'ultima il {r['ultima']:%d/%m/%Y}. Idea: toglierla dal menu principale o unirla a un'altra pagina per alleggerire la navigazione.")
+    conn.execute("DELETE FROM uso_eventi WHERE creato_il < NOW() - INTERVAL '120 days'")
+    return n
+
+
 def scansiona(conn) -> dict:
-    out = {k: f(conn) for k, f in (("qualita", qualita), ("costi", costi), ("fonti", fonti), ("evoluzione", evoluzione))}
+    out = {k: f(conn) for k, f in (("qualita", qualita), ("costi", costi), ("fonti", fonti), ("evoluzione", evoluzione), ("usabilita", usabilita))}
     nuove = sum(out.values())
     if nuove:
         conn.execute("INSERT INTO notifiche (testo, urgente, critica) VALUES (%s, FALSE, FALSE)", (f"Le sentinelle hanno {nuove} nuove proposte da valutare.",))

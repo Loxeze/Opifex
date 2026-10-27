@@ -198,6 +198,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         kp_ctx = squadre.contesto_kpi(conn, a_f) if memoria._ok(a_f, "interno") else ""
         if kp_ctx:
             prefisso.append(kp_ctx); dim["kpi"] = len(kp_ctx)
+        if a_f.get("tipo") == "sistema" and a_f.get("nome") == "Osservatore dell'uso":
+            from . import uso_ux
+            ux_ctx = uso_ux.riepilogo(conn)
+            prefisso.append(ux_ctx); dim["uso"] = len(ux_ctx)
         al_ctx = memoria.contesto_allineamento(conn, a_f)
         if al_ctx:
             prefisso.append(al_ctx); dim["allineamento"] = len(al_ctx)
