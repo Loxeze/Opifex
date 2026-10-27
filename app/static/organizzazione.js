@@ -229,9 +229,10 @@ function vistaOrganigramma(incorniciata) {
     const sup = n.superiore_id ? layout.per.get(n.superiore_id)?.nome : "Lorenzo";
     const dip = dati.divisioni.find(d => d.id === n.divisione_id)?.nome;
     scheda.style.display = "block";
+    const boxAv = h("div", { class: "avatar", style: "border-color:" + c + ";color:" + c }, n.nome.charAt(0));
     riempi(scheda, [
       h("div", { class: "testa" },
-        h("div", { class: "avatar", style: "border-color:" + c + ";color:" + c }, n.nome.charAt(0)),
+        boxAv,
         h("div", {}, h("div", { class: "nome" }, n.nome), h("div", { class: "sotto" }, n.ruolo)),
         h("button", { class: "chiudi", onclick: chiudiScheda }, "×")),
       h("div", { class: "metriche" },
@@ -243,6 +244,7 @@ function vistaOrganigramma(incorniciata) {
       h("div", { class: "sotto" }, "Risponde a: " + sup + (dip ? " · " + dip : "")),
       h("div", { class: "sotto" }, "Progetti: " + ((n.progetti || []).map(i => (dati.progetti || []).find(z => z.id === i)?.nome).filter(Boolean).join(", ") || "nessuno")),
       h("div", { class: "sotto" }, "Aziende: " + (nomiAz.join(", ") || "tutte (trasversale)") + (n.categoria === "sentinella" ? " · Sentinella" : "")),
+      bloccoGiocatore(n, boxAv, c),
       bloccoAttivita(n.id),
       h("div", { class: "azioni" },
         h("button", { class: "p", onclick: () => { const a = stato.agenti.find(x => x.id === n.id); if (a) modulo(a); } }, "Apri scheda"),
@@ -563,4 +565,64 @@ function bloccoAttivita(agenteId) {
   aggiorna();
   timer = setInterval(aggiorna, 8000);
   return corpo;
+}
+
+// ---------- Avatar e scheda giocatore (solo dati misurati) ----------
+const _cacheAvatar = new Map();
+function immagineAvatar(agenteId, versione) {
+  const k = agenteId + ":" + (versione || "");
+  if (!_cacheAvatar.has(k)) _cacheAvatar.set(k, fetch("/agenti/" + agenteId + "/avatar", { headers: token ? { Authorization: "Bearer " + token } : {} })
+    .then(r => r.ok ? r.blob() : null).then(b => b ? URL.createObjectURL(b) : null).catch(() => null));
+  return _cacheAvatar.get(k);
+}
+
+function bloccoGiocatore(n, boxAvatar, colore) {
+  const corpo = h("div", { class: "giocatore" }, h("div", { class: "sotto" }, "Carico la scheda…"));
+  const msg = h("div");
+  const carica = async () => {
+    try {
+      const g = await api("GET", "/agenti/" + n.id + "/scheda-giocatore");
+      boxAvatar.className = "avatar cornice-" + g.formazione.cornice;
+      boxAvatar.style.removeProperty("border-color");
+      boxAvatar.replaceChildren(n.nome.charAt(0));
+      if (g.avatar) immagineAvatar(n.id, g.avatar.scelto_il).then(u => { if (u) boxAvatar.replaceChildren(h("img", { src: u, alt: g.avatar.opera, title: g.avatar.opera + " — " + g.avatar.autore })); });
+      const a = g.affidabilita, c = g.carico, k = g.costo, q = g.kpi;
+      const riga = (et, v) => h("div", {}, h("small", {}, et), h("span", {}, v));
+      riempi(corpo, [
+        h("div", { class: "medaglie" }, g.formazione.medaglie.length ? g.formazione.medaglie.map(m => h("span", { class: "medaglia", title: m.competenza + " — livello " + m.livello }, m.medaglia + " " + m.competenza))
+          : h("span", { class: "sotto" }, "Nessuna competenza formata (livello 0)")),
+        h("div", { class: "metriche" },
+          riga("Formazione", "livello " + g.formazione.livello),
+          riga("Affidabilità", a.sufficienti && a.tasso != null ? Math.round(a.tasso * 100) + "% su " + a.casi + " casi" : "dati insufficienti (" + a.casi + " casi)"),
+          riga("👍 / 👎 (" + a.giorni + " gg)", a.pollici_su + " / " + a.pollici_giu),
+          riga("Task", c.task_aperte + " aperte · " + c.task_chiuse + " chiuse" + (c.in_ritardo ? " · " + c.in_ritardo + " in ritardo" : "")),
+          riga("Progetti", String(c.progetti)),
+          riga("KPI", q.aperti + " aperti · " + q.raggiunti + " raggiunti" + (q.a_rischio ? " · " + q.a_rischio + " a rischio" : "")),
+          riga("Questo mese", k.token_mese.toLocaleString("it-IT") + " token · € " + k.costo_mese.toFixed(2) + (k.percentuale_budget != null ? " (" + k.percentuale_budget + "% del tetto)" : ""))),
+        g.avatar ? h("div", { class: "sotto" }, "Avatar: «" + g.avatar.opera + "» — " + g.avatar.autore + " · " + g.avatar.licenza + " · ", h("a", { href: g.avatar.fonte_url, target: "_blank", rel: "noopener" }, "fonte")) : null,
+        stato.ruolo === "titolare" ? pannelloAvatar(n, g, carica, msg) : null, msg]);
+    } catch (e) { corpo.replaceChildren(h("div", { class: "sotto" }, "Scheda non disponibile.")); }
+  };
+  carica();
+  return corpo;
+}
+
+function pannelloAvatar(n, g, ricarica, msg) {
+  const q = h("input", { type: "text", maxlength: 80, placeholder: "es. Hermes statua, Minerva dipinto, Archimede" });
+  const ris = h("div", { class: "griglia-avatar" });
+  const cerca = async () => {
+    ris.replaceChildren(h("div", { class: "sotto" }, "Cerco su Wikimedia Commons…"));
+    try {
+      const r = await api("GET", "/gestione/avatar/cerca?q=" + encodeURIComponent(q.value));
+      riempi(ris, r.risultati.length ? r.risultati.map(x => h("div", { class: "candidata" },
+        h("img", { src: x.anteprima, alt: x.opera, loading: "lazy", referrerpolicy: "no-referrer" }),
+        h("div", { class: "sotto" }, x.opera), h("div", { class: "sotto" }, x.autore + " · " + x.licenza),
+        h("div", { class: "azioni" }, h("button", { class: "p", onclick: async (e) => { e.currentTarget.disabled = true; try { await api("POST", "/gestione/agenti/" + n.id + "/avatar", { file: x.file }); _cacheAvatar.clear(); msg.replaceChildren(avviso("Avatar impostato.", "ok")); ricarica(); } catch (er) { msg.replaceChildren(avviso(er.message, "no")); e.currentTarget.disabled = false; } } }, "Usa questo"),
+          h("a", { href: x.fonte_url, target: "_blank", rel: "noopener", class: "sotto" }, "fonte")))) : h("div", { class: "sotto" }, "Nessuna opera di pubblico dominio trovata: prova altre parole."));
+    } catch (e) { ris.replaceChildren(avviso(e.message, "no")); }
+  };
+  return h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer" }, g.avatar ? "Cambia avatar" : "Scegli un avatar"),
+    h("p", { class: "aiuto" }, "Si cercano solo opere antiche di pubblico dominio su Wikimedia Commons. Scegli tu: autore, opera, licenza e fonte restano visibili sulla scheda."),
+    h("div", { class: "riga" }, h("label", {}, "Cosa cercare", q), h("button", { class: "s", style: "align-self:flex-end", onclick: cerca }, "Cerca")),
+    ris, g.avatar ? h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => { try { await api("DELETE", "/gestione/agenti/" + n.id + "/avatar"); _cacheAvatar.clear(); ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Togli l'avatar")) : null);
 }

@@ -20,6 +20,7 @@ from .rotte_progetti import router as router_progetti
 from .rotte_scheda import router as router_scheda
 from .rotte_ginnasio import router as router_ginnasio
 from .rotte_squadre import router as router_squadre
+from .rotte_avatar import router as router_avatar
 from . import eventi
 from .rotte_utenti import router as router_utenti, gestione as gestione_utenti
 from .rotte_dialoghi import router as router_dialoghi
@@ -226,6 +227,7 @@ app.include_router(router_progetti)
 app.include_router(router_scheda)
 app.include_router(router_ginnasio)
 app.include_router(router_squadre)
+app.include_router(router_avatar)
 app.include_router(gestione_utenti)
 app.include_router(router_dialoghi)
 app.include_router(router_richieste)
