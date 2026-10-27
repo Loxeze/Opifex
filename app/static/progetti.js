@@ -49,7 +49,7 @@ function vistaProgetti() {
         h("h3", {}, "Nuovo progetto"),
         h("div", { class: "carta" }, h("label", {}, "Nome", nome), h("label", {}, "Descrizione", desc),
           h("div", { class: "riga" }, h("label", {}, "Impresa (obbligatoria)", azi), h("label", { style: "flex:0 0 auto" }, "Colore", col)),
-          h("label", {}, tutti, " Coinvolgi tutti gli agenti attivi"), lista,
+          h("label", {}, tutti, " La squadra la compone il project manager (consigliato)"), h("p", { class: "aiuto" }, "Il project manager sceglie gli agenti che servono, all'inizio o strada facendo, e ti chiede di approvarli. Togli la spunta solo per scegliere tu qualche agente fin da subito."), lista,
           h("p", { class: "aiuto" }, "Su Drive nasce Opifex → nome del progetto → agent (una cartella per ogni agente) e repository (documenti per tutta l'organizzazione). Gli output aggiornati stanno nella cartella del progetto. Archiviare un progetto non cancella mai nulla su Drive."),
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: async (e) => {
             msg.replaceChildren(); e.currentTarget.disabled = true;
