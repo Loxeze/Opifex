@@ -19,7 +19,7 @@ function vistaSiti() {
       const cust = d.custode ? d.custode.nome : "il Maestro di chiavi";
       riempi(tutti, [h("div", { class: "carta" },
         h("label", { style: "display:flex;gap:8px;align-items:flex-start" }, h("input", { type: "checkbox", checked: d.solo_custode, onchange: async (e) => { try { await api("PUT", "/gestione/siti/solo-custode", { attivo: e.target.checked }); carica(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }),
-          h("span", {}, h("b", {}, "Solo " + cust + " opera sui siti"), h("div", { class: "sotto" }, "Gli altri agenti non toccano mai l'hosting: glielo chiedono (prova del collegamento, lettura, proposta di modifica). Le modifiche in produzione aspettano sempre il tuo via libera. Se lo spegni tornano valide le assegnazioni ai singoli agenti qui sotto."))),
+          h("span", {}, h("b", {}, "Solo " + cust + " opera sui siti"), h("div", { class: "sotto" }, "Gli altri agenti non toccano mai l'hosting: glielo chiedono. Il Maestro scrive direttamente, anche in produzione (conserva la copia del file prima di ogni modifica), scarica e carica file e cartelle. Se lo spegni tornano valide le assegnazioni ai singoli agenti qui sotto."))),
         d.custode && !d.custode.attivo ? h("div", { class: "sotto", style: "color:#c44" }, cust + " è spento: nessun agente può usare i siti.") : null),
         ...(d.solo_custode ? [] : [blocchiTutti(d.accesso_totale || [], msg, carica)])]);
       riempi(lista, d.siti.length ? d.siti.map(s => schedaSito(s, carica, msg)) : h("p", { class: "sotto" }, "Nessun sito ancora. Aggiungi il primo qui sotto."));
@@ -27,8 +27,8 @@ function vistaSiti() {
   };
   carica();
   return [h("h2", {}, "Siti e hosting"),
-    h("p", { class: "aiuto" }, "Le password e le chiavi sono cifrate sul server e non vengono mai mostrate, nemmeno a te: puoi solo sostituirle. Gli agenti autorizzati lavorano sul sito tramite strumenti (elenca, leggi, scrivi) senza vedere il segreto. Sui siti in produzione ogni modifica aspetta il tuo via libera e prima si conserva una copia. Meglio usare chiavi SSH o utenti FTP limitati, e la «password applicazione» di WordPress."),
-    tutti, msg, attesa, lista, formSito(null, carica, msg)];
+    h("p", { class: "aiuto" }, "Le password e le chiavi sono cifrate sul server e non vengono mai mostrate, nemmeno a te: puoi solo sostituirle. Gli agenti autorizzati lavorano sul sito tramite strumenti (elenca, leggi, scrivi) senza vedere il segreto. Il Maestro di chiavi scrive direttamente e conserva la copia del file prima di ogni modifica; se rimetti i singoli agenti, sui siti in produzione le loro modifiche aspettano il tuo via libera. Meglio usare chiavi SSH o utenti FTP limitati, e la «password applicazione» di WordPress."),
+    tutti, msg, attesa, bloccoBackup(msg), lista, formSito(null, carica, msg)];
 }
 
 function blocchiTutti(ids, msg, ricarica) {
@@ -80,4 +80,26 @@ function formSito(s, ricarica, msg) {
         utente: utente.value.trim() || null, segreto: segreto.value || null, percorso_base: base.value.trim() || "/", produzione: prod.checked, attivo: att.checked, note: note.value.trim() || null };
       try { await api(s ? "PUT" : "POST", "/gestione/siti" + (s ? "/" + s.id : ""), corpo); segreto.value = ""; msg.replaceChildren(avviso("Salvato.", "ok")); ricarica(); }
       catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, s ? "Salva modifiche" : "Aggiungi")));
+}
+
+
+function bloccoBackup(msg) {
+  const box = h("div", { class: "carta" }, h("p", { class: "sotto" }, "Carico lo stato dei backup…"));
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/custode");
+      const quando = (t) => new Date(t).toLocaleString("it-IT");
+      riempi(box, [
+        h("h3", {}, "Backup dei siti (Maestro di chiavi)"),
+        h("p", { class: "aiuto" }, "Ogni notte alle " + d.ora + " (ora italiana) il Maestro salva tutti i siti SFTP, FTPS e WordPress in una cartella Drive dedicata («Maestro di chiavi - backup siti»), uno per sito. Gli archivi sono cifrati con una chiave che custodisce solo il Maestro: nemmeno tu la vedi, e senza la chiave i file su Drive non si aprono. Il ripristino lo chiedi a lui."),
+        h("label", { style: "display:flex;gap:8px;align-items:center" }, h("input", { type: "checkbox", checked: d.attivo, onchange: async (e) => { try { await api("PUT", "/gestione/custode/backup", { attivo: e.target.checked }); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }), "Backup notturno attivo"),
+        d.drive_collegato ? null : avviso("Drive non è collegato: senza Drive il backup non può partire (scheda Collegamenti).", "avv"),
+        d.ultimo ? h("p", { class: "sotto" }, "Ultimo giro: " + quando(d.ultimo.quando) + " · " + d.ultimo.riusciti + " siti su " + d.ultimo.siti + (d.ultimo.tutto_ok ? " salvati" : " — qualcuno non è riuscito")) : h("p", { class: "sotto" }, "Nessun backup ancora."),
+        h("div", { class: "azioni" }, h("button", { class: "s", disabled: d.in_corso, onclick: async (e) => { e.currentTarget.disabled = true; try { await api("POST", "/gestione/custode/backup-ora", {}); msg.replaceChildren(avviso("Backup avviato: ci vuole qualche minuto. Ricarica la pagina per vedere l'esito.", "ok")); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); e.currentTarget.disabled = false; } } }, d.in_corso ? "Backup in corso…" : "Esegui backup ora")),
+        d.backup.length ? h("details", {}, h("summary", {}, "Ultimi backup (" + d.backup.length + ")"), ...d.backup.slice(0, 15).map(b => h("div", { class: "sotto" }, quando(b.creato_il) + " · " + b.sito_nome + " · " + (b.ok ? b.file_n + " file, " + Math.round(b.byte_cifrati / 1024) + " KB cifrati" + (b.saltati ? " (qualcosa saltato)" : "") : "NON riuscito: " + (b.errore || "")))) ) : null,
+      ]);
+    } catch (e) { box.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return box;
 }

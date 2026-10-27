@@ -21,6 +21,7 @@ from .rotte_scheda import router as router_scheda
 from .rotte_ginnasio import router as router_ginnasio
 from .rotte_squadre import router as router_squadre
 from .rotte_avatar import router as router_avatar
+from .rotte_custode import router as router_custode
 from . import eventi
 from .rotte_utenti import router as router_utenti, gestione as gestione_utenti
 from .rotte_dialoghi import router as router_dialoghi
@@ -119,10 +120,11 @@ def _passo(nome: str, f):
 async def _manutenzione():
     """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Ogni passo e' isolato dagli altri."""
     import asyncio
-    from . import allarmi, backup, crm_schede, ginnasio, plaud, proposte_sentinelle, prova_ripristino, sintesi_memoria, studio
+    from . import allarmi, backup, custode, crm_schede, ginnasio, plaud, proposte_sentinelle, prova_ripristino, sintesi_memoria, studio
 
     def giro():
         _passo("backup", lambda c: backup.esegui(c) if backup.da_fare(c) else None)
+        _passo("backup dei siti (Maestro di chiavi)", lambda c: custode.esegui_notturno(c) if custode.da_fare(c) else None)
         _passo("allarmi", allarmi.controlla)
         _passo("sintesi memoria", lambda c: sintesi_memoria.genera(c) if sintesi_memoria.da_fare(c) else None)
         _passo("posta PLAUD", plaud.controlla)
@@ -228,6 +230,7 @@ app.include_router(router_scheda)
 app.include_router(router_ginnasio)
 app.include_router(router_squadre)
 app.include_router(router_avatar)
+app.include_router(router_custode)
 app.include_router(gestione_utenti)
 app.include_router(router_dialoghi)
 app.include_router(router_richieste)

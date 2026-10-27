@@ -8,6 +8,7 @@ import ipaddress
 import json
 import posixpath
 import socket
+import stat
 from urllib.parse import urlparse
 
 import httpx
@@ -46,7 +47,10 @@ def percorso_sicuro(base: str, perc: str) -> str:
     if "\x00" in perc or ".." in perc.split("/"):
         raise ErroreSito("Percorso non ammesso")
     base = posixpath.normpath("/" + (base or "/").strip("/"))
-    p = posixpath.normpath(posixpath.join(base, perc.lstrip("/"))) if perc else base
+    if perc and (posixpath.normpath("/" + perc.lstrip("/")) == base or posixpath.normpath("/" + perc.lstrip("/")).startswith(base.rstrip("/") + "/")):
+        p = posixpath.normpath("/" + perc.lstrip("/"))      # percorso gia' completo (es. /public_html/index.html con base /public_html): non si raddoppia
+    else:
+        p = posixpath.normpath(posixpath.join(base, perc.lstrip("/"))) if perc else base
     if p != base and not p.startswith(base.rstrip("/") + "/"):
         raise ErroreSito("Percorso fuori dalla cartella del sito")
     return p
@@ -156,6 +160,30 @@ class Sftp:
         with self.c.open(perc, "wb") as f:
             f.write(contenuto.encode("utf-8"))
 
+    # --- file e cartelle per il Maestro di chiavi ---
+    def voci(self, perc: str) -> list[tuple]:
+        """(nome, e_cartella, byte, e_collegamento)"""
+        return [(a.filename, stat.S_ISDIR(a.st_mode or 0), a.st_size or 0, stat.S_ISLNK(a.st_mode or 0)) for a in self.c.listdir_attr(perc)]
+
+    def leggi_bytes(self, perc: str, massimo: int) -> bytes:
+        if (self.c.stat(perc).st_size or 0) > massimo:
+            raise ErroreSito(f"File troppo grande (massimo {massimo // 1_000_000} MB)")
+        with self.c.open(perc, "rb") as f:
+            return f.read(massimo + 1)
+
+    def scrivi_bytes(self, perc: str, dati: bytes):
+        with self.c.open(perc, "wb") as f:
+            f.write(dati)
+
+    def crea_cartella(self, perc: str):
+        corrente = ""
+        for parte in [x for x in perc.split("/") if x]:
+            corrente += "/" + parte
+            try:
+                self.c.stat(corrente)
+            except OSError:
+                self.c.mkdir(corrente)
+
 
 class Ftp:
     """FTP su TLS (FTPS esplicito): l'FTP in chiaro non e' ammesso."""
@@ -200,6 +228,43 @@ class Ftp:
 
     def scrivi(self, perc: str, contenuto: str):
         self.f.storbinary("STOR " + perc, io.BytesIO(contenuto.encode("utf-8")))
+
+    # --- file e cartelle per il Maestro di chiavi ---
+    def voci(self, perc: str) -> list[tuple]:
+        import ftplib
+        out = []
+        try:
+            for nome, f in self.f.mlsd(perc, facts=["type", "size"]):
+                t = (f.get("type") or "").lower()
+                if t in ("cdir", "pdir"):
+                    continue
+                out.append((nome, t == "dir", int(f.get("size") or 0), "slink" in t))
+        except ftplib.error_perm:
+            raise ErroreSito("Questo server FTP non permette di elencare le cartelle (MLSD): usa SFTP") from None
+        return out
+
+    def leggi_bytes(self, perc: str, massimo: int) -> bytes:
+        buf = io.BytesIO()
+
+        def pezzo(b):
+            buf.write(b)
+            if buf.tell() > massimo:
+                raise ErroreSito(f"File troppo grande (massimo {massimo // 1_000_000} MB)")
+        self.f.retrbinary("RETR " + perc, pezzo)
+        return buf.getvalue()
+
+    def scrivi_bytes(self, perc: str, dati: bytes):
+        self.f.storbinary("STOR " + perc, io.BytesIO(dati))
+
+    def crea_cartella(self, perc: str):
+        import ftplib
+        corrente = ""
+        for parte in [x for x in perc.split("/") if x]:
+            corrente += "/" + parte
+            try:
+                self.f.mkd(corrente)
+            except ftplib.error_perm:
+                pass   # esiste gia'
 
 
 class WordPress:
@@ -252,6 +317,21 @@ class WordPress:
         if len(p) != 2:
             raise ErroreSito("Indica anche l'id, per esempio wp:pages/12")
         self._rest("POST", f"{p[0]}/{p[1]}", json={"content": contenuto})
+
+    def esporta(self) -> bytes:
+        """Copia di pagine e articoli (contenuto grezzo) per il backup."""
+        out = {}
+        for tipo in ("pages", "posts"):
+            elenco = []
+            for pagina in range(1, 11):
+                r = self._rest("GET", tipo, params={"per_page": 100, "page": pagina, "context": "edit", "status": "any"})
+                if not isinstance(r, list) or not r:
+                    break
+                elenco.extend(r)
+                if len(r) < 100:
+                    break
+            out[tipo] = elenco
+        return json.dumps(out, ensure_ascii=False, default=str).encode("utf-8")
 
 
 CONNETTORI = {"sftp": Sftp, "ftp": Ftp, "wordpress": WordPress}
@@ -388,10 +468,21 @@ def _visibili(conn, agente_id: int) -> list[dict]:
     return conn.execute(f"SELECT s.nome, s.tipo, s.produzione, s.url, s.note FROM siti_hosting s WHERE s.attivo AND {_VISIBILE} ORDER BY s.nome", {"ag": agente_id}).fetchall()
 
 
+def e_custode(conn, agente_id: int) -> bool:
+    return conn.execute("SELECT 1 FROM agenti WHERE id = %s AND ruolo_speciale = 'custode' AND attivo", (agente_id,)).fetchone() is not None
+
+
 def avviso_per(conn, agente_id: int) -> str:
     righe = _visibili(conn, agente_id)
     if not righe:
         return ""
+    if e_custode(conn, agente_id):
+        from . import custode
+        return _avviso_righe(righe).replace(" Le modifiche ai siti in produzione partono solo dopo l'approvazione di Lorenzo.", "") + custode.AVVISO
+    return _avviso_righe(righe)
+
+
+def _avviso_righe(righe: list[dict]) -> str:
     ope = [r for r in righe if r["tipo"] in CONNETTORI]
     solo = [r for r in righe if r["tipo"] not in CONNETTORI]
     t = "\n\nSITI E HOSTING: Lorenzo ha salvato le credenziali dei suoi siti in una cassaforte; tu non conosci e non devi chiedere password o chiavi, le usa il sistema."
@@ -407,8 +498,13 @@ def avviso_per(conn, agente_id: int) -> str:
 def strumenti_per(conn, agente_id: int) -> list[dict]:
     """Chi ha solo siti custoditi (pannelli, API) puo' soltanto sapere che esistono; le operazioni servono se c'e' almeno un sito su cui si puo' lavorare."""
     if any(r["tipo"] in CONNETTORI for r in _visibili(conn, agente_id)):
-        return STRUMENTI
-    return [t for t in STRUMENTI if t["name"] == "siti_disponibili"]
+        base = list(STRUMENTI)
+    else:
+        base = [t for t in STRUMENTI if t["name"] == "siti_disponibili"]
+    if e_custode(conn, agente_id):
+        from . import custode
+        base += custode.STRUMENTI
+    return base
 
 
 def ha_siti(conn, agente_id: int) -> bool:
@@ -429,6 +525,11 @@ def gestore(connessione, agente_id: int):
     def f(nome, dati):
         try:
             with connessione() as conn:
+                if nome in ("sito_scarica", "sito_carica", "sito_crea_cartella", "deposito_elenca", "sito_backup", "backup_elenco", "backup_ripristina"):
+                    from . import custode
+                    if not e_custode(conn, agente_id):
+                        return "ERRORE: strumento riservato al Maestro di chiavi"
+                    return custode.gestisci(conn, agente_id, nome, dati)
                 if nome == "siti_disponibili":
                     r = conn.execute(f"SELECT s.nome, s.tipo, s.url, s.produzione, s.note, s.esito_prova FROM siti_hosting s WHERE s.attivo AND {_VISIBILE} ORDER BY s.nome", {"ag": agente_id}).fetchall()
                     return "\n".join(f"- {x['nome']} ({x['tipo']}{', produzione' if x['produzione'] else ', prova'}){' ' + x['url'] if x['url'] else ''}"
@@ -449,6 +550,12 @@ def gestore(connessione, agente_id: int):
                     motivo = str(dati.get("motivo") or "").strip()[:500]
                     if not motivo:
                         return "ERRORE: scrivi il motivo della modifica"
+                    if e_custode(conn, agente_id):
+                        from . import custode
+                        try:
+                            return custode.scrivi_diretto(conn, agente_id, s["nome"], str(dati.get("percorso")), contenuto, motivo)
+                        except custode.ErroreCustode as e:
+                            return "ERRORE: " + str(e)
                     r = conn.execute("INSERT INTO siti_scritture (sito_id, agente_id, percorso, contenuto, motivo) VALUES (%s,%s,%s,%s,%s) RETURNING id",
                                      (s["id"], agente_id, str(dati.get("percorso")), contenuto, motivo)).fetchone()
                     _log(conn, agente_id, "sito_scrittura_proposta", {"sito": s["nome"], "percorso": str(dati.get("percorso"))[:200], "scrittura": r["id"]})
