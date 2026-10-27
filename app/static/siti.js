@@ -16,7 +16,12 @@ function vistaSiti() {
           h("details", {}, h("summary", {}, "Vedi il nuovo contenuto"), h("pre", { style: "white-space:pre-wrap;max-height:300px;overflow:auto" }, x.contenuto)),
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: (e) => decidi(true, e.currentTarget) }, "Approva e applica"), h("button", { class: "s", onclick: (e) => decidi(false, e.currentTarget) }, "Respingi")));
       })] : []);
-      riempi(tutti, blocchiTutti(d.accesso_totale || [], msg, carica));
+      const cust = d.custode ? d.custode.nome : "il Maestro di chiavi";
+      riempi(tutti, [h("div", { class: "carta" },
+        h("label", { style: "display:flex;gap:8px;align-items:flex-start" }, h("input", { type: "checkbox", checked: d.solo_custode, onchange: async (e) => { try { await api("PUT", "/gestione/siti/solo-custode", { attivo: e.target.checked }); carica(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }),
+          h("span", {}, h("b", {}, "Solo " + cust + " opera sui siti"), h("div", { class: "sotto" }, "Gli altri agenti non toccano mai l'hosting: glielo chiedono (prova del collegamento, lettura, proposta di modifica). Le modifiche in produzione aspettano sempre il tuo via libera. Se lo spegni tornano valide le assegnazioni ai singoli agenti qui sotto."))),
+        d.custode && !d.custode.attivo ? h("div", { class: "sotto", style: "color:#c44" }, cust + " è spento: nessun agente può usare i siti.") : null),
+        ...(d.solo_custode ? [] : [blocchiTutti(d.accesso_totale || [], msg, carica)])]);
       riempi(lista, d.siti.length ? d.siti.map(s => schedaSito(s, carica, msg)) : h("p", { class: "sotto" }, "Nessun sito ancora. Aggiungi il primo qui sotto."));
     } catch (e) { lista.replaceChildren(avviso(e.message, "no")); }
   };

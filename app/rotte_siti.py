@@ -37,7 +37,9 @@ def elenco(_: dict = Depends(solo_titolare)):
             ag.setdefault(r["sito_id"], []).append(r["agente_id"])
         return {"siti": [_pubblica(r, ag.get(r["id"], [])) for r in conn.execute("SELECT * FROM siti_hosting ORDER BY nome").fetchall()],
                 "attesa": conn.execute("SELECT count(*) AS n FROM siti_scritture WHERE stato='in_attesa'").fetchone()["n"],
-                "accesso_totale": [r["id"] for r in conn.execute("SELECT id FROM agenti WHERE siti_tutti ORDER BY nome").fetchall()]}
+                "accesso_totale": [r["id"] for r in conn.execute("SELECT id FROM agenti WHERE siti_tutti ORDER BY nome").fetchall()],
+                "solo_custode": siti_hosting.solo_custode(conn),
+                "custode": conn.execute("SELECT id, nome, attivo FROM agenti WHERE ruolo_speciale = 'custode' LIMIT 1").fetchone()}
 
 
 def _pulisci(d: Scheda) -> dict:
@@ -65,6 +67,19 @@ def crea(d: Scheda, u: dict = Depends(solo_titolare)):
                            (c["nome"], c["tipo"], c["url"], c["host"], c["porta"], c["utente"], _cifra(d.segreto), c["percorso_base"], c["produzione"], c["note"], d.attivo)).fetchone()["id"]
         registra(conn, u, "siti", "sito aggiunto", c["nome"], "siti_hosting", sid, "")
         return {"id": sid}
+
+
+class SoloCustode(BaseModel):
+    attivo: bool
+
+
+@router.put("/solo-custode")
+def imposta_solo_custode(d: SoloCustode, u: dict = Depends(solo_titolare)):
+    """Acceso: solo il Maestro di chiavi opera sui siti. Spento: valgono le assegnazioni ai singoli agenti."""
+    with connessione() as conn:
+        conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('siti_solo_custode', %s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", ("1" if d.attivo else "0",))
+        registra(conn, u, "siti", "accesso ai siti solo al Maestro di chiavi" if d.attivo else "accesso ai siti per assegnazione ai singoli agenti", "Tutti i siti")
+        return {"solo_custode": d.attivo}
 
 
 class AccessoTotale(BaseModel):

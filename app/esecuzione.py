@@ -376,6 +376,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     gsh = siti_hosting.gestore(connessione, agente_id)
                     for s_ in strumenti_siti:
                         gestori[s_["name"]] = gsh
+                if a["livello"] in ("manager", "referente") and a["ruolo_speciale"] != "custode" and colleghi_ok:
+                    with connessione() as c_k:
+                        if siti_hosting.solo_custode(c_k):
+                            avviso_extra += siti_hosting.AVVISO_ALTRI
                 if form_tool:
                     gfo = ginnasio.gestore(connessione, agente_id)
                     extra.extend(ginnasio.STRUMENTI)
