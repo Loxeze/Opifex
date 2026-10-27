@@ -50,7 +50,7 @@ class DatiAgente(BaseModel):
     modello: str
     istruzioni: str = Field(min_length=1, max_length=16000)
     fascia_dati_max: str = "pubblico"
-    max_token_risposta: int = Field(default=3000, ge=100, le=8000)
+    max_token_risposta: int = Field(default=8000, ge=100, le=16000)
     budget_token_mensile: int | None = Field(default=None, gt=0)
     accesso_web: bool = True
     siti_consentiti: list[str] = []
@@ -81,7 +81,7 @@ class ModificaAgente(BaseModel):
     modello: str | None = None
     istruzioni: str | None = Field(default=None, min_length=1, max_length=16000)
     fascia_dati_max: str | None = None
-    max_token_risposta: int | None = Field(default=None, ge=100, le=8000)
+    max_token_risposta: int | None = Field(default=None, ge=100, le=16000)
     budget_token_mensile: int | None = Field(default=None, gt=0)
     accesso_web: bool | None = None
     siti_consentiti: list[str] | None = None

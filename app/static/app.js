@@ -183,7 +183,7 @@ function sezioneProva(a) {
 function modulo(a) {
   const nuovo = a === null;
   const d = a || { nome: "", ruolo: "", divisione_id: null, superiore_id: null, livello: "operativo",
-    modello: stato.opzioni.modelli[0]?.nome, istruzioni: "", fascia_dati_max: "pubblico", max_token_risposta: 3000,
+    modello: stato.opzioni.modelli[0]?.nome, istruzioni: "", fascia_dati_max: "pubblico", max_token_risposta: 8000,
     budget_token_mensile: null, accesso_web: true, siti_consentiti: [], max_ricerche: 3, attivo: true, connessioni: [], aziende: [] };
 
   const nome = h("input", { type: "text", value: d.nome, maxlength: 60 });
@@ -203,7 +203,7 @@ function modulo(a) {
   modello.value = d.modello;
   const fascia = h("select", {}, Object.entries({ pubblico: "Solo dati pubblici", interno: "Dati pubblici e interni", riservato: "Tutti i dati (anche riservati)" }).map(([v, t]) => h("option", { value: v }, t)));
   fascia.value = d.fascia_dati_max;
-  const tetto = h("input", { type: "number", min: 100, max: 8000, value: d.max_token_risposta });
+  const tetto = h("input", { type: "number", min: 100, max: 16000, value: d.max_token_risposta });
   const budget = h("input", { type: "number", min: 1, value: d.budget_token_mensile ?? "", placeholder: "Nessun limite" });
   const web = h("input", { type: "checkbox" }); web.checked = d.accesso_web;
   const siti = h("textarea", { style: "min-height:80px", placeholder: "esempio.it\nbandi.regione.it" });

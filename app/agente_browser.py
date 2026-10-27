@@ -91,6 +91,7 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
     max_token = max(max_token, TETTO_CON_STRUMENTI)
     messaggi = [{"role": "user", "content": messaggio}]
     t_in = t_out = 0
+    continuate: list[str] = []  # pezzi di una risposta tagliata dal limite, in attesa di essere ricuciti
     testi: list[str] = []      # il testo di OGNI passaggio: non si perde se l'ultimo giro e' vuoto
     testo_finale = ""
     stop = ""
@@ -104,6 +105,16 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
         if testo_finale.strip():
             testi.append(testo_finale.strip())
         stop = d.get("stop_reason") or ""
+        if stop == "max_tokens" and testo_finale.strip() and len(continuate) < MAX_CONTINUAZIONI and not any(b.get("type") == "tool_use" for b in d["content"]):
+            # risposta tagliata dal limite: si fa continuare dallo stesso punto e si ricuce il testo, invece di consegnarlo troncato
+            continuate.append(testo_finale)
+            messaggi.append({"role": "assistant", "content": [b for b in d["content"] if b.get("type") == "text"]})
+            messaggi.append({"role": "user", "content": CONTINUA})
+            continue
+        if continuate and stop != "tool_use":
+            testo_finale = "".join(continuate) + testo_finale
+            testi.append(testo_finale.strip())
+            continuate = []
         if stop == "pause_turn":  # la ricerca web del fornitore chiede di proseguire
             messaggi.append({"role": "assistant", "content": d["content"]})
             continue
@@ -128,7 +139,7 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
         # ultimo giro vuoto o interrotto: un tentativo in piu' senza strumenti, per avere comunque una risposta scritta
         try:
             # se il limite era la causa, l'ultimo giro ha il doppio dello spazio (fino a 8000): meglio una risposta lunga che nessuna risposta
-            tetto = min(8000, max_token * 2) if stop == "max_tokens" else max_token
+            tetto = min(16000, max_token * 2) if stop == "max_tokens" else max_token
             diag["max_token_ritentativo"] = tetto
             d = _chiama_api({"model": modello, "max_tokens": tetto, "system": sistema,
                              "messages": _con_richiesta_finale(messaggi), "tools": strumenti, "tool_choice": {"type": "none"}})
@@ -146,6 +157,9 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
         testo += "\n\n(Interrotto: raggiunto il limite di passaggi di navigazione.)"
     return Risposta(testo, t_in, t_out, diag)
 
+
+MAX_CONTINUAZIONI = 3
+CONTINUA = "La tua risposta e' stata interrotta dal limite di lunghezza. Continua esattamente dal punto in cui ti sei fermato, senza ripetere nulla e senza premesse."
 
 URL_COMPAT = {"openai": ("https://api.openai.com/v1/chat/completions", "OpenAI"), "xai": ("https://api.x.ai/v1/chat/completions", "xAI")}
 

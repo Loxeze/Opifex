@@ -11,7 +11,7 @@ from .db import connessione
 from .fornitori import ErroreFornitore, Risposta, chiama_modello
 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
-from . import eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti
+from . import eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
@@ -383,6 +383,8 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     gsh = siti_hosting.gestore(connessione, agente_id)
                     for s_ in strumenti_siti:
                         gestori[s_["name"]] = gsh
+                if ok_int and (a["livello"] in ("manager", "referente") or pm_tool):
+                    avviso_extra += prompting.AVVISO   # la scrittura dei prompt e' competenza di manager, referente e project manager
                 if a["livello"] in ("manager", "referente") and a["ruolo_speciale"] != "custode" and colleghi_ok:
                     with connessione() as c_k:
                         if siti_hosting.solo_custode(c_k):

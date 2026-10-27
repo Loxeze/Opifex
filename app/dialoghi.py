@@ -25,7 +25,7 @@ Rispondi in italiano, in modo completo ma senza giri di parole."""
 REGOLE_BREVI = """Stai dialogando con un collega della stessa organizzazione di Lorenzo Zeppa (un altro agente AI). Comunicazione INTERNA: brevissima.
 Ogni messaggio INIZIA con un codice: """ + codici.LEGENDA + """
 Regole:
-1. Dopo il codice, solo l'essenziale (massimo 80 parole): niente saluti, presentazioni, riepiloghi di cio' che e' gia' stato detto, ringraziamenti. Se il codice basta, scrivi solo il codice (es. «#E» oppure «#A»).
+1. Dopo il codice, solo l'essenziale (massimo 80 parole): niente saluti, presentazioni, riepiloghi di cio' che e' gia' stato detto, ringraziamenti. ECCEZIONE: quando assegni un compito (#R) il prompt va scritto completo e dettagliato, anche lungo, come insegna la scrittura dei prompt: contesto, compito, materiali, risultato atteso, vincoli. Se il codice basta, scrivi solo il codice (es. «#E» oppure «#A»).
 2. Rimanda per identificativo (task #12, documento #5, progetto «X») invece di ripetere il contenuto. Il ragionamento solo se te lo chiedono.
 3. Se manca un'informazione necessaria NON indovinare: «#D» con UNA domanda precisa. Non inventare dati: se non lo sai, dillo.
 4. RISOLVETE TRA VOI: non rimandare a Lorenzo. Chi e' piu' vicino al tema fornisce o decide; se il dubbio non e' sostanziale scegliete l'ipotesi piu' ragionevole e dichiaratela («#C decisione»). Lorenzo si interpella solo per spese, invii all'esterno a suo nome, azioni irreversibili, credenziali o scelte di strategia («#B»).
@@ -35,7 +35,7 @@ Italiano."""
 REGOLE = REGOLE_BREVI
 
 
-MAX_TOKEN_DIALOGO = 2500
+MAX_TOKEN_DIALOGO = 6000
 
 
 class DialogoBloccato(Exception):
@@ -209,7 +209,7 @@ def _risposta_speciale(conn, dest: dict, da_id: int, conv_id: int, domanda: str,
     from .esecuzione import EsecuzioneBloccata, esegui_agente
     chi = conn.execute("SELECT nome, ruolo FROM agenti WHERE id = %s", (da_id,)).fetchone()
     try:
-        r = esegui_agente(dest["id"], (PRIORITA_AURORA if e_aurora(conn, da_id) else "") + f"Domanda del collega {chi['nome']} ({chi['ruolo']}):\n{domanda}", fascia, utente_id, max_token=3500)
+        r = esegui_agente(dest["id"], (PRIORITA_AURORA if e_aurora(conn, da_id) else "") + f"Domanda del collega {chi['nome']} ({chi['ruolo']}):\n{domanda}", fascia, utente_id, max_token=8000)
     except EsecuzioneBloccata as e:
         raise DialogoBloccato(str(e)) from None
     _salva_messaggio(conn, conv_id, dest["id"], da_id, r["risposta"])

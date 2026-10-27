@@ -97,7 +97,19 @@ def _chiama_anthropic(modello: str, istruzioni: str, messaggio: str, max_token: 
         raise ErroreFornitore(f"Anthropic: {r.status_code} {r.text[:200]}")
     d = r.json()
     testo = "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text")
-    return Risposta(testo, d["usage"]["input_tokens"], d["usage"]["output_tokens"], {"stop": d.get("stop_reason") or ""})
+    t_in, t_out, giri = d["usage"]["input_tokens"], d["usage"]["output_tokens"], 0
+    while d.get("stop_reason") == "max_tokens" and testo.strip() and not web and giri < 2:
+        # risposta tagliata dal limite: si fa continuare dallo stesso punto e si ricuce il testo
+        giri += 1
+        r = invia("https://api.anthropic.com/v1/messages", {"x-api-key": k, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                  {**corpo, "messages": corpo["messages"] + [{"role": "assistant", "content": testo.rstrip()},
+                                                             {"role": "user", "content": "La tua risposta e' stata interrotta dal limite di lunghezza. Continua esattamente dal punto in cui ti sei fermato, senza ripetere nulla e senza premesse."}]}, 180)
+        if r.status_code != 200:
+            break
+        d = r.json()
+        testo += "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text")
+        t_in += d["usage"]["input_tokens"]; t_out += d["usage"]["output_tokens"]
+    return Risposta(testo, t_in, t_out, {"stop": d.get("stop_reason") or ""})
 
 
 def _chiama_compatibile_openai(url: str, chiave: str, nome: str, modello: str, istruzioni: str,

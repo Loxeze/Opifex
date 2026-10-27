@@ -101,7 +101,7 @@ def _lavora(pid: int):
                 ag = conn.execute("SELECT max_token_risposta FROM agenti WHERE id = %s", (p["agente_id"],)).fetchone()
                 conn.commit()
             r = esegui_agente(p["agente_id"], msg, p["fascia_dati"], p["creato_da_utente_id"],
-                              max_token=min(8000, max(TOKEN_MINIMI_FASE, ag["max_token_risposta"] if ag else 0)))
+                              max_token=min(16000, max(TOKEN_MINIMI_FASE, ag["max_token_risposta"] if ag else 0)))
             with connessione() as conn:
                 p = conn.execute("SELECT * FROM percorsi_lavoro WHERE id = %s", (pid,)).fetchone()
                 if p["stato"] != "in_elaborazione":    # annullato nel frattempo
