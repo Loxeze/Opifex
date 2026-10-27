@@ -2,13 +2,14 @@
 // Contatti (CRM): liste, importazione CSV, riepilogo aggregato e ricerca. I dati personali sono cifrati sul server; gli agenti vedono solo conteggi.
 
 function vistaCrm() {
-  const TAB = [["schede", "Contatti"], ["ricontattare", "Da ricontattare"], ["pipeline", "Opportunità"], ["liste", "Liste e importazione"]];
+  const TAB = [["schede", "Contatti"], ["ricontattare", "Da ricontattare"], ["pipeline", "Opportunità"], ["campi", "Campi e categorie"], ["liste", "Liste e importazione"]];
   if (!stato.crmTab) stato.crmTab = "schede";
   const corpo = h("div");
   const tabs = h("div", { class: "azioni", style: "margin-bottom:12px" }, TAB.map(([id, nome]) => h("button", { class: stato.crmTab === id ? "p" : "s", onclick: () => { stato.crmTab = id; disegna(); } }, nome)));
   if (stato.crmTab === "schede") corpo.append(...[].concat(crmSchede("")));
   else if (stato.crmTab === "ricontattare") corpo.append(...[].concat(crmSchede("da_ricontattare")));
   else if (stato.crmTab === "pipeline") corpo.append(...[].concat(crmPipeline()));
+  else if (stato.crmTab === "campi") corpo.append(...[].concat(campiPersonalizzati()));
   else corpo.append(...[].concat(crmListe()));
   return [h("h2", {}, "CRM"), tabs, corpo];
 }

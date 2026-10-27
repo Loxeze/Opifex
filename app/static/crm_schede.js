@@ -64,6 +64,10 @@ function vistaContatto() {
       // dati del contatto
       const f = { nome: h("input", { type: "text", value: c.nome, maxlength: 200 }), ente: h("input", { type: "text", value: c.ente, maxlength: 200 }), email: h("input", { type: "email", value: c.email, maxlength: 200 }),
         telefono: h("input", { type: "text", value: c.telefono, maxlength: 60 }), note: h("textarea", { style: "min-height:60px", maxlength: 5000 }, c.note) };
+      const m = d.modello;
+      f.genere = sel({ organizzazione: "Organizzazione", persona: "Persona" }, m.genere);
+      f.tipo = h("input", { type: "text", value: c.tipo === "altro" ? "" : c.tipo, maxlength: 40, list: "tipi-crm", placeholder: "Es. comune, albergo, università" });
+      f.comune = h("input", { type: "text", value: c.comune || "", maxlength: 100 });
       const passo = h("input", { type: "text", value: c.prossimo_passo || "", maxlength: 300, placeholder: "Es. Richiamare per il bando" }), passoIl = h("input", { type: "date", value: c.prossimo_passo_il || "" });
       const resp = h("select", {}, opz(d.utenti, "— nessuno —")); resp.value = c.responsabile_utente_id || "";
       // nuova interazione
@@ -77,11 +81,14 @@ function vistaContatto() {
       riempi(corpo, [
         h("div", { class: "azioni" }, h("button", { class: "s", onclick: () => vai("crm") }, "← CRM")),
         h("div", { class: "carta" }, h("div", { class: "nome" }, c.nome || c.ente || c.email), h("div", { class: "sotto" }, [c.lista.nome, "relazione: " + c.relazione, "ultimo contatto: " + dataIt(c.ultimo_contatto)].join(" · ")),
-          h("div", { class: "riga" }, h("label", {}, "Nome", f.nome), h("label", {}, "Ente", f.ente)), h("div", { class: "riga" }, h("label", {}, "Email", f.email), h("label", {}, "Telefono", f.telefono)), h("label", {}, "Note", f.note),
+          h("div", { class: "riga" }, h("label", {}, "Nome", f.nome), h("label", {}, "Ente", f.ente)), h("div", { class: "riga" }, h("label", {}, "Email", f.email), h("label", {}, "Telefono", f.telefono)),
+          h("div", { class: "riga" }, h("label", {}, "È una", f.genere), h("label", {}, "Tipo", f.tipo), h("label", {}, "Comune", f.comune)),
+          h("datalist", { id: "tipi-crm" }, m.tipi_in_uso.map(t => h("option", { value: t }))), h("label", {}, "Note", f.note),
           h("div", { class: "riga" }, h("label", {}, "Prossimo passo", passo), h("label", {}, "Entro il", passoIl), h("label", {}, "Responsabile", resp)),
-          h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("PUT", "/gestione/crm/contatti/" + c.id, { nome: f.nome.value, ente: f.ente.value, email: f.email.value, telefono: f.telefono.value, note: f.note.value,
+          h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("PUT", "/gestione/crm/contatti/" + c.id, { nome: f.nome.value, ente: f.ente.value, email: f.email.value, telefono: f.telefono.value, note: f.note.value, genere: f.genere.value, tipo: f.tipo.value || "altro", comune: f.comune.value,
               prossimo_passo: passo.value || null, prossimo_passo_il: passoIl.value || null, responsabile_utente_id: resp.value ? Number(resp.value) : null }); msg.replaceChildren(avviso("Salvato.", "ok")); await carica(); } catch (e) { err(e); } } }, "Salva la scheda"),
             h("button", { class: "r", onclick: async () => { if (!confirm("Eliminare il contatto con tutta la sua storia?")) return; try { await api("DELETE", "/gestione/crm/contatti/" + c.id); vai("crm"); } catch (e) { err(e); } } }, "Elimina"))),
+        ...modelloScheda(d, c, carica, err),
         h("h3", {}, "Opportunità"),
         d.opportunita.length ? d.opportunita.map(o => {
           const st = sel(STATI_OPP, o.stato);
@@ -110,4 +117,98 @@ function vistaContatto() {
   };
   carica();
   return [h("h2", {}, "Scheda contatto"), corpo];
+}
+
+
+// ---- modello dei dati: campi personalizzati, categorie, relazioni, recapiti, fonte e verifica, storico ----
+function modelloScheda(d, c, carica, err) {
+  const m = d.modello, base = "/gestione/crm";
+  const ok = async (f) => { try { await f(); await carica(); } catch (e) { err(e); } };
+  // campi personalizzati del tipo
+  const val = {};
+  const campi = m.definizioni.map(df => {
+    let inp;
+    const cur = m.attributi[df.chiave];
+    if (df.dato === "scelta") { inp = h("select", {}, [h("option", { value: "" }, "—")].concat(df.scelte.map(x => h("option", { value: x }, x)))); inp.value = cur ?? ""; }
+    else if (df.dato === "si_no") { inp = h("select", {}, [h("option", { value: "" }, "—"), h("option", { value: "si" }, "Sì"), h("option", { value: "no" }, "No")]); inp.value = cur === true ? "si" : cur === false ? "no" : ""; }
+    else inp = h("input", { type: df.dato === "numero" ? "number" : df.dato === "data" ? "date" : "text", value: cur ?? "", maxlength: 500, step: "any" });
+    val[df.chiave] = inp;
+    return h("label", {}, df.etichetta + (df.tipo ? "" : " (per tutti)"), inp);
+  });
+  const orfani = Object.keys(m.attributi_orfani || {});
+  const blocchiAttr = h("div", { class: "carta" }, h("div", { class: "nome" }, "Campi personalizzati"),
+    campi.length ? [h("div", { class: "riga" }, campi), h("div", { class: "azioni" }, h("button", { class: "p", onclick: () => ok(async () => { await api("PUT", base + "/contatti/" + c.id + "/attributi", { valori: Object.fromEntries(Object.entries(val).map(([k, i]) => [k, i.value])) }); }) }, "Salva i campi"))]
+      : h("p", { class: "sotto" }, "Per il tipo «" + (c.tipo || "altro") + "» non ci sono campi: li definisci in CRM → Campi e categorie. Restano vuoti dove non servono."),
+    orfani.length ? h("p", { class: "sotto" }, "Valori di campi non più previsti per questo tipo: " + orfani.join(", ")) : null);
+  // categorie
+  const cat = h("input", { type: "text", list: "categorie-crm", placeholder: "Categoria", maxlength: 60 }), mot = h("input", { type: "text", placeholder: "Perché rientra in questa categoria", maxlength: 300 });
+  const blocchiCat = h("div", { class: "carta" }, h("div", { class: "nome" }, "Categorie"),
+    m.categorie.length ? m.categorie.map(x => h("div", { class: "sotto" }, h("b", {}, x.categoria), " — " + x.motivazione + " ", h("button", { class: "s", onclick: () => ok(() => api("DELETE", base + "/contatti/" + c.id + "/categorie/" + encodeURIComponent(x.categoria))) }, "Togli"))) : h("p", { class: "sotto" }, "Nessuna categoria."),
+    h("datalist", { id: "categorie-crm" }, (d.categorie_ammesse || []).map(x => h("option", { value: x.nome }))),
+    h("div", { class: "riga" }, h("label", {}, "Categoria", cat), h("label", {}, "Motivazione", mot)),
+    h("div", { class: "azioni" }, h("button", { class: "s", onclick: () => ok(() => api("POST", base + "/contatti/" + c.id + "/categorie", { categoria: cat.value, motivazione: mot.value })) }, "Assegna")));
+  // relazioni
+  const rAltro = h("select", {}, [h("option", { value: "" }, m.genere === "persona" ? "— scegli l'organizzazione —" : "— scegli la persona —")].concat((d.possibili_relazioni || []).map(x => h("option", { value: x.id }, x.nome))));
+  const rRuolo = h("input", { type: "text", placeholder: "Ruolo (es. direttore)", maxlength: 120 }), rDal = h("input", { type: "date" }), rAl = h("input", { type: "date" });
+  const blocchiRel = h("div", { class: "carta" }, h("div", { class: "nome" }, m.genere === "persona" ? "Dove lavora" : "Chi ci lavora"),
+    m.relazioni.length ? m.relazioni.map(x => h("div", { class: "sotto", style: x.attuale ? "" : "opacity:.7" },
+      h("a", { href: "#", onclick: (e) => { e.preventDefault(); stato.contattoAperto = x.altro_id; carica_altro(); } }, x.altro), " · " + (x.ruolo || "—") + " · " + (x.attuale ? "attuale" : "PASSATO") + " (" + dataIt(x.dal) + " → " + (x.al ? dataIt(x.al) : "oggi") + ")" + (x.fonte ? " · fonte: " + x.fonte : "") + " ",
+      x.attuale ? h("button", { class: "s", onclick: () => ok(() => api("PUT", base + "/relazioni/" + x.id + "/termina", {})) }, "Chiudi incarico") : null,
+      h("button", { class: "s", onclick: () => { if (confirm("Eliminare la relazione?")) ok(() => api("DELETE", base + "/relazioni/" + x.id)); } }, "Elimina"))) : h("p", { class: "sotto" }, "Nessuna relazione."),
+    h("div", { class: "riga" }, h("label", {}, m.genere === "persona" ? "Organizzazione" : "Persona", rAltro), h("label", {}, "Ruolo", rRuolo), h("label", {}, "Dal", rDal), h("label", {}, "Al", rAl)),
+    h("div", { class: "azioni" }, h("button", { class: "s", onclick: () => ok(() => {
+      if (!rAltro.value) throw new Error("Scegli con chi collegarlo");
+      const a = Number(rAltro.value), body = m.genere === "persona" ? { persona_id: c.id, organizzazione_id: a } : { persona_id: a, organizzazione_id: c.id };
+      return api("POST", base + "/relazioni", { ...body, ruolo: rRuolo.value || null, dal: rDal.value || null, al: rAl.value || null });
+    }) }, "Collega")));
+  // recapiti aggiuntivi
+  const tipoR = h("select", {}, [["email", "Email"], ["telefono", "Telefono"], ["sito", "Sito"], ["indirizzo", "Indirizzo"]].map(([k, t]) => h("option", { value: k }, t))), vR = h("input", { type: "text", maxlength: 300 }), fR = h("input", { type: "text", placeholder: "Fonte (facoltativa)", maxlength: 300 });
+  const blocchiRec = h("div", { class: "carta" }, h("div", { class: "nome" }, "Altri recapiti"),
+    m.recapiti.length ? m.recapiti.map(x => h("div", { class: "sotto" }, x.tipo + ": " + x.valore + (x.fonte ? " · fonte: " + x.fonte : "") + (x.verificato_il ? " · verificato il " + dataIt(x.verificato_il) : "") + " ",
+      h("button", { class: "s", onclick: () => ok(() => api("DELETE", base + "/recapiti/" + x.id)) }, "Togli"))) : h("p", { class: "sotto" }, "Nessun recapito aggiuntivo."),
+    h("div", { class: "riga" }, h("label", {}, "Tipo", tipoR), h("label", {}, "Valore", vR), h("label", {}, "Fonte", fR)),
+    h("div", { class: "azioni" }, h("button", { class: "s", onclick: () => ok(() => api("POST", base + "/contatti/" + c.id + "/recapiti", { tipo: tipoR.value, valore: vR.value, fonte: fR.value || null })) }, "Aggiungi")));
+  // fonte e verifica
+  const fe = h("input", { type: "text", value: m.fonte.fonte_editore || "", maxlength: 300 }), fl = h("input", { type: "text", value: m.fonte.fonte_licenza || "", maxlength: 300 }), fu = h("input", { type: "text", value: m.fonte.fonte_url || "", maxlength: 300 }), fd = h("input", { type: "date", value: m.fonte.fonte_data || "" });
+  const vn = h("input", { type: "text", placeholder: "Nota (es. telefonato, risponde)", maxlength: 300 });
+  const blocchiFonte = h("details", { class: "carta" }, h("summary", {}, "Fonte e verifica · " + (m.verificato_il ? "verificato il " + dataIt(m.verificato_il) : "mai verificato") + (m.fonte.fonte_editore ? " · " + m.fonte.fonte_editore : "")),
+    h("div", { class: "riga" }, h("label", {}, "Editore della fonte", fe), h("label", {}, "Licenza", fl)), h("div", { class: "riga" }, h("label", {}, "Indirizzo della fonte", fu), h("label", {}, "Data della fonte", fd)),
+    m.fonte.importato_il ? h("p", { class: "sotto" }, "Importato il " + dataIt(m.fonte.importato_il)) : null,
+    h("div", { class: "azioni" }, h("button", { class: "s", onclick: () => ok(() => api("PUT", base + "/contatti/" + c.id + "/fonte", { fonte_editore: fe.value, fonte_licenza: fl.value, fonte_url: fu.value, fonte_data: fd.value || null })) }, "Salva la fonte")),
+    h("div", { class: "riga" }, h("label", {}, "Verifica", vn)), m.verifica_nota ? h("p", { class: "sotto" }, "Ultima nota: " + m.verifica_nota) : null,
+    h("div", { class: "azioni" }, h("button", { class: "p", onclick: () => ok(() => api("POST", base + "/contatti/" + c.id + "/verifica", { nota: vn.value || null })) }, "Segna come verificato oggi")));
+  // storico
+  const st = h("div");
+  const blocchiStorico = h("details", { class: "carta", ontoggle: async (e) => { if (!e.target.open || st.childNodes.length) return; try { const r = await api("GET", base + "/contatti/" + c.id + "/storico");
+      st.replaceChildren(...(r.storico.length ? r.storico.map(x => h("div", { class: "sotto" }, new Date(x.quando).toLocaleString("it-IT") + " · " + (x.da || "sistema") + " · " + x.campo + (x.prima || x.dopo ? ": " + (x.prima || "—") + " → " + (x.dopo || "—") : "") + (x.fonte ? " · fonte: " + x.fonte : ""))) : [h("p", { class: "sotto" }, "Nessuna modifica registrata.")])); } catch (x) { err(x); } } },
+    h("summary", {}, "Storico delle modifiche"), st);
+  return [blocchiAttr, blocchiCat, blocchiRel, blocchiRec, blocchiFonte, blocchiStorico];
+}
+
+function carica_altro() { vai("contatto"); }
+
+function campiPersonalizzati() {
+  const corpo = h("div"), msg = h("div");
+  const carica = async () => {
+    try {
+      const [d, k] = await Promise.all([api("GET", "/gestione/crm/campi"), api("GET", "/gestione/crm/categorie")]);
+      const tipo = h("input", { type: "text", list: "tipi-campi", placeholder: "Es. comune (vuoto = per tutti)", maxlength: 40 }), chiave = h("input", { type: "text", placeholder: "nome tecnico, es. abitanti", maxlength: 40 }),
+        et = h("input", { type: "text", placeholder: "Etichetta, es. Abitanti", maxlength: 60 }), dato = h("select", {}, [["testo", "Testo"], ["numero", "Numero"], ["data", "Data"], ["si_no", "Sì / No"], ["scelta", "Scelta tra voci"]].map(([v, t]) => h("option", { value: v }, t))),
+        scelte = h("input", { type: "text", placeholder: "Voci separate da virgola (solo per «scelta»)", maxlength: 500 }), nc = h("input", { type: "text", placeholder: "Nuova categoria", maxlength: 60 });
+      const per = {}; d.campi.forEach(x => (per[x.tipo || ""] = per[x.tipo || ""] || []).push(x));
+      riempi(corpo, [
+        h("p", { class: "aiuto" }, "I campi personalizzati servono dove servono: «abitanti» per i comuni, «stelle» per gli alberghi. Nelle schede degli altri tipi quel campo non compare e resta vuoto. Il tipo è quello che scrivi nella scheda del contatto."),
+        Object.keys(per).length ? Object.entries(per).map(([t, lista]) => h("div", { class: "carta" }, h("div", { class: "nome" }, t ? "Tipo: " + t : "Per tutti i tipi"),
+          lista.map(x => h("div", { class: "sotto" }, x.etichetta + " (" + x.chiave + ", " + x.dato + (x.dato === "scelta" ? ": " + x.scelte.join(", ") : "") + ") ",
+            h("button", { class: "s", onclick: async () => { if (!confirm("Eliminare il campo «" + x.etichetta + "»?")) return; try { await api("DELETE", "/gestione/crm/campi/" + x.id); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Elimina"))))) : h("p", { class: "sotto" }, "Nessun campo personalizzato ancora."),
+        h("datalist", { id: "tipi-campi" }, d.tipi_in_uso.map(t => h("option", { value: t }))),
+        h("details", { class: "carta" }, h("summary", {}, "+ Nuovo campo"), h("div", { class: "riga" }, h("label", {}, "Per il tipo", tipo), h("label", {}, "Nome tecnico", chiave), h("label", {}, "Etichetta", et)),
+          h("div", { class: "riga" }, h("label", {}, "Che dato è", dato), h("label", {}, "Voci", scelte)),
+          h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("POST", "/gestione/crm/campi", { tipo: tipo.value, chiave: chiave.value, etichetta: et.value, dato: dato.value, scelte: scelte.value.split(",").map(x => x.trim()).filter(Boolean) }); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Crea il campo"))),
+        h("h3", {}, "Categorie"), h("p", { class: "sotto" }, k.categorie.map(x => x.nome + " (" + x.usate + ")").join(" · ")),
+        h("div", { class: "riga" }, h("label", {}, "Nuova categoria", nc), h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => { try { await api("POST", "/gestione/crm/categorie", { nome: nc.value }); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Aggiungi"))), msg]);
+    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return corpo;
 }

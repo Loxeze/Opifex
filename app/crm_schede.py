@@ -2,7 +2,7 @@
 Nomi, recapiti e note restano cifrati; solo il titolare apre le schede. Gli agenti continuano a vedere solo conteggi aggregati."""
 from datetime import date, datetime, timezone
 
-from . import cassaforte, crm
+from . import cassaforte, crm, crm_modello
 
 CANALI = ("email", "telefono", "incontro", "riunione", "messaggio", "social", "altro")
 ESITI = ("nessuna_risposta", "risposto", "interessato", "non_interessato", "da_richiamare", "altro")
@@ -38,7 +38,8 @@ def riga(r: dict) -> dict:
     return {"id": r["id"], "nome": _d(r["nome_cifrato"]), "ente": _d(r["ente_cifrato"]), "email": _d(r["email_cifrata"]), "telefono": _d(r["telefono_cifrato"]),
             "tipo": r["tipo"], "regione": r["regione"], "provincia": r["provincia"], "settore": r["settore"], "relazione": r["relazione"],
             "ultimo_contatto": r["ultimo_contatto"], "prossimo_passo": r["prossimo_passo"], "prossimo_passo_il": r["prossimo_passo_il"],
-            "responsabile_utente_id": r["responsabile_utente_id"], "azienda_id": r["azienda_id"], "lista_id": r["lista_id"]}
+            "responsabile_utente_id": r["responsabile_utente_id"], "azienda_id": r["azienda_id"], "lista_id": r["lista_id"],
+            "genere": r.get("genere", "organizzazione"), "comune": r.get("comune")}
 
 
 def titolo(c: dict) -> str:
@@ -65,7 +66,7 @@ def elenco(conn, q: str = "", filtro: str = "", utente_id: int | None = None, li
         if t:
             if len(t) < 2:
                 raise ErroreScheda("Scrivi almeno 2 caratteri")
-            if t not in " ".join((c["nome"], c["ente"], c["email"], c["telefono"], r["tipo"] or "", r["provincia"] or "")).lower():
+            if t not in " ".join((c["nome"], c["ente"], c["email"], c["telefono"], r["tipo"] or "", r["provincia"] or "", r.get("comune") or "")).lower():
                 continue
         c["opp_aperte"] = r["opp_aperte"]
         out.append(c)
@@ -85,27 +86,48 @@ def crea(conn, d: dict, utente_id: int) -> int:
     h = crm.hash_email(email) if email else None
     if h and conn.execute("SELECT 1 FROM crm_contatti WHERE lista_id = %s AND email_hash = %s", (lista, h)).fetchone():
         raise ErroreScheda("Esiste gia' un contatto con questa email nella rubrica")
-    return conn.execute("""INSERT INTO crm_contatti (lista_id, tipo, regione, provincia, settore, relazione, nome_cifrato, ente_cifrato, email_cifrata, telefono_cifrato, note_cifrate, email_hash,
-                                                     responsabile_utente_id, azienda_id)
-                           VALUES (%s,%s,%s,%s,%s,'nessuna',%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                        (lista, (d.get("tipo") or "altro")[:40], (d.get("regione") or None), (d.get("provincia") or None), (d.get("settore") or None), _c(nome), _c(ente), _c(email),
-                         _c(d.get("telefono")), _c(d.get("note")), h, utente_id, d.get("azienda_id"))).fetchone()["id"]
+    genere = d.get("genere") or ("organizzazione" if ente else "persona")
+    if genere not in crm_modello.GENERI:
+        raise ErroreScheda("Genere non valido: persona o organizzazione")
+    tipo = " ".join(str(d.get("tipo") or "altro").lower().split())[:40]
+    cid = conn.execute("""INSERT INTO crm_contatti (lista_id, tipo, regione, provincia, comune, settore, relazione, nome_cifrato, ente_cifrato, email_cifrata, telefono_cifrato, note_cifrate, email_hash,
+                                                     responsabile_utente_id, azienda_id, genere)
+                           VALUES (%s,%s,%s,%s,%s,%s,'nessuna',%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                        (lista, tipo, (d.get("regione") or None), (d.get("provincia") or None), (d.get("comune") or None), (d.get("settore") or None), _c(nome), _c(ente), _c(email),
+                         _c(d.get("telefono")), _c(d.get("note")), h, utente_id, d.get("azienda_id"), genere)).fetchone()["id"]
+    if d.get("attributi"):
+        try:
+            crm_modello.imposta_attributi(conn, cid, d["attributi"], utente_id)
+        except crm_modello.ErroreModello as e:
+            raise ErroreScheda(str(e)) from None
+    return cid
 
 
-def modifica(conn, cid: int, d: dict):
+def modifica(conn, cid: int, d: dict, utente_id: int | None = None):
     r = conn.execute("SELECT * FROM crm_contatti WHERE id = %s", (cid,)).fetchone()
     if r is None:
         raise LookupError("Contatto inesistente")
     cifrati = {"nome": "nome_cifrato", "ente": "ente_cifrato", "email": "email_cifrata", "telefono": "telefono_cifrato", "note": "note_cifrate"}
     sets, par = [], []
+    if "genere" in d and d["genere"] not in crm_modello.GENERI:
+        raise ErroreScheda("Genere non valido: persona o organizzazione")
+    if d.get("genere") and d["genere"] != r["genere"] and conn.execute("SELECT 1 FROM crm_relazioni WHERE persona_id = %s OR organizzazione_id = %s", (cid, cid)).fetchone():
+        raise ErroreScheda("Prima di cambiare tra persona e organizzazione togli le relazioni di questa scheda")
     for k, col in cifrati.items():
         if k in d and d[k] is not None:
+            if _d(r[col]) != (d[k] or "").strip():
+                crm_modello.storico(conn, cid, k, _d(r[col]) or None, (d[k] or "").strip() or None, utente_id)
             sets.append(f"{col} = %s"); par.append(_c(d[k]))
             if k == "email":
                 sets.append("email_hash = %s"); par.append(crm.hash_email(d[k]) if (d[k] or "").strip() else None)
-    for k in ("tipo", "regione", "provincia", "settore", "relazione", "prossimo_passo", "prossimo_passo_il", "responsabile_utente_id", "azienda_id"):
+    for k in ("tipo", "regione", "provincia", "comune", "settore", "relazione", "prossimo_passo", "prossimo_passo_il", "responsabile_utente_id", "azienda_id", "genere"):
         if k in d:
-            sets.append(f"{k} = %s"); par.append(d[k] or None)
+            nuovo = d[k] or None
+            if k == "tipo" and nuovo:
+                nuovo = " ".join(str(nuovo).lower().split())[:40]
+            if r.get(k) != nuovo and k in ("tipo", "regione", "provincia", "comune", "settore", "relazione", "genere"):
+                crm_modello.storico(conn, cid, k, r.get(k), nuovo, utente_id)
+            sets.append(f"{k} = %s"); par.append(nuovo)
     if sets:
         conn.execute(f"UPDATE crm_contatti SET {', '.join(sets)} WHERE id = %s", par + [cid])
 
@@ -130,7 +152,7 @@ def scheda(conn, cid: int, utente_id: int) -> dict:
     for o in opp:
         o["note"] = _d(o.pop("note_cifrate"))
     crm._registra(conn, None, utente_id, "scheda_titolare", {"contatto": cid}, 1)
-    return {"contatto": c, "interazioni": inter, "opportunita": opp}
+    return {"contatto": c, "interazioni": inter, "opportunita": opp, "modello": crm_modello.dettaglio(conn, cid)}
 
 
 def nuova_interazione(conn, cid: int, d: dict, utente_id: int | None = None, agente_id: int | None = None) -> int:

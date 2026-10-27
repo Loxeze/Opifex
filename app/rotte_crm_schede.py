@@ -4,7 +4,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from . import cassaforte, crm_schede as cs, registro
+from . import cassaforte, crm_modello, crm_schede as cs, registro
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -43,6 +43,9 @@ class Contatto(BaseModel):
     regione: str | None = Field(default=None, max_length=60)
     provincia: str | None = Field(default=None, max_length=60)
     settore: str | None = Field(default=None, max_length=80)
+    comune: str | None = Field(default=None, max_length=100)
+    genere: str | None = Field(default=None, max_length=20)
+    attributi: dict | None = None
     azienda_id: int | None = None
 
 
@@ -71,6 +74,10 @@ def apri(cid: int, u: dict = Depends(solo_titolare)):
             r = cs.scheda(conn, cid, u["id"])
         except (LookupError, cassaforte.CassaforteNonConfigurata) as e:
             raise _err(e) from None
+        r["categorie_ammesse"] = crm_modello.categorie(conn)
+        altro = "persona" if r["modello"]["genere"] == "organizzazione" else "organizzazione"
+        r["possibili_relazioni"] = [{"id": x["id"], "nome": cassaforte.decifra(x["nome_cifrato"]) if altro == "persona" and x["nome_cifrato"] else (cassaforte.decifra(x["ente_cifrato"]) if x["ente_cifrato"] else cassaforte.decifra(x["nome_cifrato"]))}
+                                    for x in conn.execute("SELECT id, nome_cifrato, ente_cifrato FROM crm_contatti WHERE genere = %s AND id <> %s AND (nome_cifrato IS NOT NULL OR ente_cifrato IS NOT NULL) ORDER BY id DESC LIMIT 1500", (altro, cid)).fetchall()]
         r["progetti"] = conn.execute("SELECT id, nome FROM progetti WHERE eliminato_il IS NULL ORDER BY nome").fetchall()
         r["aziende"] = conn.execute("SELECT id, nome FROM aziende WHERE attiva ORDER BY nome").fetchall()
         r["utenti"] = conn.execute("SELECT id, nome FROM utenti WHERE attivo ORDER BY nome").fetchall()
@@ -82,8 +89,10 @@ def modifica(cid: int, d: Modifica, u: dict = Depends(solo_titolare)):
     campi = d.model_dump(exclude_unset=True)
     with connessione() as conn:
         try:
-            cs.modifica(conn, cid, campi)
-        except (LookupError, cassaforte.CassaforteNonConfigurata) as e:
+            cs.modifica(conn, cid, {k: v for k, v in campi.items() if k != 'attributi'}, u['id'])
+            if campi.get('attributi'):
+                crm_modello.imposta_attributi(conn, cid, campi['attributi'], u['id'])
+        except (cs.ErroreScheda, crm_modello.ErroreModello, LookupError, cassaforte.CassaforteNonConfigurata) as e:
             raise _err(e) from None
         registro.registra(conn, u, "collegamento", "Contatto CRM modificato", f"contatto {cid}", "crm_contatto", cid, dettagli={"campi": sorted(campi)})
     return {"ok": True}
