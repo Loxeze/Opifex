@@ -214,3 +214,7 @@ header{padding-top:max(12px,env(safe-area-inset-top))}
 .griglia-numeri{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0}
 .tabscorri{overflow-x:auto;margin:6px 0 14px}
 .barra{min-width:80px;background:rgba(255,255,255,.08);border-radius:4px}
+
+.ginnasio{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.ginnasio>section{min-width:0}
+@media (max-width:900px){.ginnasio{grid-template-columns:1fr}}

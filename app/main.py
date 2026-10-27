@@ -18,6 +18,7 @@ from .rotte_briefing import router as router_briefing
 from .rotte_accessi import router as router_accessi
 from .rotte_progetti import router as router_progetti
 from .rotte_scheda import router as router_scheda
+from .rotte_ginnasio import router as router_ginnasio
 from .rotte_utenti import router as router_utenti, gestione as gestione_utenti
 from .rotte_dialoghi import router as router_dialoghi
 from .rotte_richieste import router as router_richieste
@@ -115,7 +116,7 @@ def _passo(nome: str, f):
 async def _manutenzione():
     """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Ogni passo e' isolato dagli altri."""
     import asyncio
-    from . import allarmi, backup, crm_schede, plaud, proposte_sentinelle, prova_ripristino, sintesi_memoria, studio
+    from . import allarmi, backup, crm_schede, ginnasio, plaud, proposte_sentinelle, prova_ripristino, sintesi_memoria, studio
 
     def giro():
         _passo("backup", lambda c: backup.esegui(c) if backup.da_fare(c) else None)
@@ -124,6 +125,7 @@ async def _manutenzione():
         _passo("posta PLAUD", plaud.controlla)
         _passo("prova ripristino", lambda c: prova_ripristino.prova(c) if prova_ripristino.da_fare(c) else None)
         _passo("studi", lambda c: studio.rileva_e_segna(c) if studio.da_fare(c) else None)
+        _passo("ginnasio", ginnasio.giro)
         _passo("promemoria CRM", crm_schede.promemoria)
         _passo("proposte sentinelle", lambda c: proposte_sentinelle.scansiona(c) if proposte_sentinelle.da_fare(c) else None)
     await asyncio.sleep(90)
@@ -219,6 +221,7 @@ app.include_router(router_accessi)
 app.include_router(router_utenti)
 app.include_router(router_progetti)
 app.include_router(router_scheda)
+app.include_router(router_ginnasio)
 app.include_router(gestione_utenti)
 app.include_router(router_dialoghi)
 app.include_router(router_richieste)
@@ -316,12 +319,12 @@ def elenco_agenti(utente: dict = Depends(utente_corrente)):
     with connessione() as conn:
         if visibili is None:
             righe = conn.execute(
-                f"SELECT a.id, a.divisione_id, a.superiore_id, a.nome, a.ruolo, a.livello, a.tipo, a.modello, a.attivo, {etichetta.sql()} AS etichetta "
+                f"SELECT a.id, a.divisione_id, a.superiore_id, a.nome, a.ruolo, a.livello, a.tipo, a.modello, a.attivo, {etichetta.sql()} AS etichetta, COALESCE((SELECT round(avg(ac.livello))::int FROM agenti_competenze ac WHERE ac.agente_id = a.id), 0) AS livello_formazione "
                 "FROM agenti a ORDER BY a.id"
             ).fetchall()
         else:
             righe = conn.execute(
-                f"SELECT a.id, a.divisione_id, a.superiore_id, a.nome, a.ruolo, a.livello, a.tipo, a.modello, a.attivo, {etichetta.sql()} AS etichetta "
+                f"SELECT a.id, a.divisione_id, a.superiore_id, a.nome, a.ruolo, a.livello, a.tipo, a.modello, a.attivo, {etichetta.sql()} AS etichetta, COALESCE((SELECT round(avg(ac.livello))::int FROM agenti_competenze ac WHERE ac.agente_id = a.id), 0) AS livello_formazione "
                 "FROM agenti a WHERE a.divisione_id = ANY(%s) ORDER BY a.id",
                 (visibili,),
             ).fetchall()
