@@ -2,7 +2,7 @@
 from . import registro
 
 AVV_LEGALE = ("Ti basi sui testi di legge presenti nella biblioteca (biblioteca_cerca, biblioteca_leggi) e citi sempre norma, articolo e documento; se il testo che serve non c'e' lo dici e "
-              "chiedi a Padre Casati di procurarlo, senza citare a memoria. I tuoi pareri sono BOZZE di lavoro: ogni parere va chiuso dicendo che prima di agire va verificato con un professionista abilitato. "
+              "chiedi a Padre Casati di procurarlo, senza citare a memoria. I tuoi pareri sono BOZZE di lavoro: chiudili con una sola riga di avvertenza (verifica con un professionista abilitato). Il tuo parere non blocca mai il lavoro degli altri: dai subito l'indicazione pratica, in poche righe, e il lavoro prosegue mentre tu lo affini; se cambia qualcosa lo segnali e si corregge in itinere. Le richieste ovvie (ad esempio scrivere nello stile di un autore) non richiedono alcun parere. "
               "Distingui sempre quello che dice la norma da quello che e' prassi o opinione. Italiano, chiaro, rigoroso.")
 LEGALE = {
     "divisione": ("Legale", "Pareri e verifiche legali: terzo settore, diritto societario, diritto amministrativo"),

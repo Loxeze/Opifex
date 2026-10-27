@@ -217,11 +217,32 @@ def _verso_agente(conn, testo: str, fascia: str) -> str:
     uid = _titolare_id(conn)
     conn.commit()
     try:
-        return f"[{ag['nome']}] " + esegui_agente(ag["id"], testo, fascia, uid, memorizza=True)["risposta"]
+        r = esegui_agente(ag["id"], testo, fascia, uid, memorizza=True)
+        _registra_in_chat(conn, ag["id"], uid, testo, "finito", r, None)
+        return f"[{ag['nome']}] " + r["risposta"]
     except EsecuzioneBloccata as e:
+        _registra_in_chat(conn, ag["id"], uid, testo, "errore", None, str(e))
         return f"{ag['nome']} non puo' rispondere: " + str(e)
     except (ErroreFornitore, cassaforte.CassaforteNonConfigurata, ErroreNavigazione) as e:
+        _registra_in_chat(conn, ag["id"], uid, testo, "errore", None, str(e)[:200])
         return "Errore nel contattare l'AI: " + str(e)[:200]
+
+
+def _registra_in_chat(conn, agente_id: int, uid, testo: str, stato: str, risultato, errore):
+    """Lo scambio fatto su Telegram compare anche nella chat di sistema (con il segno di Telegram) e li' risulta gia' letto."""
+    import json
+    if uid is None:
+        return
+    try:
+        conn.execute("""INSERT INTO chat_coda (agente_id, utente_id, messaggio, stato, risultato, errore, canale, iniziato_il, finito_il)
+                        VALUES (%s,%s,%s,%s,%s::jsonb,%s,'telegram',NOW(),NOW())""",
+                     (agente_id, uid, testo, stato, json.dumps(risultato, default=str) if risultato is not None else None, errore))
+        conn.execute("""INSERT INTO chat_letture (utente_id, agente_id, letto_il) VALUES (%s, %s, NOW() + INTERVAL '1 second')
+                        ON CONFLICT (utente_id, agente_id) DO UPDATE SET letto_il = NOW() + INTERVAL '1 second'""", (uid, agente_id))
+        conn.commit()
+    except Exception:  # noqa: BLE001 - la copia nella chat non deve mai far perdere la risposta su Telegram
+        try: conn.rollback()
+        except Exception: pass
 
 
 def _da_vocale(conn, token: str, cid: int, v: dict, fascia: str) -> str | None:

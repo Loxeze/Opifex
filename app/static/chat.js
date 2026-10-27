@@ -110,7 +110,8 @@ function conversazioniChat() {
   const bolla = (m) => {
     const out = [];
     const allegatiTxt = (m.allegati || []).length ? "\n📎 " + m.allegati.join(", ") : "";
-    out.push(h("div", { class: "bolla mia" }, h("div", { class: "risposta" }, m.messaggio + allegatiTxt), h("div", { class: "ora" }, tempoChat(m.creato_il))));
+    if (m.canale === "ronda") out.push(h("div", { class: "chat-giorno" }, "🔔 Ronda automatica sui progetti · " + tempoChat(m.creato_il)));
+    else out.push(h("div", { class: "bolla mia" }, h("div", { class: "risposta" }, m.messaggio + allegatiTxt), h("div", { class: "ora" }, (m.canale === "telegram" ? "📱 da Telegram · " : "") + tempoChat(m.creato_il))));
     if (m.stato === "in_coda" || m.stato === "in_lavoro") {
       out.push(h("div", { class: "bolla loro attesa" }, h("div", { class: "sotto" }, "⏳ " + (S.nomeAgente || "L'agente") + (m.stato === "in_lavoro" ? " sta scrivendo…" : " risponderà appena è libero…"))));
     } else if (m.stato === "errore") {

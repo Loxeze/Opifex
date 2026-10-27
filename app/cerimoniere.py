@@ -22,16 +22,18 @@ def scheda_vaga(a: dict) -> bool:
     return len((a["ruolo"] or "").strip()) < SCHEDA_MINIMA and not a["rimanda_a"]
 
 
+def _riga_agente(a: dict) -> str:
+    return (f"- {a['nome']} [{a['livello']}] — " + (a["divisione"] or "trasversale") + (f" — {a['aziende']}" if a["aziende"] else "") + f" — {a['ruolo']}"
+            + (f" (non si occupa di: {a['rimanda_a']})" if a["rimanda_a"] else "") + (f" · risponde a {a['superiore']}" if a["superiore"] else "")
+            + (" · SCHEDA VAGA" if scheda_vaga(a) else ""))
+
+
 def mappa(conn, filtro: str = "", cerimoniere_id: int | None = None) -> str:
     agenti = [a for a in _agenti(conn) if a["id"] != cerimoniere_id]
     f = (filtro or "").strip().lower()
     if f:
         agenti = [a for a in agenti if f in " ".join(str(a[k] or "") for k in ("nome", "ruolo", "rimanda_a", "divisione", "aziende")).lower()]
-    righe = []
-    for a in agenti[:MAX_AGENTI]:
-        righe.append(f"- {a['nome']} [{a['livello']}] — " + (a["divisione"] or "trasversale") + (f" — {a['aziende']}" if a["aziende"] else "") + f" — {a['ruolo']}"
-                     + (f" (non si occupa di: {a['rimanda_a']})" if a["rimanda_a"] else "") + (f" · risponde a {a['superiore']}" if a["superiore"] else "")
-                     + (" · SCHEDA VAGA" if scheda_vaga(a) else ""))
+    righe = [_riga_agente(a) for a in agenti[:MAX_AGENTI]]
     testo = "\n".join(righe) or "Nessun agente corrisponde."
     vaghe = [a["nome"] for a in _agenti(conn) if scheda_vaga(a) and a["id"] != cerimoniere_id]
     ultimi = conn.execute("""SELECT i.id, i.bisogno, i.esito, d.nome AS dest FROM instradamenti i LEFT JOIN agenti d ON d.id = i.destinatario_agente_id
@@ -137,3 +139,57 @@ def gestore(cerimoniere_id: int, connessione):
             return "ERRORE: " + str(e)
         return "ERRORE: strumento sconosciuto"
     return f
+
+
+# ---------- elenco degli agenti tenuto a memoria, aggiornato ogni giorno ----------
+CH_ELENCO, CH_IL, CH_NOMI, CH_NOVITA = "cerimoniere_elenco", "cerimoniere_elenco_il", "cerimoniere_elenco_nomi", "cerimoniere_elenco_novita"
+MAX_ELENCO = 150
+
+
+def _imposta(conn, chiave: str, valore: str):
+    conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s, %s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (chiave, valore))
+
+
+def _leggi(conn, chiave: str) -> str | None:
+    r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = %s", (chiave,)).fetchone()
+    return r["valore"] if r else None
+
+
+def aggiorna_elenco(conn) -> dict:
+    """Rilegge tutti gli agenti attivi, li tiene a memoria e annota cosa e' cambiato dall'ultimo aggiornamento."""
+    import json
+    ag = _agenti(conn)
+    ag = [a for a in ag if a["ruolo_speciale"] != "cerimoniere"][:MAX_ELENCO]
+    prima = None
+    try:
+        prima = set(json.loads(_leggi(conn, CH_NOMI) or "null") or [])
+    except ValueError:
+        pass
+    ora = {a["nome"] for a in ag}
+    nuovi = sorted(ora - prima) if prima is not None else []
+    usciti = sorted(prima - ora) if prima is not None else []
+    novita = ""
+    if nuovi:
+        novita += "Nuovi dall'ultimo aggiornamento: " + ", ".join(nuovi) + ". "
+    if usciti:
+        novita += "Non piu' presenti: " + ", ".join(usciti) + ". "
+    _imposta(conn, CH_ELENCO, "\n".join(_riga_agente(a) for a in ag))
+    _imposta(conn, CH_NOMI, json.dumps(sorted(ora)))
+    _imposta(conn, CH_NOVITA, novita.strip())
+    _imposta(conn, CH_IL, conn.execute("SELECT NOW()::text AS t").fetchone()["t"])
+    return {"agenti": len(ag), "nuovi": nuovi, "usciti": usciti}
+
+
+def da_fare(conn) -> bool:
+    il = _leggi(conn, CH_IL)
+    if not il:
+        return True
+    return conn.execute("SELECT %s::timestamptz < NOW() - INTERVAL '20 hours' AS vecchio", (il,)).fetchone()["vecchio"]
+
+
+def contesto_elenco(conn) -> str:
+    """Testo che il Cerimoniere ha sempre davanti: l'elenco completo degli agenti, aggiornato al massimo di ieri."""
+    if da_fare(conn):
+        aggiorna_elenco(conn)
+    return ("ELENCO COMPLETO DEGLI AGENTI PRESENTI (tenuto a memoria, aggiornato il " + (_leggi(conn, CH_IL) or "")[:16] + "; conoscili tutti a memoria, nome per nome):\n"
+            + (_leggi(conn, CH_ELENCO) or "") + (("\n\nNOVITA': " + _leggi(conn, CH_NOVITA)) if _leggi(conn, CH_NOVITA) else ""))

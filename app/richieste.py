@@ -19,7 +19,13 @@ AUTONOMIA - LORENZO E' L'ULTIMA RISORSA, NON LA PRIMA. Se ti manca un'informazio
 4) solo se nessuno puo' decidere scrivi su una riga a parte «[MANCA] la domanda precisa che solo Lorenzo puo' risolvere»; se senza quel dato non puoi proseguire «[MANCA-BLOCCANTE] ...».
 Lorenzo va interpellato SOLO per: spese o impegni economici, invii all'esterno a suo nome, azioni irreversibili, credenziali o accessi che solo lui puo' dare, scelte di strategia e priorita' che nessun collega puo' prendere.
 NON chiedergli: conferme su cio' che ti ha gia' detto di fare o che rientra nel tuo compito (fallo e riferisci), cose gia' scritte nei documenti o nelle sue risposte precedenti, domande gia' poste da un altro agente, scelte operative che puoi fare tu.
-Intanto completa la parte di lavoro che puoi fare e indica chiaramente cosa resta in sospeso."""
+Intanto completa la parte di lavoro che puoi fare e indica chiaramente cosa resta in sospeso.
+
+NON TI BLOCCARE MAI, PUNTA DRITTO AL RISULTATO. Non fermarti ad aspettare pareri, autorizzazioni o verifiche (legali, amministrative, di qualità, di altri reparti): fai il lavoro richiesto subito, con la scelta più ragionevole. Se un parere serve, chiedilo a un collega nello stesso momento (chiedi_a_agente) senza attendere, e se cambia qualcosa adatta il lavoro in corso e dillo in una riga. Non chiedere permessi per cose ovvie: scrivere «nello stile di» un autore, citare o ispirarsi a persone, opere o temi pubblici non è una questione legale da sottoporre a nessuno. Lorenzo è interpellato solo nei casi elencati sopra. Le modifiche e gli adattamenti si fanno in itinere.
+
+RISPOSTE CONCISE. Dai il risultato, non il racconto: niente premesse, niente elenchi di ciò che hai o non hai, niente riepilogo di ciò che hai fatto, niente scuse o ripetizioni di limiti già noti. Se il lavoro è un testo, consegna il testo; il commento, se serve, è di una o due righe. Un'unica riga su ciò che manca solo se cambia davvero il risultato.
+
+AURORA HA LA PRECEDENZA. Aurora coordina l'intera organizzazione e vigila su tutti i progetti: quando un suo messaggio o una sua direttiva ti arriva, mettila davanti a ogni altro lavoro, eseguila subito e rispondi con l'esito in una riga."""
 
 _RIGA = re.compile(r"^\s*[\[«]\s*MANCA(-BLOCCANTE)?\s*[\]»]\s*:?\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 

@@ -198,6 +198,9 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         kp_ctx = squadre.contesto_kpi(conn, a_f) if memoria._ok(a_f, "interno") else ""
         if kp_ctx:
             prefisso.append(kp_ctx); dim["kpi"] = len(kp_ctx)
+        if a_f.get("ruolo_speciale") == "cerimoniere":
+            ce_ctx = cerimoniere.contesto_elenco(conn)
+            prefisso.append(ce_ctx); dim["elenco_agenti"] = len(ce_ctx)
         if a_f.get("tipo") == "sistema" and a_f.get("nome") == "Osservatore dell'uso":
             from . import uso_ux
             ux_ctx = uso_ux.riepilogo(conn)

@@ -184,7 +184,18 @@ def _fai_parlare(conn, parlante_id: int, destinatario_id: int, conv_id: int, ist
     return r.testo
 
 
-def _controlli_generali(conn, conv_id: int | None):
+def e_aurora(conn, agente_id: int | None) -> bool:
+    if agente_id is None:
+        return False
+    return conn.execute("SELECT 1 FROM agenti WHERE id = %s AND nome = 'Aurora' AND tipo = 'sistema'", (agente_id,)).fetchone() is not None
+
+
+PRIORITA_AURORA = "PRIORITA' MASSIMA: questo messaggio e' di Aurora, che coordina l'organizzazione. Mettilo davanti a ogni altro lavoro, eseguilo subito e rispondi con l'esito in una riga.\n"
+
+
+def _controlli_generali(conn, conv_id: int | None, da_id: int | None = None):
+    if e_aurora(conn, da_id):
+        return   # i messaggi di Aurora non si fermano per budget o numero di messaggi
     if _token_dialoghi_oggi(conn) >= int(impostazione(conn, "dialoghi_budget_token_giornaliero", "30000000")):
         raise DialogoBloccato("Budget giornaliero dei dialoghi esaurito")
     if conv_id is not None:
@@ -198,7 +209,7 @@ def _risposta_speciale(conn, dest: dict, da_id: int, conv_id: int, domanda: str,
     from .esecuzione import EsecuzioneBloccata, esegui_agente
     chi = conn.execute("SELECT nome, ruolo FROM agenti WHERE id = %s", (da_id,)).fetchone()
     try:
-        r = esegui_agente(dest["id"], f"Domanda del collega {chi['nome']} ({chi['ruolo']}):\n{domanda}", fascia, utente_id, max_token=3500)
+        r = esegui_agente(dest["id"], (PRIORITA_AURORA if e_aurora(conn, da_id) else "") + f"Domanda del collega {chi['nome']} ({chi['ruolo']}):\n{domanda}", fascia, utente_id, max_token=3500)
     except EsecuzioneBloccata as e:
         raise DialogoBloccato(str(e)) from None
     _salva_messaggio(conn, conv_id, dest["id"], da_id, r["risposta"])
@@ -213,7 +224,7 @@ def domanda_a_collega(da_id: int, nome_dest: str, domanda: str, conv_id: int | N
         dest = permessi.get(nome_dest.strip().lower())
         if dest is None:
             raise DialogoBloccato("Puoi parlare solo con: " + (", ".join(c["nome"] for c in permessi.values()) or "nessuno"))
-        _controlli_generali(conn, conv_id)
+        _controlli_generali(conn, conv_id, da_id)
         if conv_id is None:
             conv_id = conn.execute(
                 "INSERT INTO conversazioni (titolo, fascia_dati, iniziata_da_agente) VALUES (%s,%s,%s) RETURNING id",
@@ -231,7 +242,7 @@ def domanda_a_collega(da_id: int, nome_dest: str, domanda: str, conv_id: int | N
         if dest.get("ruolo_speciale"):
             return _risposta_speciale(conn, dest, da_id, conv_id, domanda, fascia, utente_id), conv_id
         risposta = _fai_parlare(conn, dest["id"], da_id, conv_id,
-                                "Rispondi al messaggio precedente. Se non e' chiaro, chiedi chiarimenti precisi.", fascia, utente_id)
+                                (PRIORITA_AURORA if e_aurora(conn, da_id) else "") + "Rispondi al messaggio precedente. Se non e' chiaro, chiedi chiarimenti precisi.", fascia, utente_id)
     return risposta, conv_id
 
 

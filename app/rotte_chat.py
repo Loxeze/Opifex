@@ -58,7 +58,7 @@ def non_letti(utente: dict = Depends(utente_corrente)):
 
 def _messaggio(r: dict) -> dict:
     x = r["risultato"] or {}
-    return {"id": r["id"], "messaggio": r["messaggio"], "stato": r["stato"], "errore": r["errore"], "creato_il": r["creato_il"], "finito_il": r["finito_il"],
+    return {"id": r["id"], "canale": r["canale"], "messaggio": r["messaggio"], "stato": r["stato"], "errore": r["errore"], "creato_il": r["creato_il"], "finito_il": r["finito_il"],
             "secondi": float(r["secondi"]) if r["secondi"] is not None else None,
             "risposta": x.get("risposta"), "file": x.get("file_creati") or [], "token": (x.get("token_input") or 0) + (x.get("token_output") or 0),
             "usati": x.get("documenti_usati") or [], "esclusi": x.get("documenti_esclusi_per_riservatezza") or [], "avvisi": x.get("avvisi") or [],
@@ -71,7 +71,7 @@ def apri(agente_id: int, prima_di: int | None = None, limite: int = 40, utente: 
     limite = max(1, min(limite, 200))
     with connessione() as conn:
         a = _agente_ok(conn, agente_id, utente)
-        righe = conn.execute("""SELECT id, messaggio, stato, risultato, errore, creato_il, finito_il, secondi FROM chat_coda
+        righe = conn.execute("""SELECT id, messaggio, stato, risultato, errore, creato_il, finito_il, secondi, canale FROM chat_coda
                                 WHERE utente_id = %s AND agente_id = %s AND (%s::int IS NULL OR id < %s) ORDER BY id DESC LIMIT %s""",
                              (utente["id"], agente_id, prima_di, prima_di, limite + 1)).fetchall()
         b = conn.execute("SELECT testo, fascia FROM chat_bozze WHERE utente_id = %s AND agente_id = %s", (utente["id"], agente_id)).fetchone()

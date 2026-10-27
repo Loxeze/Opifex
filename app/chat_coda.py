@@ -39,9 +39,9 @@ def _lavora(coda_id: int, agente_id: int, utente_id: int, messaggio: str, fascia
                          (stato, json.dumps(r, default=str) if r is not None else None, errore, round(time.monotonic() - t0, 1), coda_id))
 
 
-def accoda(agente_id: int, utente_id: int, messaggio: str, fascia: str, allegati=None, extra: dict | None = None, sincrono: bool = False) -> int:
+def accoda(agente_id: int, utente_id: int, messaggio: str, fascia: str, allegati=None, extra: dict | None = None, sincrono: bool = False, canale: str = "web") -> int:
     with connessione() as conn:
-        cid = conn.execute("INSERT INTO chat_coda (agente_id, utente_id, messaggio) VALUES (%s,%s,%s) RETURNING id", (agente_id, utente_id, messaggio)).fetchone()["id"]
+        cid = conn.execute("INSERT INTO chat_coda (agente_id, utente_id, messaggio, canale) VALUES (%s,%s,%s,%s) RETURNING id", (agente_id, utente_id, messaggio, canale)).fetchone()["id"]
     args = (cid, agente_id, utente_id, messaggio, fascia, allegati, extra or {})
     if sincrono:
         _lavora(*args)
