@@ -125,7 +125,10 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
     if stop == "limite_passi" or not testo_finale.strip():
         # ultimo giro vuoto o interrotto: un tentativo in piu' senza strumenti, per avere comunque una risposta scritta
         try:
-            d = _chiama_api({"model": modello, "max_tokens": max_token, "system": sistema,
+            # se il limite era la causa, l'ultimo giro ha il doppio dello spazio (fino a 8000): meglio una risposta lunga che nessuna risposta
+            tetto = min(8000, max_token * 2) if stop == "max_tokens" else max_token
+            diag["max_token_ritentativo"] = tetto
+            d = _chiama_api({"model": modello, "max_tokens": tetto, "system": sistema,
                              "messages": _con_richiesta_finale(messaggi), "tools": strumenti, "tool_choice": {"type": "none"}})
             t_in += d["usage"]["input_tokens"]; t_out += d["usage"]["output_tokens"]
             extra_t = "".join(b.get("text", "") for b in d["content"] if b.get("type") == "text").strip()

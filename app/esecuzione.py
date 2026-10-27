@@ -323,10 +323,11 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     avviso_extra += crm.AVVISO
                     gestori["crm_conta"] = crm.gestore(connessione, agente_id)
                 if spec_tool == "formatore":
-                    extra.extend(casati.STRUMENTI)
+                    st_cas = casati.STRUMENTI + ([casati.STRUMENTO_SCARICA] if casati.FORMAZIONE.get() else [])
+                    extra.extend(st_cas)
                     avviso_extra += casati.AVVISO + "\n\nBIBLIOTECA ORA: " + _elenco_biblioteca(a_f)
                     gc = casati.gestore(a_f, agente_id, connessione)
-                    for s_ in casati.STRUMENTI:
+                    for s_ in st_cas:
                         gestori[s_["name"]] = gc
                 if spec_tool == "cerimoniere":
                     extra.extend(cerimoniere.STRUMENTI)

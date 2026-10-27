@@ -5,6 +5,7 @@ import re
 import threading
 from datetime import date, datetime, timedelta, timezone
 
+from . import casati
 from .db import connessione
 from .memoria_lavoro import SEGRETO
 
@@ -18,12 +19,14 @@ FOCUS = {
     5: "eccellenza: giudizio sui casi nuovi, innovazione, quando NON applicare le regole, come formare altri",
 }
 # stima prudente dei token di una formazione (ricerca + stesura): si affina con i dati reali (token_usati)
-STIMA_TOKEN = {1: 8000, 2: 12000, 3: 18000, 4: 25000, 5: 35000}
-MAX_TOKEN_ESECUZIONE = {1: 3500, 2: 4500, 3: 5500, 4: 6500, 5: 7500}
+STIMA_TOKEN = {1: 60000, 2: 80000, 3: 100000, 4: 125000, 5: 150000}   # ricerca + studio + stesura: si affina con i dati reali
+MAX_TOKEN_RICERCA = 2500
+MAX_TOKEN_STUDIO = 4500
+MAX_TOKEN_ESECUZIONE = {1: 5000, 2: 6000, 3: 7000, 4: 8000, 5: 8000}   # la stesura finale
 MAX_RICHIESTE_SETTIMANA = 3
 MAX_TENTATIVI = 2
 GIORNI_VERIFICA = 180
-MAX_CORPO = 12000
+MAX_CORPO = 20000
 
 
 class ErroreGinnasio(Exception):
@@ -232,12 +235,7 @@ def avvia(rid: int):
         threading.Thread(target=_lavora, args=(rid,), daemon=True).start()
 
 
-def _prompt(conn, r: dict) -> str:
-    comp = conn.execute("SELECT * FROM competenze WHERE id = %s", (r["competenza_id"],)).fetchone() if r["competenza_id"] else None
-    precedenti = []
-    if comp:
-        for lv in conn.execute("SELECT livello, corpo FROM competenze_livelli WHERE competenza_id = %s AND livello < %s AND stato = 'approvata' ORDER BY livello", (comp["id"], r["livello"])).fetchall():
-            precedenti.append(f"--- Livello {lv['livello']} ({LIVELLI[lv['livello']]}) gia' scritto ---\n{lv['corpo'][:2500]}")
+def _contesto_richiesta(conn, r: dict) -> str:
     chi = ""
     if r["agente_id"]:
         a = conn.execute("SELECT nome, ruolo FROM agenti WHERE id = %s", (r["agente_id"],)).fetchone()
@@ -249,13 +247,37 @@ def _prompt(conn, r: dict) -> str:
     return (f"FORMAZIONE #{r['id']} — competenza: {r['competenza_nome']}, livello {r['livello']} ({LIVELLI[r['livello']]}).{chi}{prog}\n"
             f"Motivo della richiesta: {r['motivo'] or 'non indicato'}\n"
             + (f"Note di Lorenzo sulla bozza precedente (tienine conto): {r['note']}\n" if r["note"] else "")
-            + f"\nScrivi la competenza per questo livello. Cosa deve contenere un livello {LIVELLI[r['livello']]}: {FOCUS[r['livello']]}.\n"
-              "Come procedere: 1) biblioteca_cerca per cio' che c'e' gia'; 2) cerca_fonti (poche ricerche mirate) per integrare, senza dati riservati; "
-              "3) se serve un PDF proponilo con proponi_download (non si scarica da solo). Non ripetere cio' che dicono i livelli precedenti: aggiungi.\n"
-              "Il testo e' istruzione operativa per un agente che dovra' lavorare cosi': metodo a passi, checklist, formato dei risultati, errori da evitare, "
-              "domande da fare prima di iniziare, e in fondo una sezione «Fonti» con titolo e indirizzo di ogni fonte usata. Mai password o chiavi. Italiano, concreto.\n"
-              "Chiudi la risposta in questo formato esatto:\nDESCRIZIONE: una riga (max 200 caratteri) che dice a cosa serve la competenza e quando usarla\nCOMPETENZA:\n<il testo>\n"
-              + ("\n\n" + "\n\n".join(precedenti) if precedenti else ""))
+            + f"Cosa deve contenere un livello {LIVELLI[r['livello']]}: {FOCUS[r['livello']]}.\n")
+
+
+def _precedenti(conn, r: dict) -> str:
+    out = []
+    if r["competenza_id"]:
+        for lv in conn.execute("SELECT livello, corpo FROM competenze_livelli WHERE competenza_id = %s AND livello < %s AND stato = 'approvata' ORDER BY livello", (r["competenza_id"], r["livello"])).fetchall():
+            out.append(f"--- Livello {lv['livello']} ({LIVELLI[lv['livello']]}) gia' scritto ---\n{lv['corpo'][:2500]}")
+    return ("\n\n" + "\n\n".join(out)) if out else ""
+
+
+def _prompt_ricerca(conn, r: dict) -> str:
+    return (_contesto_richiesta(conn, r) + "\nFASE 1 di 3 — RICERCA DEL MATERIALE. Non scrivere ancora la competenza.\n"
+            "1) biblioteca_cerca: guarda cosa c'e' gia'. 2) cerca_fonti con poche ricerche mirate (archivi diversi: openalex, arxiv, wikipedia, semanticscholar), senza dati riservati. "
+            f"3) scarica con scarica_materiale i PDF ad accesso aperto davvero utili (al massimo {casati.MAX_DOC_FORMAZIONE}, preferisci manuali, rassegne e linee guida a post e opinioni). "
+            "Chiudi con una lista breve: cosa hai scaricato, cosa gia' c'era, cosa non hai trovato.")
+
+
+def _prompt_studio(conn, r: dict, ricerca: str) -> str:
+    return (_contesto_richiesta(conn, r) + "\nFASE 2 di 3 — STUDIO. Esito della ricerca:\n" + ricerca[:2500] + "\n\n"
+            "Leggi con biblioteca_cerca e biblioteca_leggi i documenti pertinenti (anche piu' parti dello stesso) e scrivi gli APPUNTI per la stesura: per ogni punto utile "
+            "metodo, criteri, errori da evitare, numeri o soglie, con documento e brano di provenienza. Distingui studi rivisti da altri studiosi da opinioni. "
+            "Massimo 1200 parole, solo appunti: la competenza si scrive nella fase successiva.")
+
+
+def _prompt(conn, r: dict, appunti: str = "") -> str:
+    return (_contesto_richiesta(conn, r) + "\nFASE 3 di 3 — STESURA. Scrivi ora la competenza per questo livello, senza usare altri strumenti, appoggiandoti agli appunti qui sotto. Non ripetere cio' che dicono i livelli precedenti: aggiungi.\n"
+            "Il testo e' istruzione operativa per un agente che dovra' lavorare cosi': metodo a passi, checklist, formato dei risultati, errori da evitare, "
+            "domande da fare prima di iniziare, e in fondo una sezione «Fonti» con titolo e indirizzo di ogni fonte usata davvero (se non hai trovato fonti scrivilo, non inventarle). Mai password o chiavi. Italiano, concreto.\n"
+            "Chiudi la risposta in questo formato esatto:\nDESCRIZIONE: una riga (max 200 caratteri) che dice a cosa serve la competenza e quando usarla\nCOMPETENZA:\n<il testo>\n"
+            + (f"\n=== APPUNTI DI STUDIO ===\n{appunti[:9000]}\n" if appunti else "") + _precedenti(conn, r))
 
 
 def _parti(testo: str) -> tuple[str, str]:
@@ -266,6 +288,7 @@ def _parti(testo: str) -> tuple[str, str]:
 
 
 def _lavora(rid: int):
+    from . import casati
     from .esecuzione import esegui_agente
     with connessione() as conn:
         r = conn.execute("SELECT * FROM richieste_formazione WHERE id = %s AND stato = 'in_corso'", (rid,)).fetchone()
@@ -275,16 +298,39 @@ def _lavora(rid: int):
         if cas is None:
             conn.execute("UPDATE richieste_formazione SET stato = 'errore', errore = 'Padre Casati non e'' attivo', conclusa_il = NOW() WHERE id = %s", (rid,))
             return
-        prompt = _prompt(conn, r)
+        prompt_ricerca = _prompt_ricerca(conn, r)
         conn.commit()
+    token_tot = 0
+
+    def fase(nome, prompt, max_token, scarica=False):
+        nonlocal token_tot
+        with connessione() as conn:
+            conn.execute("UPDATE richieste_formazione SET fase = %s, token_usati = %s WHERE id = %s", (nome, token_tot, rid))
+        tk = casati.FORMAZIONE.set({"richiesta": rid, "n": 0, "byte": 0}) if scarica else casati.FORMAZIONE.set(None)
+        try:
+            o = esegui_agente(cas["id"], prompt, "interno", None, max_token=max_token)
+        finally:
+            casati.FORMAZIONE.reset(tk)
+        token_tot += o["token_input"] + o["token_output"]
+        return o["risposta"]
+
     try:
-        out = esegui_agente(cas["id"], prompt, "interno", None, max_token=MAX_TOKEN_ESECUZIONE[r["livello"]])
+        ricerca = fase("ricerca", prompt_ricerca, MAX_TOKEN_RICERCA, scarica=True)
+        with connessione() as conn:
+            r = conn.execute("SELECT * FROM richieste_formazione WHERE id = %s", (rid,)).fetchone()
+            prompt_studio = _prompt_studio(conn, r, ricerca)
+        appunti = fase("studio", prompt_studio, MAX_TOKEN_STUDIO)
+        with connessione() as conn:
+            conn.execute("UPDATE richieste_formazione SET appunti = %s WHERE id = %s", (appunti[:20000], rid))
+            prompt_stesura = _prompt(conn, r, appunti)
+        testo_finale = fase("stesura", prompt_stesura, MAX_TOKEN_ESECUZIONE[r["livello"]])
+        out = {"risposta": testo_finale, "token_input": token_tot, "token_output": 0}
     except Exception as e:  # noqa: BLE001 - la formazione fallita si vede in pagina e non ferma nulla
         with connessione() as conn:
-            conn.execute("UPDATE richieste_formazione SET stato = 'errore', errore = %s, conclusa_il = NOW() WHERE id = %s", (str(e)[:300], rid))
+            conn.execute("UPDATE richieste_formazione SET stato = 'errore', errore = %s, token_usati = %s, conclusa_il = NOW() WHERE id = %s", (str(e)[:300], token_tot, rid))
         return
     descr, corpo = _parti(out["risposta"])
-    token = out["token_input"] + out["token_output"]
+    token = token_tot
     with connessione() as conn:
         if len(corpo) < 200 or SEGRETO.search(corpo):
             conn.execute("UPDATE richieste_formazione SET stato = 'errore', errore = %s, token_usati = %s, conclusa_il = NOW() WHERE id = %s",

@@ -218,3 +218,9 @@ header{padding-top:max(12px,env(safe-area-inset-top))}
 .ginnasio{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
 .ginnasio>section{min-width:0}
 @media (max-width:900px){.ginnasio{grid-template-columns:1fr}}
+/* Ginnasio: la tabella della biblioteca sta in mezza pagina, i testi lunghi (siti, titoli) vanno a capo */
+.ginnasio .tabella{table-layout:fixed;width:100%}
+.ginnasio .tabella td,.ginnasio .tabella th{overflow-wrap:anywhere;word-break:break-word;vertical-align:top;font-size:.9em}
+.ginnasio .sotto,.ginnasio .nome{overflow-wrap:anywhere}
+.ginnasio>section{overflow-x:auto}
+.ginnasio .tabella th:nth-child(1){width:34%}.ginnasio .tabella th:nth-child(2){width:16%}.ginnasio .tabella th:nth-child(3){width:9%}.ginnasio .tabella th:nth-child(4){width:13%}.ginnasio .tabella th:nth-child(5){width:13%}

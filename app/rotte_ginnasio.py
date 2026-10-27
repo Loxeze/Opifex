@@ -23,7 +23,7 @@ def stato(_: dict = Depends(solo_titolare)):
         bozze = conn.execute("""SELECT l.id, l.livello, l.corpo, l.descrizione, l.versione, l.token_usati, c.nome AS competenza, f.id AS richiesta_id, f.agente_id, a.nome AS agente
                                 FROM competenze_livelli l JOIN competenze c ON c.id = l.competenza_id LEFT JOIN richieste_formazione f ON f.livello_id = l.id AND f.stato = 'da_approvare'
                                 LEFT JOIN agenti a ON a.id = f.agente_id WHERE l.stato = 'bozza' ORDER BY l.id""").fetchall()
-        recenti = conn.execute("""SELECT f.id, f.competenza_nome, f.livello, f.stato, f.token_usati, f.errore, f.conclusa_il, a.nome AS agente FROM richieste_formazione f LEFT JOIN agenti a ON a.id = f.agente_id
+        recenti = conn.execute("""SELECT f.id, f.competenza_nome, f.livello, f.stato, f.token_usati, f.errore, f.fase, f.conclusa_il, a.nome AS agente FROM richieste_formazione f LEFT JOIN agenti a ON a.id = f.agente_id
                                   WHERE f.stato IN ('in_corso','conclusa','errore','annullata') ORDER BY f.id DESC LIMIT 15""").fetchall()
         agenti = conn.execute("SELECT id, nome, ruolo, livello FROM agenti WHERE attivo AND ruolo_speciale IS NULL ORDER BY id").fetchall()
         for a in agenti:
