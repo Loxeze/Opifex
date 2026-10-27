@@ -128,12 +128,14 @@ class NuovoProgetto(BaseModel):
 
 
 def _imposta_agenti(conn, pid: int, ids: list[int] | None):
+    """Un progetto nuovo parte senza agenti (c'e' solo il suo PM, che compone la squadra e la fa approvare). Chi sceglie a mano passa gli id."""
     attivi = {r["id"] for r in conn.execute("SELECT id FROM agenti WHERE attivo").fetchall()}
-    altri_pm = {r["pm_agente_id"] for r in conn.execute("SELECT pm_agente_id FROM progetti WHERE pm_agente_id IS NOT NULL AND id <> %s", (pid,)).fetchall()}
-    scelti = (attivi - altri_pm) if not ids else set(ids)   # di default tutti, tranne i project manager degli altri progetti
+    scelti = set(ids or [])
     if not scelti <= attivi:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Agente inesistente o spento")
-    conn.execute("DELETE FROM progetti_agenti WHERE progetto_id=%s AND NOT agente_id = ANY(%s)", (pid, list(scelti)))
+    # restano sempre il PM e chi e' entrato con una squadra approvata
+    conn.execute("""DELETE FROM progetti_agenti WHERE progetto_id=%s AND NOT agente_id = ANY(%s) AND NOT squadra
+                    AND agente_id IS DISTINCT FROM (SELECT pm_agente_id FROM progetti WHERE id=%s)""", (pid, list(scelti), pid))
     for a in scelti:
         conn.execute("INSERT INTO progetti_agenti (progetto_id, agente_id) VALUES (%s,%s) ON CONFLICT DO NOTHING", (pid, a))
 

@@ -11,7 +11,7 @@ from .db import connessione
 from .fornitori import ErroreFornitore, Risposta, chiama_modello
 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
-from . import ginnasio, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti
+from . import ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from .navigatore import ErroreNavigazione, Navigatore
@@ -174,6 +174,9 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
         gi_ctx = ginnasio.contesto(conn, a_f, messaggio) if memoria._ok(a_f, "interno") else ""
         if gi_ctx:
             prefisso.append(gi_ctx); dim["competenze"] = len(gi_ctx)
+        kp_ctx = squadre.contesto_kpi(conn, a_f) if memoria._ok(a_f, "interno") else ""
+        if kp_ctx:
+            prefisso.append(kp_ctx); dim["kpi"] = len(kp_ctx)
         al_ctx = memoria.contesto_allineamento(conn, a_f)
         if al_ctx:
             prefisso.append(al_ctx); dim["allineamento"] = len(al_ctx)
@@ -243,7 +246,9 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             prog_tool = bool(scheda_progetto.strumenti_abilitati() and ok_int and (a["livello"] in ("manager", "referente") or pm_tool) and scheda_progetto.progetti_di(conn, agente_id))   # gli operativi leggono la scheda ma non pagano gli strumenti in ogni chiamata
             form_tool = bool(scheda_progetto.strumenti_abilitati() and ok_int and (a["livello"] in ("manager", "referente") or pm_tool))
             prog_crea = bool(scheda_progetto.strumenti_abilitati() and ok_int and a["livello"] in ("manager", "referente") and not _sent)
-            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool:
+            sq_pm = bool(form_tool and pm_tool)
+            sq_val = bool(form_tool and not _sent)
+            if siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -355,6 +360,19 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                     avviso_extra += ginnasio.AVVISO
                     for s_ in ginnasio.STRUMENTI:
                         gestori[s_["name"]] = gfo
+                if sq_pm or sq_val:
+                    gsq = squadre.gestore(connessione, agente_id)
+                    if sq_pm:
+                        extra.extend(squadre.STRUMENTI_PM)
+                        avviso_extra += squadre.AVVISO_PM
+                        for s_ in squadre.STRUMENTI_PM:
+                            gestori[s_["name"]] = gsq
+                    if sq_val:
+                        extra.extend([squadre.STRUMENTO_VALUTA, squadre.STRUMENTO_RICHIAMA])
+                        if not sq_pm:
+                            avviso_extra += squadre.AVVISO_MANAGER
+                        gestori["valuta_agente"] = gsq
+                        gestori["squadra_richiama"] = gsq
                 if prog_tool or prog_crea:
                     gsp = scheda_progetto.gestore(connessione, agente_id)
                     if prog_tool:

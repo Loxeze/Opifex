@@ -39,6 +39,7 @@ function vistaProgetto() {
           h("div", { class: "sotto" }, perc + "% completato · " + fatte + " task chiuse su " + tot + (d.in_ritardo ? " · ⚠ " + d.in_ritardo + " in ritardo" : "")),
           p.allineamento ? h("details", { style: "margin-top:8px" }, h("summary", {}, "Documento di allineamento"), h("pre", { style: "white-space:pre-wrap" }, p.allineamento)) : null),
         bloccoScheda(p.id),
+        bloccoSquadra(p.id),
         tit ? [h("h3", {}, "Manager di riferimento"),
           h("div", { class: "riga" }, [d.pm ? { ambito: "Project management", id: d.pm.id, nome: d.pm.nome } : null, ...d.manager].filter(Boolean).map(m => h("div", { class: "carta", style: "flex:0 1 220px" },
             h("div", { class: "sotto" }, m.ambito), h("div", { class: "nome" }, m.nome), h("div", { class: "azioni" }, h("button", { class: "p", onclick: () => parla(m.id) }, "Parla con lui"))))),
@@ -120,6 +121,46 @@ function bloccoScheda(pid) {
           s.versioni.map(v => h("div", { class: "sotto", style: "padding:6px 0;border-top:1px solid var(--bordo)" },
             new Date(v.creata_il).toLocaleString("it-IT") + " · " + (v.agente ? "🤖 " + v.agente : "👤 " + (v.persona || "?")) + " · " + (NOMI[v.campo] || v.campo),
             h("div", { style: "white-space:pre-wrap;color:var(--testo)" }, (v.dopo || "").slice(0, 400))))) : null]);
+    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return corpo;
+}
+
+const ESITI_KPI = { in_linea: "🟢 in linea", a_rischio: "🟠 a rischio", fuori_rotta: "🔴 fuori rotta", raggiunto: "✅ raggiunto" };
+
+function bloccoSquadra(pid) {
+  const corpo = h("div");
+  const carica = async () => {
+    try {
+      const s = await api("GET", "/progetti/" + pid + "/squadra"), mod = s.puo_modificare;
+      const msg = h("div");
+      const brief = h("textarea", { style: "min-height:80px", maxlength: 4000, disabled: !mod, placeholder: "Cosa vuoi ottenere: il project manager ricava da qui le competenze necessarie e propone la squadra" });
+      brief.value = s.brief || "";
+      const agisci = async (f) => { try { await f(); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } };
+      riempi(corpo, [
+        h("h3", {}, "Squadra e KPI"),
+        h("p", { class: "aiuto" }, "Il project manager sceglie gli agenti in base alle competenze (e al loro livello), tu approvi. Gli agenti restano dei loro manager d'area, che vengono avvisati e possono richiamarli; dentro il progetto li comanda il PM, che assegna i KPI e li valuta."),
+        h("div", { class: "carta" }, h("label", {}, "Brief del progetto", brief),
+          mod ? h("div", { class: "azioni" }, h("button", { class: "p", onclick: () => agisci(() => api("PUT", "/gestione/progetti/" + pid + "/brief", { brief: brief.value })) }, "Salva il brief")) : null),
+        s.proposte.map(pr => h("div", { class: "carta", style: "border-left:4px solid var(--accento, #c60)" },
+          h("div", { class: "nome" }, "Squadra proposta da " + (pr.proposta_da || "un agente")),
+          h("div", { class: "sotto" }, pr.motivazione),
+          pr.lacune ? h("div", { class: "sotto" }, "Competenze mancanti: " + pr.lacune) : null,
+          pr.membri.map(m => h("div", {}, h("b", {}, m.nome), " (" + (m.reparto || "—") + ") — " + (m.ruolo_progetto || m.ruolo || "") + (m.motivo ? ": " + m.motivo : ""))),
+          mod ? h("div", { class: "azioni" },
+            h("button", { class: "p", onclick: () => agisci(() => api("POST", "/gestione/squadre/" + pr.id + "/decisione", { approva: true })) }, "Approva la squadra"),
+            h("button", { class: "s", onclick: () => { const n = prompt("Perché la respingi? (il PM lo leggerà)") ; if (n !== null) agisci(() => api("POST", "/gestione/squadre/" + pr.id + "/decisione", { approva: false, nota: n })); } }, "Respingi")) : null)),
+        s.squadra.length ? s.squadra.map(m => h("div", { class: "carta", style: "margin-bottom:6px" },
+          h("div", { class: "nome" }, (m.e_pm ? "🧭 " : "") + m.nome + (m.livello_formazione ? " (" + m.livello_formazione + ")" : ""), h("span", { class: "sotto" }, " · " + (m.ruolo_progetto || m.ruolo || "") + " · " + (m.reparto || ""))),
+          m.competenze.length ? h("div", { class: "sotto" }, "Competenze: " + m.competenze.join(", ")) : null,
+          h("div", { class: "sotto" }, "Nel progetto: " + m.misure.chiuse + " task chiuse, " + m.misure.aperte + " aperte" + (m.misure.in_ritardo ? ", " + m.misure.in_ritardo + " in ritardo" : "") + " · 👍 " + m.misure.pollici_su + " 👎 " + m.misure.pollici_giu),
+          m.kpi.map(k => h("div", { style: "padding:4px 0;border-top:1px solid var(--bordo)" + (k.chiuso ? ";opacity:.6" : "") },
+            "🎯 " + k.nome + ": " + (k.valore ?? "—") + (k.valore_obiettivo != null ? " / " + k.valore_obiettivo + " " + (k.unita || "") : "") + (k.esito ? " · " + ESITI_KPI[k.esito] : "") + (k.scadenza ? " · entro " + new Date(k.scadenza).toLocaleDateString("it-IT") : ""),
+            k.nota ? h("div", { class: "sotto" }, k.nota) : null)),
+          mod && !m.e_pm ? h("div", { class: "azioni" }, h("button", { class: "s", onclick: () => { if (confirm("Togliere " + m.nome + " dalla squadra?")) agisci(() => api("DELETE", "/gestione/progetti/" + pid + "/squadra/" + m.id)); } }, "Togli dalla squadra")) : null))
+          : h("p", { class: "sotto" }, "Nessuna squadra ancora: scrivi il brief e chiedi al project manager di proporla."),
+        msg]);
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };
   carica();

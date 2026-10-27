@@ -32,6 +32,10 @@ def dati(conn, m: dict, ore: int) -> str:
         parti.append("Richieste di informazioni aperte: " + "; ".join(f"{r['nome']}: {r['domanda'][:120]}" for r in ric))
     if ini:
         parti.append("Iniziative: " + "; ".join(f"{r['titolo']} [{r['stato']}]" + (f" — sintesi: {r['sintesi'][:200]}" if r["sintesi"] else "") for r in ini))
+    from . import squadre
+    for pr in conn.execute("SELECT id, nome FROM progetti WHERE pm_agente_id = %s AND NOT archiviato AND eliminato_il IS NULL", (m["id"],)).fetchall():
+        ks = squadre.kpi_elenco(conn, pr["id"])
+        parti.append(f"Progetto «{pr['nome']}» — KPI della squadra: " + ("; ".join(f"{k['agente']}: {squadre._riga_kpi(k)}" for k in ks[:10]) or "nessuno assegnato"))
     return "\n".join(parti)
 
 

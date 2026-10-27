@@ -98,6 +98,10 @@ def panoramica(conn, a: dict, utente_id: int | None) -> str:
         parti.append("Task aperti:\n" + "\n".join(
             f"- {t['titolo']} [{t['stato']}]" + (f" ({t['agente']})" if t["agente"] else "") + (f", scadenza {t['scadenza']:%d/%m/%Y}" if t["scadenza"] else "")
             for t in tk))
+    from . import squadre
+    av = squadre.avanzamento_progetti(conn)
+    if av:
+        parti.append(av)
     if not parti:
         return ""
     return ("VISIONE D'INSIEME (cio' che e' successo con gli altri agenti: usala per non chiedere cose gia' date e per non far ripetere nulla; "
