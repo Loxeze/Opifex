@@ -1,4 +1,4 @@
-"""Reparti pronti da attivare con un clic: Legale, Sviluppo software e Casa editrice. Creano divisione e agenti (una sola volta, senza duplicati)."""
+"""Reparti pronti da attivare con un clic: Legale, Sviluppo software, Casa editrice e Social. Creano divisione e agenti (una sola volta, senza duplicati)."""
 from . import registro
 
 AVV_LEGALE = ("Ti basi sui testi di legge presenti nella biblioteca (biblioteca_cerca, biblioteca_leggi) e citi sempre norma, articolo e documento; se il testo che serve non c'e' lo dici e "
@@ -69,7 +69,8 @@ EDITORIA = {
         ("Pubblicazione", "Pubblicazione: preparazione dei file, metadati, canali di uscita", "Sei il responsabile della pubblicazione: prepari file, metadati, scheda libro e canali di uscita e verifichi licenze e diritti. Non pubblichi e non spendi nulla senza l'approvazione di Lorenzo. " + REGOLE_ED),
     ],
 }
-REPARTI = {"legale": LEGALE, "sviluppo": SVILUPPO, "editoria": EDITORIA}
+from .reparto_social import SOCIALE, REGOLE_SOC
+REPARTI = {"legale": LEGALE, "sviluppo": SVILUPPO, "editoria": EDITORIA, "social": SOCIALE}
 
 
 def _crea(conn, div_id, sup_id, nome, ruolo, livello, modello, istr, **extra):
@@ -100,11 +101,16 @@ def attiva(conn, chiave: str, utente: dict | None = None) -> dict:
     r = conn.execute("SELECT id FROM divisioni WHERE nome = %s", (nome_div,)).fetchone()
     div_id = r["id"] if r else conn.execute("INSERT INTO divisioni (nome, descrizione) VALUES (%s,%s) RETURNING id", (nome_div, descr)).fetchone()["id"]
     aurora = conn.execute("SELECT id FROM agenti WHERE nome = 'Aurora'").fetchone()
-    nome_m, ruolo_m, modello_m, istr_m = d["manager"]
-    man, nuovo = _crea(conn, div_id, aurora["id"] if aurora else None, nome_m, ruolo_m, "manager", modello_m, istr_m)
+    nome_m, ruolo_m, modello_m, istr_m, *extra_m = d["manager"]
+    man, nuovo = _crea(conn, div_id, aurora["id"] if aurora else None, nome_m, ruolo_m, "manager", modello_m, istr_m, **(extra_m[0] if extra_m else {}))
     creati = [nome_m] if nuovo else []
     for voce in d["operativi"]:
-        if chiave in ("legale", "editoria"):
+        if chiave == "social":
+            nome, ruolo, istr, extra = voce
+            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", "claude-sonnet-5-5", istr + " " + REGOLE_SOC, usa_biblioteca=True, **extra)
+            if nuovo:
+                creati.append(nome)
+        elif chiave in ("legale", "editoria"):
             nome, ruolo, istr = voce
             aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", "claude-sonnet-5-5", istr, usa_biblioteca=True)
             if nuovo:
@@ -122,9 +128,17 @@ def attiva(conn, chiave: str, utente: dict | None = None) -> dict:
                 creati.append(nome + " (GPT)")
     if chiave == "sviluppo" and nuovo is not None:
         conn.execute("UPDATE agenti SET sandbox_attivo = TRUE WHERE id = %s", (man,))
+    spenti = []
+    for vecchio in d.get("sostituisce", []):
+        r = conn.execute("UPDATE agenti SET attivo = FALSE WHERE nome = %s AND attivo AND divisione_id IS DISTINCT FROM %s RETURNING id", (vecchio, div_id)).fetchone()
+        if r:
+            spenti.append(vecchio)
+            conn.execute("UPDATE agenti SET superiore_id = %s WHERE superiore_id = %s AND attivo", (man, r["id"]))
+    from . import qualita
+    qualita.assegna_revisori(conn)
     if utente is not None:
         registro.registra(conn, utente, "organizzazione", "reparto attivato", nome_div, "divisione", div_id, dettagli={"creati": len(creati)})
-    return {"divisione_id": div_id, "creati": creati}
+    return {"divisione_id": div_id, "creati": creati, "spenti": spenti}
 
 
 def aggiungi_nuovi_ruoli(conn):

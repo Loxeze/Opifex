@@ -59,7 +59,7 @@ with TestClient(app) as c:
     ok("solo titolare", c.get("/gestione/reparti", headers=HC).status_code == 403 and c.get("/gestione/sandbox", headers=HC).status_code == 403)
     n0 = sql("SELECT count(*) FROM agenti")[0][0]
     r = c.get("/gestione/reparti", headers=H).json()["reparti"]
-    ok("all'inizio nessun reparto attivo", [x["attivo"] for x in r] == [False, False, False], str(r))
+    ok("all'inizio nessun reparto attivo", [x["attivo"] for x in r] == [False, False, False, False], str(r))
     ok("chiave sconosciuta: 404", c.post("/gestione/reparti/boh/attiva", headers=H).status_code == 404)
     # ---- Legale
     x = c.post("/gestione/reparti/legale/attiva", headers=H).json()
@@ -69,7 +69,7 @@ with TestClient(app) as c:
        and all(l[2] for l in leg if l[1] == "operativo") and len({l[3] for l in leg if l[1] == "operativo"}) == 1, str(leg))
     ok("istruzioni: bozze da verificare con un professionista; ditta individuale sotto il societario", "professionista" in sql("SELECT istruzioni FROM agenti WHERE nome='Legale Terzo settore'")[0][0]
        and "ditta" in sql("SELECT istruzioni FROM agenti WHERE nome='Legale Diritto societario'")[0][0].lower())
-    ok("idempotente", c.post("/gestione/reparti/legale/attiva", headers=H).json()["creati"] == [] and sql("SELECT count(*) FROM agenti")[0][0] == n0 + 4)
+    ok("idempotente", c.post("/gestione/reparti/legale/attiva", headers=H).json()["creati"] == [] and sql("SELECT count(*) FROM agenti")[0][0] == n0 + 5)   # +4 agenti del reparto +1 Revisore qualita'
     # ---- Sviluppo
     x = c.post("/gestione/reparti/sviluppo/attiva", headers=H).json()
     ok("Sviluppo: capofila + 12 ruoli Claude + 12 controllori GPT", len(x["creati"]) == 25 and "Capo sviluppo" in x["creati"], str(len(x["creati"])))
@@ -110,7 +110,7 @@ with TestClient(app) as c:
     ok("il designer UX non ha la sandbox (ma ha il controllore)", "prova_codice" not in strumenti_visti[-1])
     strumenti_visti.clear(); copione[:] = [fine("ok")]
     c.post(f"/agenti/{leg_id}/chat", headers=H, json={"messaggio": "Ci serve lo statuto di una APS", "fascia_dati": "interno"})
-    ok("il legale vede la biblioteca, non la sandbox ne' il doppio controllo", "biblioteca_cerca" in strumenti_visti[-1] and "prova_codice" not in strumenti_visti[-1] and "revisione_incrociata" not in strumenti_visti[-1], str(strumenti_visti[-1]))
+    ok("il legale vede la biblioteca, non la sandbox, ma la revisione obbligatoria", "biblioteca_cerca" in strumenti_visti[-1] and "prova_codice" not in strumenti_visti[-1] and "revisione_incrociata" in strumenti_visti[-1], str(strumenti_visti[-1]))
     ok("...e le sue istruzioni ricordano di verificare con un professionista", "professionista" in ultimi_msg[-1] or True)
     # ---- prova del codice
     copione[:] = [chiama("prova_codice", {"linguaggio": "python", "codice": "print('ciao dal codice')"}), fine("Il codice funziona.")]

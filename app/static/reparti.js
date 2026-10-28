@@ -9,7 +9,7 @@ function vistaReparti() {
         d.reparti.map(r => h("div", { class: "carta", style: "margin-bottom:8px" },
           h("div", { class: "nome" }, r.nome + (r.attivo ? "  🟢 attivo (" + r.agenti + " agenti)" : "  ⚪ non attivo")), h("div", { class: "sotto" }, r.descrizione),
           h("div", { class: "azioni" }, h("button", { class: r.attivo ? "s" : "p", onclick: async () => {
-            try { const x = await api("POST", "/gestione/reparti/" + r.chiave + "/attiva"); msg.replaceChildren(avviso(x.creati.length ? "Creati " + x.creati.length + " agenti." : "Era già tutto a posto.", "ok")); await carica(); }
+            try { const x = await api("POST", "/gestione/reparti/" + r.chiave + "/attiva"); msg.replaceChildren(avviso(x.creati.length ? "Creati " + x.creati.length + " agenti." + ((x.spenti || []).length ? " Spenti i vecchi: " + x.spenti.join(", ") + " (si riaccendono dalle impostazioni)." : "") : "Era già tutto a posto.", "ok")); await carica(); }
             catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, r.attivo ? "Completa / ricontrolla" : "Attiva il reparto"))))]);
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
