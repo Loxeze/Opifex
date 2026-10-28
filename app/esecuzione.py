@@ -407,6 +407,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                         extra.extend([squadre.STRUMENTO_VALUTA, squadre.STRUMENTO_RICHIAMA])
                         if not sq_pm:
                             avviso_extra += squadre.AVVISO_MANAGER
+                        if a["livello"] in ("manager", "referente"):
+                            extra.append(squadre.STRUMENTO_ORGANICO)
+                            avviso_extra += squadre.AVVISO_SPEZZETTA
+                            gestori["squadra_organico"] = gsq
                         gestori["valuta_agente"] = gsq
                         gestori["squadra_richiama"] = gsq
                 if prog_tool or prog_crea:

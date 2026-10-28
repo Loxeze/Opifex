@@ -319,6 +319,33 @@ STRUMENTO_RICHIAMA = {"name": "squadra_richiama",
 AVVISO_PM = ("\n\nSQUADRA E KPI: dal brief del progetto ricava le competenze che servono (con il livello), cercale con squadra_cerca e proponi la squadra con squadra_proponi: scegli pochi agenti, con un ruolo chiaro. "
              "Le lacune chiedile al Ginnasio con formazione_richiedi. Quando la squadra e' approvata assegna a ciascuno 1-3 KPI misurabili (kpi_assegna), aggiornali con i dati veri (kpi_aggiorna) e valuta il lavoro con valuta_agente. "
              "Il manager d'area resta il proprietario dell'agente: tu comandi sul lavoro dentro il progetto.")
+STRUMENTO_ORGANICO = {"name": "squadra_organico",
+                      "description": "Il tuo organico: per ogni sottoposto diretto ruolo, competenze con livello, task aperte, affidabilita'. Usalo SEMPRE prima di spezzettare una richiesta.",
+                      "input_schema": {"type": "object", "properties": {}}}
+
+
+def organico(conn, manager_id: int) -> str:
+    """Elenco dei sottoposti diretti con ruolo, competenze (livello), carico e affidabilita': base dello spezzettamento."""
+    subs = conn.execute("""SELECT id, nome, ruolo FROM agenti WHERE superiore_id = %s AND attivo AND NOT sentinella ORDER BY nome""", (manager_id,)).fetchall()
+    if not subs:
+        return "Non hai sottoposti diretti: lavora tu o chiedi ai colleghi con chiedi_a_agente."
+    out = [f"Organico ({len(subs)} sottoposti). Dai un pezzo a CIASCUNO:"]
+    for a in subs:
+        comp = ginnasio.competenze_agente(conn, a["id"])
+        aperte = conn.execute("SELECT count(*) AS n FROM task WHERE assegnato_agente_id = %s AND stato <> 'completata'", (a["id"],)).fetchone()["n"]
+        st = dossier.statistiche(conn, a["id"])
+        aff = f"{round(st['tasso_approvazione'] * 100)}% su {st['casi']} casi" if st["tasso_approvazione"] is not None else "n.d."
+        cs = ", ".join(f"{c['nome']} L{c['livello']}" for c in comp[:6]) or "nessuna competenza registrata"
+        out.append(f"- {a['nome']} — {a['ruolo'] or '—'} | competenze: {cs} | task aperte: {aperte} | affidabilita': {aff}")
+    return "\n".join(out)
+
+
+AVVISO_SPEZZETTA = ("\n\nMETODO DI LAVORO - SPEZZETTARE: quando ricevi una richiesta, una proposta o un progetto non lo fai tu e non lo dai a uno solo. "
+                    "1) Chiama squadra_organico e conosci le competenze di ciascun sottoposto. 2) Scomponi il lavoro in parti piu' piccole possibili e assegna a OGNUNO dei tuoi sottoposti la parte che la sua competenza verticale sa fare meglio "
+                    "(anche una verifica, una critica o un controllo conta come parte): nessuno resta fermo. 3) Ogni parte con un prompt completo (ruolo, contesto, compito in passi, materiali, formato, criteri, consegna) tramite crea_task o chiedi_a_agente, in parallelo. "
+                    "4) Raccogli le consegne, ricomponile in un unico risultato coerente e verifica ogni pezzo contro il criterio scritto. 5) Valuta ciascuno con valuta_agente: chi lavora fa esperienza e il progetto migliora per il contributo di ogni competenza. "
+                    "Se una competenza manca nel team, dillo e chiedila al Ginnasio.")
+
 AVVISO_MANAGER = ("\n\nVALUTAZIONI: valuta il lavoro dei tuoi sottoposti con valuta_agente (su/giu, con motivo concreto per il giu): sei tu, non Lorenzo, a monitorarne la qualita'. "
                   "Se un tuo agente e' stato aggregato a una squadra e ti serve, puoi richiamarlo con squadra_richiama.")
 
@@ -336,6 +363,8 @@ def gestore(connessione_, agente_id: int):
                 if nome == "kpi_aggiorna":
                     kpi_aggiorna(conn, agente_id, dati)
                     return "KPI aggiornato."
+                if nome == "squadra_organico":
+                    return organico(conn, agente_id)
                 if nome == "valuta_agente":
                     return valuta(conn, agente_id, dati)
                 if nome == "squadra_richiama":

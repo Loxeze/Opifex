@@ -1,0 +1,16 @@
+{
+  "name": "Opifex Voce",
+  "short_name": "Opifex Voce",
+  "description": "L'assistente vocale di Opifex: briefing, task, contatti, note, messaggi ai manager ed email con doppia conferma",
+  "lang": "it",
+  "start_url": "/app/voce-app/",
+  "scope": "/app/voce-app/",
+  "display": "standalone",
+  "background_color": "#0f1218",
+  "theme_color": "#0f1218",
+  "icons": [
+    {"src": "../icona-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "../icona-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "../icona-maschera-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

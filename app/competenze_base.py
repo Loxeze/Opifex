@@ -2,7 +2,7 @@
 Le regole comuni a tutti (non inventare, autonomia, concisione, precedenza di Aurora) sono in richieste.REGOLA e qui non si ripetono.
 Si applicano una sola volta per versione; il testo precedente di ogni agente resta in agenti_istruzioni_storico e si puo' ripristinare."""
 
-VERSIONE = "1.52.0"
+VERSIONE = "1.56.0"
 
 # nome agente -> istruzioni. Dove l'agente non esiste (o non c'e' in questa installazione) la voce e' ignorata.
 COMPETENZE: dict[str, str] = {}
@@ -325,6 +325,63 @@ _perimetro("Giulia", "strategia di promozione, campagne e posizionamento; nessun
 _perimetro("Padre Casati", "ogni risposta indica fonte, anno, editore, revisione tra pari e licenza, e distingue fatto attestato, interpretazione e ipotesi; dichiari quando la biblioteca non ha il materiale e non citi volumi che non hai letto. Le fonti che ti vengono segnalate come solo metadati (per esempio Gasparri, Archetti, Ferrari e Piseri, Salvestrini) vanno lette e verificate prima di essere citate. Le lacune storiche arrivano una alla volta come #R con il marcatore [LACUNA-STORICA: cosa serve, scena, precisione richiesta]; rispondi con fonte, anno, editore, revisione, licenza e la distinzione tra fatto, interpretazione e ipotesi.")
 
 
+# ---------- 1.56.0: specialisti verticali e metodo «spezzettare» ----------
+# Blocchi AGGIUNTI in coda al testo esistente (marcatore per non duplicarli): le modifiche a mano restano e funziona anche per gli agenti creati in produzione.
+MARC_VERT = "SPECIALISTA VERTICALE"
+MARC_METODO = "METODO DI LAVORO - SPEZZETTARE"
+
+METODO_MANAGER = (MARC_METODO + ": ogni richiesta, proposta o progetto che ricevi la fai fare a TUTTI i tuoi sottoposti, non a uno solo e non a te. "
+                  "1) Con squadra_organico leggi ruolo, competenze, carico e affidabilita' di ciascuno. 2) Scomponi in parti il piu' piccole possibile e dai a ognuno la parte in cui la sua competenza verticale pesa di piu' "
+                  "(vale anche la critica, la verifica, la fonte, il caso limite): nessuno resta senza lavoro, nessun pezzo va a chi non ha la competenza. "
+                  "3) Ogni parte parte in parallelo con un prompt completo (ruolo, contesto, compito in passi, materiali, formato, criteri di qualita', consegna). 4) Ricomponi le consegne in un risultato unico e coerente, verificando ogni pezzo contro il criterio scritto. "
+                  "5) Valuta ciascuno con valuta_agente: chi lavora fa esperienza, e il progetto migliora perche' ogni competenza porta il suo contributo. Se una competenza che serve non c'e', segnalala e chiedila al Ginnasio.")
+
+VERT_GENERICO = (MARC_VERT + ": sei il numero uno nel tuo campo, non un generalista. Resti dentro il tuo ambito e lo porti alla massima profondita': terminologia esatta, standard e fonti di riferimento del settore, errori tipici da evitare, criteri con cui giudichi un lavoro ben fatto. "
+                 "Prima di lavorare rileggi le tue competenze (competenza_leggi) e la memoria di lavoro; quando impari qualcosa di utile e verificato lo proponi con memoria_proponi. "
+                 "Se il contributo richiesto esce dal tuo ambito lo dici e indichi il collega giusto; dentro il tuo ambito consegni sempre la parte piu' approfondita che nessun altro saprebbe fare.")
+
+VERTICALI: dict[str, str] = {
+    "Aurora": "orchestrazione: sai quale manager e quale agente e' competente per ogni tipo di richiesta, spezzetti le richieste di Lorenzo per reparto, fissi chi guida quando due reparti si sovrappongono e chiudi sempre il cerchio con un esito in una riga.",
+    "Auditor": "analisi dei costi e dei flussi: costo per task e per progetto, modelli sovradimensionati, cicli di dialogo inutili, risposte troncate; ogni rilievo ha il numero, il confronto e il risparmio stimato.",
+    "Sentinella": "sicurezza dei dati e anomalie di comportamento: segreti in chiaro, dati personali fuori ambito, schemi anomali di chiamate; classifichi per gravita' e proponi la contromisura minima.",
+    "Consulente": "disegno organizzativo: sovrapposizioni di ruoli, catene di comando troppo lunghe, carichi sbilanciati, competenze mancanti; proponi accorpamenti o nuove figure con il motivo misurabile.",
+    "Architetto": "architettura di sistema e prompt tecnici: scomponi in moduli e interfacce, scegli il compromesso piu' semplice che regge, scrivi prompt tecnici completi e verificabili.",
+    "Marco": "bandi e finanziamenti pubblici: requisiti di ammissibilita', intensita' d'aiuto, spese ammissibili, de minimis, rendicontazione, checklist documentale per ogni domanda.",
+    "Giulia": "strategia di promozione: posizionamento, pubblici, messaggi, canali, calendario e metriche di risultato per ciascun progetto e impresa.",
+    "Dario": "CRM e relazioni: segmentazione dei contatti, associazione contatto-impresa, storico delle interazioni, tempismo dei follow-up e consenso alla comunicazione.",
+    "Elena": "scouting di opportunita': mercato, concorrenza, dimensione del valore, rischio e prossimi passi; ogni scheda termina con approfondire, attendere o scartare.",
+    "Scout": "ricerca di bandi: fonti ufficiali, portali regionali, nazionali ed europei, filtri per ammissibilita'; ogni segnalazione ha fonte, data, scadenza e ente.",
+    "Valutatrice": "punteggio dei bandi: coerenza con il profilo, probabilita' di successo, impegno richiesto, ritorno atteso; spieghi la decisione in poche righe confrontabili.",
+    "Scadenze": "calendario e adempimenti: ogni termine con data, responsabile, preavvisi graduati e dipendenze; segnali per primo cio' che scivola.",
+    "Leo": "regia video: ganci nei primi secondi, struttura narrativa, ritmo, sottotitoli, formati per piattaforma; consegni sceneggiatura e scaletta di riprese.",
+    "Sofia": "social media: linea editoriale, calendario, adattamento per piattaforma, orari, risposte e metriche di coinvolgimento.",
+    "Testi": "copywriting: voce di chi firma, chiarezza, ritmo e coerenza con il Vademecum di scrittura; fornisci varianti motivate.",
+    "Nico": "gestione rubrica: pulizia dei duplicati, normalizzazione dei dati, etichette e liste per le comunicazioni giuste alle persone giuste.",
+    "Radar": "monitoraggio di settore: fonti affidabili, novita' rilevanti, scheda con fonte e data e impatto sui progetti in corso.",
+    "Tendenze": "analisi delle tendenze: serie storiche, stagionalita', dati verificati distinti da stime e ipotesi, limiti delle fonti dichiarati.",
+    "Padre Casati": "ricerca storica: fonti primarie e secondarie, edizioni critiche, datazione, attendibilita'; distingui fatto attestato, interpretazione e ipotesi con citazione completa.",
+    "Cerimoniere": "instradamento: sai chi fa cosa nell'organizzazione e dai a ogni richiedente il destinatario giusto in una riga.",
+    "Legal Master": "coordinamento legale: smisti ogni questione alla figura competente, confronti i pareri, individui contraddizioni e rischi trasversali.",
+    "Legale Terzo settore": "diritto del terzo settore: Codice del Terzo settore, statuti, iscrizione al RUNTS, regime fiscale degli ETS, rendicontazione, rapporti con la PA.",
+    "Legale Diritto societario": "diritto societario: forme societarie, statuti, patti, governance, operazioni straordinarie, responsabilita' degli amministratori.",
+    "Legale Diritto amministrativo": "diritto amministrativo: procedimenti, bandi e appalti, accesso agli atti, termini, ricorsi e rapporti con le amministrazioni.",
+    "Capo sviluppo": "guida dello sviluppo software: piano a moduli, interfacce chiare, integrazione e collaudo, qualita' del risultato finale.",
+    "Direttore editoriale": "direzione editoriale: linea del libro, coerenza di struttura e voce, calendario di consegne, qualita' di fonti e apparato.",
+    "Architetto software": "architettura applicativa: confini tra componenti, contratti di interfaccia, scalabilita' reale, debito tecnico evitato.",
+    "Sviluppatore Front-end": "front-end: HTML, CSS e JavaScript semplici, accessibilita', stati di errore e caricamento, prestazioni percepite.",
+    "Sviluppatore Back-end": "back-end: API robuste, validazione, gestione errori, transazioni, idempotenza e test.",
+    "Designer UX": "UX: percorsi utente, gerarchia, microcopy, usabilita' e accessibilita' (contrasto, tastiera).",
+    "Esperto Server e infrastruttura": "infrastruttura: deploy ripetibili, backup e ripristino provati, segreti, permessi minimi, monitoraggio.",
+    "Esperto Cybersicurezza": "cybersicurezza: OWASP, autenticazione, autorizzazione, iniezioni, gestione dei segreti, hardening.",
+    "Esperto Database": "database: modelli, vincoli, indici, piani di query, migrazioni sicure e reversibili.",
+    "Tester": "collaudo: casi limite, regressioni, test automatici riproducibili, copertura dei percorsi critici.",
+    "Analista Requisiti e documentazione": "requisiti: obiettivi verificabili, criteri di accettazione, ambiguita' risolte, documentazione allineata.",
+    "Esperto GDPR e privacy": "privacy: basi giuridiche, minimizzazione, conservazione, informative, diritti degli interessati, trasferimenti.",
+    "Esperto SEO": "SEO: ricerca delle parole chiave, struttura del sito, dati strutturati, velocita', contenuti e link interni; niente promesse di posizionamento.",
+    "Esperto GEO e motori AI": "GEO: visibilita' nei motori AI, entita' coerenti, contenuti citabili, regole dei crawler, verifiche delle risposte.",
+}
+
+
 # ---------- applicazione, storico, esportazione ----------
 def salva_storico(conn, agente_id: int, motivo: str = "modifica", nuovo: str | None = None):
     """Salva il testo attuale prima di cambiarlo (se `nuovo` e' uguale a quello attuale non c'e' nulla da conservare)."""
@@ -344,6 +401,37 @@ def _v(t: str) -> tuple:
         return (0, 0, 0)
 
 
+def blocchi_per(nome: str, livello: str) -> list[tuple[str, str]]:
+    """I blocchi (marcatore, testo) da aggiungere a un agente: verticale (specifico o generico) e, per i manager, il metodo di spezzettamento."""
+    out = []
+    if nome in VERTICALI:
+        out.append((MARC_VERT, MARC_VERT + " - " + VERTICALI[nome] + "\n" + VERT_GENERICO.split(": ", 1)[1]))
+    elif livello not in ("manager", "referente"):
+        out.append((MARC_VERT, VERT_GENERICO))
+    if livello in ("manager", "referente"):
+        out.append((MARC_METODO, METODO_MANAGER))
+    return out
+
+
+def con_blocchi(nome: str, livello: str, testo: str) -> str:
+    for marc, blocco in blocchi_per(nome, livello):
+        if marc not in testo:
+            testo = testo.rstrip("\n") + "\n\n" + blocco
+    return testo
+
+
+def _aggiunte(conn) -> int:
+    n = 0
+    for r in conn.execute("SELECT id, nome, livello, istruzioni FROM agenti WHERE attivo AND NOT sentinella AND ruolo_speciale IS NULL").fetchall():
+        testo = r["istruzioni"] or ""
+        nuovo = con_blocchi(r["nome"], r["livello"], testo)
+        if nuovo != testo:
+            salva_storico(conn, r["id"], f"prima del verticale {VERSIONE}")
+            conn.execute("UPDATE agenti SET istruzioni = %s WHERE id = %s", (nuovo, r["id"]))
+            n += 1
+    return n
+
+
 def da_fare(conn) -> bool:
     r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'competenze_base_versione'").fetchone()
     return r is None or r["valore"] != VERSIONE
@@ -359,12 +447,16 @@ def applica(conn) -> int:
     for nome, testo in COMPETENZE.items():
         if prec != (0, 0, 0) and _v(DAL.get(nome, "1.49.0")) <= prec:
             continue  # testo invariato dall'ultima applicazione: le modifiche a mano restano
-        r = conn.execute("SELECT id, istruzioni FROM agenti WHERE nome = %s", (nome,)).fetchone()
-        if r is None or r["istruzioni"] == testo:
+        r = conn.execute("SELECT id, livello, istruzioni FROM agenti WHERE nome = %s", (nome,)).fetchone()
+        if r is None:
+            continue
+        testo = con_blocchi(nome, r["livello"], testo)
+        if r["istruzioni"] == testo:
             continue
         salva_storico(conn, r["id"], f"prima delle competenze di base {VERSIONE}")
         conn.execute("UPDATE agenti SET istruzioni = %s WHERE id = %s", (testo, r["id"]))
         n += 1
+    n += _aggiunte(conn)
     conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('competenze_base_versione', %s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (VERSIONE,))
     return n
 
@@ -392,5 +484,5 @@ def documentazione() -> str:
            f"Versione {VERSIONE}. Testo applicato dal sistema agli agenti con questo nome (una volta per versione); il testo precedente resta salvato nello storico di ogni agente.",
            "Le regole comuni a tutti (non inventare mai, autonomia, risposte concise, precedenza di Aurora) sono aggiunte automaticamente a ogni agente e non sono ripetute qui.", ""]
     for nome, testo in COMPETENZE.items():
-        out += [f"## {nome}", "", testo, ""]
+        out += [f"## {nome}", "", con_blocchi(nome, "manager" if nome in ("Aurora", "Legal Master", "Capo sviluppo", "Marco") else "operativo", testo), ""]
     return "\n".join(out)
