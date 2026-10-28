@@ -165,21 +165,25 @@ const STATO_STUDIO = { proposto: "da approvare", approvato: "in partenza", in_co
 
 function vistaStudi() {
   const corpo = h("div"), msg = h("div");
-  let timer = null;
+  let timer = null, firma = null;
+  const testi = new Map();    // schede gia' aperte: restano aperte e allo stesso punto anche quando la pagina si aggiorna
   const carica = async () => {
     try {
       const d = await api("GET", "/gestione/studi");
+      const f = JSON.stringify(d);
+      if (f === firma && corpo.firstChild) return;      // nulla di nuovo: non si ridisegna, cosi' non si perde il punto di lettura
+      firma = f;
       const decidi = async (s, azione) => {
         try { await api("POST", "/gestione/studi/" + s.id + "/decisione", { azione }); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
       };
       const tema = h("input", { maxlength: 200, placeholder: "Es. Regole di rendicontazione dei bandi PNRR" });
       const motivo = h("textarea", { style: "min-height:56px", maxlength: 1500, placeholder: "Perché serve (facoltativo)" });
       const rep = h("select", {}, h("option", { value: "" }, "Per tutti i reparti"), d.divisioni.map(x => h("option", { value: x.id }, x.nome)));
-      riempi(corpo, [
+      riempiConservando(corpo, [
         h("p", { class: "aiuto" }, "Padre Casati studia quando c'è un motivo: un bando caricato, una domanda dei colleghi che la biblioteca non copre, un agente che riceve molti 👎, un approfondimento che vuole fare lui o che chiedi tu. Ogni studio parte solo dopo la tua approvazione, consulta biblioteca e archivi aperti e si chiude con una scheda e una voce di dossier da approvare in «Memoria di lavoro»."),
         h("h3", {}, "Studi" + (d.da_approvare ? " da approvare (" + d.da_approvare + ")" : "")),
         d.studi.length ? d.studi.map(s => {
-          const sch = h("pre", { style: "white-space:pre-wrap;display:none;max-height:380px;overflow:auto" });
+          const sch = h("pre", { style: "white-space:pre-wrap;max-height:380px;overflow:auto;display:" + (testi.has(s.id) ? "block" : "none") }, testi.get(s.id) || "");
           return h("div", { class: "carta", style: "margin-bottom:8px" },
             h("div", { class: "nome" }, s.tema),
             h("div", { class: "sotto" }, [STATO_STUDIO[s.stato], ORIGINE_STUDIO[s.origine], s.reparto, s.richiesto_da ? "per " + s.richiesto_da : "", s.riferimento,
@@ -188,7 +192,7 @@ function vistaStudi() {
             s.errore ? avviso(s.errore, "no") : null, sch,
             h("div", { class: "azioni" },
               s.stato === "proposto" ? [h("button", { class: "p", onclick: () => decidi(s, "approva") }, "Approva lo studio"), h("button", { class: "s", onclick: () => decidi(s, "scarta") }, "Scarta")] : null,
-              s.ha_scheda ? h("button", { class: "s", onclick: async () => { if (sch.style.display === "none") { try { sch.textContent = (await api("GET", "/gestione/studi/" + s.id)).scheda; sch.style.display = "block"; } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } else sch.style.display = "none"; } }, "Leggi la scheda") : null));
+              s.ha_scheda ? h("button", { class: "s", onclick: async () => { if (sch.style.display === "none") { try { sch.textContent = (await api("GET", "/gestione/studi/" + s.id)).scheda; testi.set(s.id, sch.textContent); sch.style.display = "block"; } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } else { sch.style.display = "none"; testi.delete(s.id); } } }, "Leggi la scheda") : null));
         }) : h("p", { class: "sotto" }, "Nessuno studio ancora."),
         h("h3", {}, "Chiedi uno studio"),
         h("div", { class: "riga" }, h("label", {}, "Tema", tema), h("label", {}, "Reparto", rep)), motivo,

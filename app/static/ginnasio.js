@@ -1,8 +1,31 @@
 "use strict";
 // Ginnasio: a sinistra lo studio di Padre Casati (studi e biblioteca), a destra la formazione (coda, bozze, competenze).
 
+// Ridisegna un blocco senza far perdere il punto di lettura: posizione della pagina, scorrimento interno dei testi lunghi,
+// sezioni aperte/chiuse e testo che si sta scrivendo (gli aggiornamenti automatici non devono mai riportarti in cima).
+function riempiConservando(el, contenuto) {
+  const tutti = () => [...el.querySelectorAll("*")];
+  const aperti = [...el.querySelectorAll("details")].map(d => d.open);
+  const scorrimenti = [];
+  tutti().forEach((n, i) => { if (n.scrollTop > 0) scorrimenti.push([i, n.scrollTop]); });
+  const valori = [];
+  tutti().forEach((n, i) => { if ((n.tagName === "TEXTAREA" || n.tagName === "INPUT" || n.tagName === "SELECT") && n.type !== "checkbox" && n.type !== "file") valori.push([i, n.value]); });
+  const attivo = document.activeElement && el.contains(document.activeElement) ? tutti().indexOf(document.activeElement) : -1;
+  const x = window.scrollX, y = window.scrollY, interno = el.scrollTop;
+  riempi(el, contenuto);
+  const dopo = tutti();
+  [...el.querySelectorAll("details")].forEach((d, i) => { if (i < aperti.length) d.open = aperti[i]; });
+  valori.forEach(([i, v]) => { const n = dopo[i]; if (n && n.tagName && ["TEXTAREA", "INPUT", "SELECT"].includes(n.tagName) && n.value !== v && v !== "") n.value = v; });
+  scorrimenti.forEach(([i, t]) => { if (dopo[i]) dopo[i].scrollTop = t; });
+  el.scrollTop = interno;
+  if (attivo >= 0 && dopo[attivo] && dopo[attivo].focus) dopo[attivo].focus({ preventScroll: true });
+  window.scrollTo(x, y);
+}
+
 function vistaGinnasio() {
   const msg = h("div"), destra = h("div");
+  const cacheAvanz = new Map();   // le schede di avanzamento restano le stesse tra un aggiornamento e l'altro
+  let ultimaFirma = null;
   const sinistra = h("div", {}, h("h3", { style: "margin-top:0" }, "Studio"), vistaStudi(), vistaBiblioteca());
   const NOMI = { 1: "Junior", 2: "Medium", 3: "Senior", 4: "Expert", 5: "Master" };
   const ORIGINI = { manuale: "tu", manager: "un manager", pm: "un project manager", lacuna: "lacuna rilevata", cerimoniere: "Cerimoniere" };
@@ -12,6 +35,9 @@ function vistaGinnasio() {
   const carica = async () => {
     try {
       const d = await api("GET", "/gestione/ginnasio"), im = d.impostazioni;
+      const firma = JSON.stringify(d);
+      if (firma === ultimaFirma && destra.firstChild) return;    // nulla di nuovo: non si ridisegna, cosi' non si perde il punto di lettura
+      ultimaFirma = firma;
       const perc = im.senza_limite ? 0 : Math.min(100, Math.round(100 * im.usati_oggi / im.budget));
       const budget = h("input", { type: "number", min: 0, step: 1000, value: im.budget, style: "width:120px" });
       const comp = h("input", { maxlength: 100, list: "elenco-competenze", placeholder: "Es. Project management" });
@@ -22,7 +48,7 @@ function vistaGinnasio() {
       const urg = h("select", {}, h("option", { value: 2 }, "Urgenza normale"), h("option", { value: 3 }, "Urgenza alta"), h("option", { value: 1 }, "Urgenza bassa"));
       const prog = h("select", {}, h("option", { value: "" }, "— nessun progetto —"), d.progetti.map(p => h("option", { value: p.id }, p.nome)));
       const azione = (f) => async () => { try { await f(); await carica(); } catch (e) { errore(e); } };
-      riempi(destra, [
+      riempiConservando(destra, [
         h("h3", { style: "margin-top:0" }, "Formazione"),
         h("div", { class: "carta" },
           h("div", { class: "nome" }, im.attivo ? "Formazione attiva" : "Formazione in pausa"),
@@ -64,7 +90,7 @@ function vistaGinnasio() {
               try { const r = await api("POST", "/gestione/ginnasio/richieste", { competenza: comp.value, livello: Number(liv.value), agente_id: ag.value ? Number(ag.value) : null, motivo: mot.value, progetto_id: prog.value ? Number(prog.value) : null, urgenza: Number(urg.value) });
                 comp.value = mot.value = ""; msg.replaceChildren(avviso(r.assegnata ? "La competenza esisteva già: assegnata subito." : r.unita ? "Unita a una richiesta già in coda." : "Messa in coda.", "ok")); await carica(); } catch (e) { errore(e); } } }, "Metti in coda"))),
         h("h4", {}, "Formazioni in corso e recenti"),
-        d.recenti.length ? d.recenti.map(x => avanzamento(x, carica, errore)) : h("p", { class: "sotto" }, "Nessuna formazione ancora."),
+        d.recenti.length ? d.recenti.map(x => avanzamento(x, carica, errore, cacheAvanz)) : h("p", { class: "sotto" }, "Nessuna formazione ancora."),
         h("h4", {}, "Competenze"),
         d.competenze.length ? d.competenze.map(c => schedaCompetenza(c, d, carica, errore)) : h("p", { class: "sotto" }, "Nessuna competenza ancora: nasce dalla prima formazione approvata."),
         h("h4", {}, "Livello di formazione degli agenti"),
@@ -121,13 +147,17 @@ const NOME_FASE = { ricerca: "1 · Ricerca e download", studio: "2 · Studio", s
 const ICONA_FASE = { finita: "✅", in_corso: "⏳", in_attesa: "⚪", saltata: "↪️", interrotta: "⛔" };
 
 // Avanzamento di una formazione: tappe, documenti scaricati, appunti e passaggi di Padre Casati
-function avanzamento(x, carica, errore) {
+function avanzamento(x, carica, errore, cache) {
+  if (cache && cache.has(x.id)) { const esistente = cache.get(x.id); esistente.aggiorna(x); return esistente; }
   const corpo = h("div", { class: "sotto" }, "Apri per vedere a che punto è.");
-  let timer = null, caricato = false;
+  let timer = null, caricato = false, firmaAv = null;
   const carica_ = async () => {
     try {
       const a = await api("GET", "/gestione/ginnasio/richieste/" + x.id + "/avanzamento");
-      riempi(corpo, [
+      const firma = JSON.stringify(a) + x.stato;
+      if (firma === firmaAv) return;                // nessuna novita': il testo che stai leggendo non si muove
+      firmaAv = firma;
+      riempiConservando(corpo, [
         h("div", { style: "display:flex;gap:10px;flex-wrap:wrap;margin:6px 0" }, a.fasi.map(f => h("div", { class: "carta", style: "padding:6px 10px;flex:1;min-width:140px" },
           h("div", {}, ICONA_FASE[f.stato] + " " + NOME_FASE[f.nome]), h("div", { class: "sotto" }, ({ finita: "finita", in_corso: "in corso…", in_attesa: "in attesa", saltata: "già fatta", interrotta: "interrotta" })[f.stato] + (f.token ? " · " + f.token.toLocaleString("it-IT") + " token" : "") + (f.durata_ms ? " · " + Math.round(f.durata_ms / 1000) + " s" : ""))))),
         a.errore ? h("div", { class: "sotto", style: "color:#c44" }, "Motivo: " + a.errore) : null,
@@ -143,6 +173,17 @@ function avanzamento(x, carica, errore) {
   };
   const det = h("details", { open: x.stato === "in_corso" || x.stato === "appunti_pronti", ontoggle: () => { if (det.open && !caricato) { caricato = true; carica_(); } } },
     h("summary", { style: "cursor:pointer;padding:4px 0" }, h("b", {}, x.competenza_nome + " · liv. " + x.livello), (x.agente ? " · " + x.agente : "") + " · " + STATO_FORMAZIONE[x.stato] + (x.token_usati ? " · " + x.token_usati.toLocaleString("it-IT") + " token" : "")), corpo);
-  if (det.open) { caricato = true; carica_(); if (x.stato === "in_corso") timer = setInterval(() => { if (!document.body.contains(det)) { clearInterval(timer); return; } carica_(); }, 6000); }
+  const avviaTimer = () => { if (!timer && x.stato === "in_corso") timer = setInterval(() => { if (!document.body.contains(det)) return; carica_(); }, 6000); };
+  const riepilogo = det.querySelector("summary");
+  det.aggiorna = (nuovo) => {
+    const prima = x.stato;
+    x = nuovo;
+    riepilogo.replaceChildren(h("b", {}, x.competenza_nome + " · liv. " + x.livello), (x.agente ? " · " + x.agente : "") + " · " + STATO_FORMAZIONE[x.stato] + (x.token_usati ? " · " + x.token_usati.toLocaleString("it-IT") + " token" : ""));
+    if (x.stato !== "in_corso" && timer) { clearInterval(timer); timer = null; }
+    if (x.stato === "in_corso") avviaTimer();
+    if (prima !== x.stato && det.open) carica_();
+  };
+  if (det.open) { caricato = true; carica_(); avviaTimer(); }
+  if (cache) cache.set(x.id, det);
   return det;
 }
