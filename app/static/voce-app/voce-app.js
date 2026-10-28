@@ -21,6 +21,7 @@ function esci() { try { localStorage.removeItem(CH); } catch (e) { /* ignora */ 
 const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const daB64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0));
 
+let ultimeDecisioni = [];
 async function api(percorso, opz = {}) {
   const intest = { "Content-Type": "application/json" };
   if (token) intest.Authorization = "Bearer " + token;
@@ -121,7 +122,7 @@ function disegnaHome(proponiPasskey) {
   log = h("div", { class: "log", role: "log" });
   const campo = h("input", { id: "cmd", placeholder: "Scrivi o parla: «briefing», «cerca Rossi»…", enterkeyhint: "send", "aria-label": "Comando" });
   const scorciatoie = [["Briefing", "briefing"], ["Le mie task", "task"], ["Ginnasio", "ginnasio"], ["Manager", "manager"],
-                       ["Nuova nota", "nota:"], ["Nuova email", "email"]];
+                       ["Decisioni", "decisioni"], ["Nuova nota", "nota:"], ["Nuova email", "email"]];
   radice.replaceChildren(
     h("div", { class: "riga sp" }, h("h1", {}, nome ? "Ciao " + nome : "Opifex Voce"), h("button", { onclick: esci, "aria-label": "Esci" }, "Esci")),
     h("button", { id: "mic", class: "mic", onclick: () => { if (ascoltando) fermaAscolto(); else { parla(""); ascolta((t) => { campo.value = t; esegui(t); }); } }, "aria-label": "Parla" }, "🎤"),
@@ -168,11 +169,22 @@ async function esegui(testo) {
       const r = await api("/v1/note", { metodo: "POST", corpo: { testo: m[2] } });
       return scrivi("ai", r.sintesi, true);
     }
+    if (/^(decisioni|da decidere|cosa devo approvare|posta)/.test(n)) {
+      const r = await api("/v1/decisioni"); ultimeDecisioni = r.decisioni;
+      return scrivi("ai", r.sintesi + (r.decisioni.length ? "\n" + r.decisioni.slice(0, 8).map((x) => x.n + ". " + x.titolo).join("\n") + "\nDi' «approva 1», «respingi 2» oppure «rispondi 3 sì»." : ""), true);
+    }
+    if ((m = testo.match(/^(approva|respingi|rifiuta|scarta|rispondi)\s+(\d+)\s*:?\s*(.*)$/is))) {
+      if (!ultimeDecisioni.length) { const r = await api("/v1/decisioni"); ultimeDecisioni = r.decisioni; }
+      const v = ultimeDecisioni.find((x) => x.n === Number(m[2]));
+      if (!v) return scrivi("ai", "Non trovo la decisione " + m[2] + ": di' «decisioni» per l'elenco.", true);
+      const az = /^appr/i.test(m[1]) ? "approva" : /^rispondi/i.test(m[1]) ? "rispondi" : "respingi";
+      return preparaAzione("decisione.prendi", { tipo: v.tipo, id: v.id, azione: az, testo: m[3] || undefined });
+    }
     if (/^(ginnasio|formazione)/.test(n)) { const r = await api("/v1/ginnasio"); return scrivi("ai", r.sintesi, true); }
     if (/^(manager|agenti|chi sono i manager)/.test(n)) { const r = await api("/v1/agenti"); return scrivi("ai", r.sintesi, true); }
     if (/^(email|mail|scrivi una mail|scrivi un'email|invia una mail)/.test(n)) return avviaEmail();
     if ((m = testo.match(/^(?:scrivi a|chiedi a|di a|dì a|di' a)\s+(\S+)\s+(.+)/i))) return scriviAManager(m[1], m[2]);
-    scrivi("ai", "Non ho capito. Prova: briefing, task, cerca Rossi, nota comprare latte, scrivi a Marco com'e' andata, crea task chiamare il commercialista, email.", true);
+    scrivi("ai", "Non ho capito. Prova: briefing, decisioni, task, cerca Rossi, nota comprare latte, documento per Aurora, scrivi a Marco com'e' andata, crea task chiamare il commercialista, email.", true);
   } catch (e) { scrivi("er", e.message); }
 }
 

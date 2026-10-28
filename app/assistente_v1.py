@@ -454,7 +454,30 @@ def _esegui_nota(conn, u: dict, p: dict) -> str:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
 
 
-AZIONI = {"nota.affida": (_prepara_nota, _esegui_nota, "Nota a un manager"), "email.invia": (_prepara_email, _esegui_email, "Invio email"), "task.crea": (_prepara_task, _esegui_task, "Nuova task")}
+def _prepara_decisione(conn, u: dict, p: dict) -> tuple[dict, str]:
+    from . import posta_decisioni as pd
+    n = p.get("n")
+    voci = pd.elenco(conn)
+    v = next((x for x in voci if (n and x["n"] == int(n)) or (not n and x["tipo"] == p.get("tipo") and x["id"] == p.get("id"))), None)
+    if v is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Decisione non trovata: chiedimi prima l'elenco delle decisioni")
+    azione = p.get("azione")
+    if azione not in v["azioni"]:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Qui puoi: " + ", ".join(v["azioni"]))
+    testo = str(p.get("testo") or "").strip() or None
+    if azione == "rispondi" and not testo:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Dimmi la risposta, per esempio: rispondi 1 sì")
+    verbo = {"approva": "Approvo", "respingi": "Respingo", "rispondi": "Rispondo"}[azione]
+    return ({"tipo": v["tipo"], "id": v["id"], "azione": azione, "testo": testo},
+            f"{verbo}: {v['titolo'][:200]}" + (f" — «{testo[:200]}»" if testo else "") + ". Confermi?")
+
+
+def _esegui_decisione(conn, u: dict, p: dict) -> str:
+    from . import posta_decisioni as pd
+    return pd.decidi(conn, u, p["tipo"], int(p["id"]), p["azione"], p.get("testo"))
+
+
+AZIONI = {"decisione.prendi": (_prepara_decisione, _esegui_decisione, "Decisione"), "nota.affida": (_prepara_nota, _esegui_nota, "Nota a un manager"), "email.invia": (_prepara_email, _esegui_email, "Invio email"), "task.crea": (_prepara_task, _esegui_task, "Nuova task")}
 
 
 class PreparaAzione(BaseModel):

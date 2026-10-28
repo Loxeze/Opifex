@@ -67,6 +67,7 @@ from .rotte_voce_el import router as router_voce_el
 from .assistente_v1 import router as router_assistente_v1
 from .rotte_preferenze import router as router_preferenze
 from .note_aurora import router as router_note_aurora
+from .posta_decisioni import router as router_posta_decisioni
 from .rotte_riepilogo import router as router_riepilogo
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
@@ -284,6 +285,7 @@ app.include_router(router_voce_el)
 app.include_router(router_assistente_v1)
 app.include_router(router_preferenze)
 app.include_router(router_note_aurora)
+app.include_router(router_posta_decisioni)
 app.include_router(router_riepilogo)
 
 
