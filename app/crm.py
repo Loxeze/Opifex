@@ -213,43 +213,121 @@ def _scegli_intestazioni(righe, massimo: int = 15):
     return migliore, buffer
 
 
-def _importa_righe(conn, lista_id: int, righe, origine: str) -> dict:
-    righe = iter(righe)
-    (punti, pos), buffer = _scegli_intestazioni(righe)
-    if pos is None or punti == 0:
-        prima = next((r for r in buffer if any(str(x).strip() for x in r)), [])
-        raise ErroreCrm("Non riconosco le colonne: servono nella riga delle intestazioni almeno «nome», «ente» o «email». "
-                        "Intestazioni trovate: " + (", ".join(str(x).strip() for x in prima if str(x).strip())[:300] or "nessuna"))
-    intestazioni = [str(x).strip().lower() for x in buffer[pos]]
-    col = {}
-    for chiave, nomi in SINONIMI.items():
-        for i, h in enumerate(intestazioni):
-            if h in nomi and chiave not in col:
-                col[chiave] = i
-    if not col.get("email") and not col.get("ente") and not col.get("nome"):
-        raise ErroreCrm("Non riconosco le colonne: servono almeno una tra «nome», «ente» ed «email». Intestazioni trovate: "
-                        + ", ".join(h for h in intestazioni if h)[:300])
-    usate = {i for i in col.values()}
-    ignorate = [h for i, h in enumerate(intestazioni) if h and i not in usate]
-    lista = conn.execute("SELECT natura FROM crm_liste WHERE id = %s", (lista_id,)).fetchone()
-    if lista is None:
-        raise ErroreCrm("Lista inesistente")
+CAMPI = [("nome", "Nome e cognome"), ("ente", "Ente / azienda"), ("email", "Email"), ("telefono", "Telefono"), ("tipo", "Tipo (es. comune, museo)"),
+         ("regione", "Regione"), ("provincia", "Provincia"), ("abitanti", "Abitanti"), ("dimensione", "Fascia di dimensione"), ("settore", "Settore"),
+         ("relazione", "Relazione"), ("ultimo_contatto", "Ultimo contatto"), ("consenso", "Consenso marketing"), ("note", "Note")]
+MODI_DOPPIONI = ("salta", "aggiorna", "importa")
+
+
+def _fogli_file(contenuto: bytes):
+    """Elenco di (origine, righe) per ogni foglio del file (CSV: uno solo)."""
+    if contenuto[:4] == b"\xd0\xcf\x11\xe0":
+        raise ErroreCrm("Questo e' un Excel vecchio (.xls): aprilo con Excel e salvalo come «Cartella di lavoro di Excel (.xlsx)» oppure come CSV, poi riprova")
+    if contenuto[:2] == b"PK":
+        fogli, leggi = _righe_xlsx(contenuto)
+        if not fogli:
+            raise ErroreCrm("Il file Excel non contiene fogli")
+        return [("Excel, foglio «" + (nome or "") + "»", (lambda p=percorso: leggi(p))) for nome, percorso in fogli]
+    origine, _ = _righe_csv(contenuto)
+    return [(origine, lambda: _righe_csv(contenuto)[1])]
+
+
+def _carica(contenuto: bytes, foglio: int | None = None, righe_max: int = MAX_RIGHE) -> dict:
+    """Legge il file: sceglie il foglio e la riga di intestazioni (o usa il foglio indicato) e propone l'abbinamento automatico delle colonne."""
     import itertools
-    dati = itertools.chain(buffer[pos + 1:], righe)
-    importati = doppioni = vuoti = 0
-    for n, riga in enumerate(dati):
-        if n >= MAX_RIGHE:
-            raise ErroreCrm(f"File troppo grande: al massimo {MAX_RIGHE} righe per importazione")
+    candidati = _fogli_file(contenuto)
+    scelta = None
+    for i, (origine, apri) in enumerate(candidati):
+        if foglio is not None and i != foglio:
+            continue
+        (punti, pos), buffer = _scegli_intestazioni(iter(apri()))
+        pieno = [n for n, r in enumerate(buffer) if any(str(x).strip() for x in r)]
+        if pos is None or punti == 0:
+            if foglio is None or not pieno:
+                scelta = scelta or (0, i, origine, apri, None, buffer, pieno)
+                continue
+            pos = pieno[0]
+        cand = (punti, i, origine, apri, pos, buffer, pieno)
+        if scelta is None or scelta[4] is None or punti > scelta[0]:
+            scelta = cand
+        if foglio is None and punti > 0:
+            break
+    if scelta is None:
+        raise ErroreCrm("Il file non contiene dati")
+    punti, i, origine, apri, pos, buffer, pieno = scelta
+    if pos is None:
+        if not pieno:
+            raise ErroreCrm("Il file non contiene dati")
+        pos = pieno[0]           # nessuna intestazione nota: si parte dalla prima riga piena e l'abbinamento lo fa l'utente
+    intestazioni = [str(x).strip() for x in buffer[pos]]
+    righe = []
+    for n, riga in enumerate(itertools.islice(iter(apri()), pos + 1, None)):
+        if n >= righe_max:
+            raise ErroreCrm(f"File troppo grande: al massimo {righe_max} righe per importazione")
+        righe.append(riga)
+    nomi = [h.lower() for h in intestazioni]
+    mappa = {}
+    for chiave, sin in SINONIMI.items():
+        for k, h in enumerate(nomi):
+            if h in sin and chiave not in mappa:
+                mappa[chiave] = k
+    return {"origine": origine, "foglio": i, "fogli": [c[0] for c in candidati], "intestazioni": intestazioni, "righe": righe, "mappa": mappa, "riconosciute": punti > 0}
+
+
+def anteprima(contenuto: bytes, foglio: int | None = None) -> dict:
+    """Primo passo dell'importazione guidata: intestazioni, prime righe e abbinamento proposto. Non scrive nulla."""
+    d = _carica(contenuto, foglio)
+    return {"origine": d["origine"], "foglio": d["foglio"], "fogli": d["fogli"], "intestazioni": d["intestazioni"], "righe_totali": len(d["righe"]),
+            "esempio": [[str(x).strip()[:80] for x in r] for r in d["righe"][:5]], "mappa": d["mappa"], "riconosciute": d["riconosciute"],
+            "campi": [{"chiave": k, "etichetta": e} for k, e in CAMPI]}
+
+
+def _importa_righe(conn, lista_id: int, d: dict, mappa: dict | None = None, doppioni: str = "salta", controlla_in: str = "lista", simula: bool = False) -> dict:
+    col = {k: int(v) for k, v in (mappa if mappa is not None else d["mappa"]).items() if v is not None and v != "" and k in dict(CAMPI)}
+    if not col.get("email") and not col.get("ente") and not col.get("nome"):
+        prima = [h for h in d["intestazioni"] if h]
+        raise ErroreCrm("Non riconosco le colonne: servono almeno una tra «nome», «ente» ed «email». Intestazioni trovate: " + ", ".join(prima)[:300])
+    if doppioni not in MODI_DOPPIONI:
+        raise ErroreCrm("Modo di gestione dei doppioni non valido")
+    usate = set(col.values())
+    ignorate = [h for i, h in enumerate(d["intestazioni"]) if h and i not in usate]
+    if conn.execute("SELECT 1 FROM crm_liste WHERE id = %s", (lista_id,)).fetchone() is None:
+        raise ErroreCrm("Lista inesistente")
+    importati = doppioni_n = aggiornati = vuoti = 0
+    visti: set[str] = set()
+    saltate: list[dict] = []
+    for n, riga in enumerate(d["righe"], start=1):
         g = lambda k: (str(riga[col[k]]).strip() if k in col and col[k] < len(riga) and riga[col[k]] is not None else "")
         if not any(g(k) for k in ("email", "ente", "nome")):
             vuoti += 1
             continue
-        tipo = (g("tipo") or "altro").lower()[:60]
         email = g("email")
         eh = hash_email(email) if email else None
-        if eh and conn.execute("SELECT 1 FROM crm_contatti WHERE lista_id = %s AND email_hash = %s", (lista_id, eh)).fetchone():
-            doppioni += 1
+        esistente = None
+        if eh:
+            if eh in visti:
+                esistente = {"id": None}
+            else:
+                esistente = conn.execute("SELECT id, nome_cifrato, ente_cifrato, telefono_cifrato, regione, provincia, settore FROM crm_contatti WHERE email_hash = %s"
+                                         + (" AND lista_id = %s" if controlla_in == "lista" else "") + " LIMIT 1",
+                                         (eh, lista_id) if controlla_in == "lista" else (eh,)).fetchone()
+            visti.add(eh)
+        if esistente is not None and doppioni != "importa":
+            if doppioni == "aggiorna" and esistente["id"] is not None:
+                if not simula:
+                    conn.execute("""UPDATE crm_contatti SET nome_cifrato = COALESCE(nome_cifrato, %s), ente_cifrato = COALESCE(ente_cifrato, %s), telefono_cifrato = COALESCE(telefono_cifrato, %s),
+                                           regione = COALESCE(regione, %s), provincia = COALESCE(provincia, %s), settore = COALESCE(settore, %s) WHERE id = %s""",
+                                 (_c(g("nome")), _c(g("ente")), _c(g("telefono")), g("regione")[:60].title() or None, g("provincia")[:60].upper() or None, g("settore")[:80] or None, esistente["id"]))
+                aggiornati += 1
+            else:
+                doppioni_n += 1
+            if len(saltate) < 20:
+                saltate.append({"riga": n, "motivo": "doppione", "valore": email})
             continue
+        importati += 1
+        if simula:
+            continue
+        tipo = (g("tipo") or "altro").lower()[:60]
         conn.execute(
             """INSERT INTO crm_contatti (lista_id, tipo, regione, provincia, fascia_dimensione, settore, relazione, ultimo_contatto, consenso_marketing,
                    nome_cifrato, ente_cifrato, email_cifrata, telefono_cifrato, note_cifrate, email_hash)
@@ -257,32 +335,20 @@ def _importa_righe(conn, lista_id: int, righe, origine: str) -> dict:
             (lista_id, tipo, g("regione")[:60].title() or None, g("provincia")[:60].upper() or None,
              g("dimensione")[:60] or _fascia(g("abitanti"), tipo), g("settore")[:80] or None, (g("relazione") or "nessuna").lower()[:40],
              _data(g("ultimo_contatto")), _vero(g("consenso")),
-             _c(g("nome")), _c(g("ente")), _c(email), _c(g("telefono")), _c(g("note")), eh))
-        importati += 1
-    return {"importati": importati, "doppioni": doppioni, "righe_vuote": vuoti, "origine": origine,
-            "colonne_riconosciute": sorted(col), "colonne_ignorate": ignorate[:30]}
+             _c(g("nome")), _c(g("ente")), _c(email), _c(g("telefono")), _c(g("note")), eh if doppioni != "importa" or not eh else None))
+    return {"importati": importati, "doppioni": doppioni_n, "aggiornati": aggiornati, "righe_vuote": vuoti, "origine": d["origine"], "simulazione": simula,
+            "colonne_riconosciute": sorted(col), "colonne_ignorate": ignorate[:30], "saltate": saltate}
 
 
-def importa_file(conn, lista_id: int, contenuto: bytes, nome: str = "") -> dict:
+def importa_file(conn, lista_id: int, contenuto: bytes, nome: str = "", mappa: dict | None = None, doppioni: str = "salta",
+                 controlla_in: str = "lista", simula: bool = False, foglio: int | None = None) -> dict:
     """Importa un file di contatti: CSV (virgola, punto e virgola o tabulazione; UTF-8 o Latin-1) oppure Excel .xlsx.
-    Con piu' fogli usa il primo che contiene intestazioni riconoscibili. Colonne riconosciute per nome (vedi SINONIMI)."""
-    if contenuto[:4] == b"\xd0\xcf\x11\xe0":
-        raise ErroreCrm("Questo e' un Excel vecchio (.xls): aprilo con Excel e salvalo come «Cartella di lavoro di Excel (.xlsx)» oppure come CSV, poi riprova")
-    if contenuto[:2] == b"PK":
-        fogli, leggi = _righe_xlsx(contenuto)
-        if not fogli:
-            raise ErroreCrm("Il file Excel non contiene fogli")
-        ultimo = None
-        for nome_foglio, percorso in fogli:
-            try:
-                return _importa_righe(conn, lista_id, leggi(percorso), "Excel, foglio «" + (nome_foglio or "") + "»")
-            except ErroreCrm as e:
-                ultimo = e
-                if "Non riconosco le colonne" not in str(e):
-                    raise
-        raise ultimo
-    origine, righe = _righe_csv(contenuto)
-    return _importa_righe(conn, lista_id, righe, origine)
+    Senza mappa usa l'abbinamento automatico delle colonne (vedi SINONIMI); con la mappa scelta dall'utente nel passaggio guidato usa quella."""
+    d = _carica(contenuto, foglio)
+    if mappa is None and not d["riconosciute"]:
+        prima = ", ".join(h for h in d["intestazioni"] if h)[:300]
+        raise ErroreCrm("Non riconosco le colonne: servono nella riga delle intestazioni almeno «nome», «ente» o «email». Intestazioni trovate: " + (prima or "nessuna"))
+    return _importa_righe(conn, lista_id, d, mappa, doppioni, controlla_in, simula)
 
 
 def importa_csv(conn, lista_id: int, contenuto: bytes) -> dict:

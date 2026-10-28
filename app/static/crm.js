@@ -2,16 +2,23 @@
 // Contatti (CRM): liste, importazione CSV, riepilogo aggregato e ricerca. I dati personali sono cifrati sul server; gli agenti vedono solo conteggi.
 
 function vistaCrm() {
-  const TAB = [["schede", "Contatti"], ["ricontattare", "Da ricontattare"], ["pipeline", "Opportunità"], ["campi", "Campi e categorie"], ["liste", "Liste e importazione"]];
-  if (!stato.crmTab) stato.crmTab = "schede";
+  const TAB = [["cruscotto", "Cruscotto"], ["schede", "Contatti"], ["ricontattare", "Da ricontattare"], ["pipeline", "Opportunità"], ["campi", "Campi e categorie"], ["liste", "Liste"]];
+  if (!stato.crmTab) stato.crmTab = "cruscotto";
   const corpo = h("div");
-  const tabs = h("div", { class: "azioni", style: "margin-bottom:12px" }, TAB.map(([id, nome]) => h("button", { class: stato.crmTab === id ? "p" : "s", onclick: () => { stato.crmTab = id; disegna(); } }, nome)));
-  if (stato.crmTab === "schede") corpo.append(...[].concat(crmSchede("")));
+  const tabs = h("div", { class: "azioni", style: "margin-bottom:12px;align-items:center" }, TAB.map(([id, nome]) => h("button", { class: stato.crmTab === id ? "p" : "s", onclick: () => { stato.crmTab = id; disegna(); } }, nome)));
+  const importa = h("div");
+  const pulsanteImporta = h("button", { class: "p", style: "margin-left:auto", onclick: () => {
+    if (importa.firstChild) { importa.replaceChildren(); return; }
+    importa.replaceChildren(importazioneGuidata(() => importa.replaceChildren()));
+  } }, "⬆ Importa contatti");
+  tabs.append(pulsanteImporta);
+  if (stato.crmTab === "cruscotto") corpo.append(...[].concat(crmCruscotto()));
+  else if (stato.crmTab === "schede") corpo.append(...[].concat(crmSchede("")));
   else if (stato.crmTab === "ricontattare") corpo.append(...[].concat(crmSchede("da_ricontattare")));
-  else if (stato.crmTab === "pipeline") corpo.append(...[].concat(crmPipeline()));
+  else if (stato.crmTab === "pipeline") corpo.append(...[].concat(crmBacheca()));
   else if (stato.crmTab === "campi") corpo.append(...[].concat(campiPersonalizzati()));
   else corpo.append(...[].concat(crmListe()));
-  return [h("h2", {}, "CRM"), tabs, corpo];
+  return [h("h2", {}, "CRM"), tabs, importa, corpo];
 }
 
 function crmListe() {

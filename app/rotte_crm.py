@@ -1,5 +1,7 @@
 """Contatti (CRM): liste, importazione da CSV o Excel, riepilogo aggregato e ricerca. Solo titolare. Gli agenti non passano da qui: usano solo i conteggi."""
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+import json
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from . import cassaforte, crm, registro
@@ -38,19 +40,42 @@ def crea(d: NuovaLista, u: dict = Depends(solo_titolare)):
     return {"id": r["id"]}
 
 
-@router.post("/liste/{lid}/importa")
-def importa(lid: int, file: UploadFile = File(...), u: dict = Depends(solo_titolare)):
+def _leggi_file(file: UploadFile) -> bytes:
     dati = file.file.read(MAX_BYTE + 1)
     if len(dati) > MAX_BYTE:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File troppo grande (massimo 25 MB)")
+    return dati
+
+
+@router.post("/importa/anteprima")
+def anteprima(file: UploadFile = File(...), foglio: int | None = Form(default=None), u: dict = Depends(solo_titolare)):
+    """Importazione guidata, passo 1: cosa c'e' nel file e come propongo di abbinare le colonne. Non scrive nulla."""
+    try:
+        return crm.anteprima(_leggi_file(file), foglio)
+    except crm.ErroreCrm as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
+
+
+@router.post("/liste/{lid}/importa")
+def importa(lid: int, file: UploadFile = File(...), mappa: str | None = Form(default=None), doppioni: str = Form(default="salta"),
+            controlla_in: str = Form(default="lista"), simula: bool = Form(default=False), foglio: int | None = Form(default=None),
+            u: dict = Depends(solo_titolare)):
+    dati = _leggi_file(file)
+    try:
+        m = json.loads(mappa) if mappa else None
+        if m is not None and not isinstance(m, dict):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Abbinamento delle colonne non valido") from None
     with connessione() as conn:
         try:
-            esito = crm.importa_file(conn, lid, dati, file.filename or "")
+            esito = crm.importa_file(conn, lid, dati, file.filename or "", m, doppioni, "tutte" if controlla_in == "tutte" else "lista", simula, foglio)
         except crm.ErroreCrm as e:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
         except cassaforte.CassaforteNonConfigurata as e:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from None
-        registro.registra(conn, u, "collegamento", "Contatti importati", f"lista {lid}", "crm_lista", lid, dettagli=esito)
+        if not simula:
+            registro.registra(conn, u, "collegamento", "Contatti importati", f"lista {lid}", "crm_lista", lid, dettagli={k: v for k, v in esito.items() if k != "saltate"})
     return esito
 
 

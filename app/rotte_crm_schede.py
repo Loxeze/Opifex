@@ -4,7 +4,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from . import cassaforte, crm_modello, crm_schede as cs, registro
+from . import cassaforte, crm_dashboard, crm_modello, crm_schede as cs, registro
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -197,5 +197,14 @@ def pipeline(u: dict = Depends(solo_titolare)):
     with connessione() as conn:
         try:
             return cs.pipeline(conn, u["id"])
+        except cassaforte.CassaforteNonConfigurata as e:
+            raise _err(e) from None
+
+
+@router.get("/dashboard")
+def cruscotto(u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            return crm_dashboard.cruscotto(conn, u["id"])
         except cassaforte.CassaforteNonConfigurata as e:
             raise _err(e) from None
