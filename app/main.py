@@ -71,6 +71,7 @@ from .posta_decisioni import router as router_posta_decisioni
 from .miglioramento import router as router_miglioramento
 from .dipendenze import router as router_dipendenze
 from .scheda_impresa import router as router_impresa
+from .tavoli import router as router_tavoli
 from .rotte_riepilogo import router as router_riepilogo
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
@@ -294,6 +295,7 @@ app.include_router(router_posta_decisioni)
 app.include_router(router_miglioramento)
 app.include_router(router_dipendenze)
 app.include_router(router_impresa)
+app.include_router(router_tavoli)
 app.include_router(router_riepilogo)
 
 
