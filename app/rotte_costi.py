@@ -10,9 +10,9 @@ router = APIRouter()
 
 
 @router.get("/gestione/costi")
-def quadro(giorni: int = 14, _: dict = Depends(solo_titolare)):
+def quadro(giorni: int = 14, fornitori: bool = True, _: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        q = costi.quadro(conn, giorni)
+        q = costi.quadro(conn, giorni, con_fornitori=fornitori)
         q["testo"] = costi.testo(q)
         return q
 
