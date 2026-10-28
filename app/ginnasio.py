@@ -24,7 +24,6 @@ STIMA_TOKEN = {1: 60000, 2: 80000, 3: 100000, 4: 125000, 5: 150000}   # ricerca 
 MAX_TOKEN_RICERCA = 2500
 MAX_TOKEN_STUDIO = 4500
 MAX_TOKEN_ESECUZIONE = {1: 5000, 2: 6000, 3: 7000, 4: 8000, 5: 8000}   # la stesura finale
-MAX_RICHIESTE_SETTIMANA = 3
 MAX_TENTATIVI = 2
 GIORNI_VERIFICA = 180
 MAX_CORPO = 20000
@@ -109,11 +108,6 @@ def richiedi(conn, competenza: str, livello: int, *, agente_id=None, motivo: str
             raise ErroreGinnasio(f"Serve prima il livello {livello - 1} ({LIVELLI[livello - 1]}) di «{nome}»")
     elif livello > 1:
         raise ErroreGinnasio(f"La competenza «{nome}» non esiste ancora: si parte dal livello 1 (Junior)")
-    if da_agente_id:
-        n = conn.execute("SELECT count(*) AS n FROM richieste_formazione WHERE richiesta_da_agente_id = %s AND stato <> 'annullata' AND creata_il > NOW() - interval '7 days'",
-                         (da_agente_id,)).fetchone()["n"]
-        if n >= MAX_RICHIESTE_SETTIMANA:
-            raise ErroreGinnasio(f"Hai gia' fatto {MAX_RICHIESTE_SETTIMANA} richieste di formazione negli ultimi 7 giorni")
     dup = conn.execute("""SELECT id FROM richieste_formazione WHERE stato IN ('in_coda','in_corso','da_approvare') AND lower(competenza_nome) = lower(%s) AND livello = %s
                           AND agente_id IS NOT DISTINCT FROM %s""", (nome, livello, agente_id)).fetchone()
     if dup:
@@ -188,9 +182,14 @@ def usati_oggi(conn) -> int:
 
 
 def stato_generale(conn) -> dict:
-    budget = int(impostazione(conn, "ginnasio_budget_giornaliero", "30000") or 30000)
+    # budget 0 = nessun tetto: la formazione procede senza limite giornaliero di token
+    try:
+        budget = max(0, int(impostazione(conn, "ginnasio_budget_giornaliero", "0") or 0))
+    except ValueError:
+        budget = 0
     usati = usati_oggi(conn)
-    return {"attivo": impostazione(conn, "ginnasio_attivo", "0") == "1", "pausa_studio": impostazione(conn, "ginnasio_pausa_studio", "1") == "1", "budget": budget, "usati_oggi": usati, "residuo": max(0, budget - usati),
+    senza_limite = budget == 0
+    return {"senza_limite": senza_limite, "attivo": impostazione(conn, "ginnasio_attivo", "0") == "1", "pausa_studio": impostazione(conn, "ginnasio_pausa_studio", "1") == "1", "budget": budget, "usati_oggi": usati, "residuo": (10**12 if senza_limite else max(0, budget - usati)),
             "in_corso": conn.execute("SELECT count(*) AS n FROM richieste_formazione WHERE stato = 'in_corso'").fetchone()["n"]}
 
 
@@ -518,7 +517,7 @@ STRUMENTI = [
     {"name": "formazione_richiedi",
      "description": "Chiedi che un agente (o tu) venga formato su una competenza, quando nel lavoro vedi una lacuna concreta. Indica competenza, livello (1 Junior, 2 Medium, 3 Senior, 4 Expert, 5 Master), "
                     "motivo concreto (quale lacuna, in quale progetto) e urgenza 1-3. La richiesta entra in coda e Padre Casati la elabora secondo la graduatoria e il budget giornaliero. "
-                    "Non puoi chiedere piu' di tre richieste a settimana.",
+                    "Non c'e' un numero massimo di richieste: chiedi quello che serve davvero, con un motivo concreto.",
      "input_schema": {"type": "object", "properties": {"competenza": {"type": "string"}, "livello": {"type": "integer"}, "agente": {"type": "string", "description": "Nome dell'agente da formare (omesso: solo la libreria)"},
                                                        "motivo": {"type": "string"}, "progetto": {"type": "string"}, "urgenza": {"type": "integer"}}, "required": ["competenza", "livello", "motivo"]}},
 ]

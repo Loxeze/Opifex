@@ -13,7 +13,7 @@ function vistaCrm() {
   } }, "⬆ Importa contatti");
   tabs.append(pulsanteImporta);
   if (stato.crmTab === "cruscotto") corpo.append(...[].concat(crmCruscotto()));
-  else if (stato.crmTab === "schede") corpo.append(...[].concat(crmSchede("")));
+  else if (stato.crmTab === "schede") corpo.append(...[].concat(crmContatti()));
   else if (stato.crmTab === "ricontattare") corpo.append(...[].concat(crmSchede("da_ricontattare")));
   else if (stato.crmTab === "pipeline") corpo.append(...[].concat(crmBacheca()));
   else if (stato.crmTab === "campi") corpo.append(...[].concat(campiPersonalizzati()));

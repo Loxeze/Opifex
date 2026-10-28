@@ -12,8 +12,8 @@ function vistaGinnasio() {
   const carica = async () => {
     try {
       const d = await api("GET", "/gestione/ginnasio"), im = d.impostazioni;
-      const perc = Math.min(100, Math.round(100 * im.usati_oggi / im.budget));
-      const budget = h("input", { type: "number", min: 1000, step: 1000, value: im.budget, style: "width:120px" });
+      const perc = im.senza_limite ? 0 : Math.min(100, Math.round(100 * im.usati_oggi / im.budget));
+      const budget = h("input", { type: "number", min: 0, step: 1000, value: im.budget, style: "width:120px" });
       const comp = h("input", { maxlength: 100, list: "elenco-competenze", placeholder: "Es. Project management" });
       const dl = h("datalist", { id: "elenco-competenze" }, d.competenze.map(c => h("option", { value: c.nome })));
       const liv = h("select", {}, livelloOpz());
@@ -27,8 +27,8 @@ function vistaGinnasio() {
         h("div", { class: "carta" },
           h("div", { class: "nome" }, im.attivo ? "Formazione attiva" : "Formazione in pausa"),
           h("div", { style: "margin:8px 0 4px;height:8px;border-radius:99px;background:var(--bordo);overflow:hidden" }, h("div", { style: "height:100%;width:" + perc + "%;background:linear-gradient(90deg,#f3b54a,#e58bd0)" })),
-          h("div", { class: "sotto" }, "Oggi " + im.usati_oggi.toLocaleString("it-IT") + " token su " + im.budget.toLocaleString("it-IT") + (im.in_corso ? " · una formazione è in corso…" : "")),
-          h("div", { class: "riga" }, h("label", { style: "flex:0 0 auto" }, "Budget giornaliero (token)", budget),
+          h("div", { class: "sotto" }, "Oggi " + im.usati_oggi.toLocaleString("it-IT") + " token" + (im.senza_limite ? " · nessun tetto giornaliero" : " su " + im.budget.toLocaleString("it-IT")) + (im.in_corso ? " · una formazione è in corso…" : "")),
+          h("div", { class: "riga" }, h("label", { style: "flex:0 0 auto" }, "Budget giornaliero (token, 0 = senza tetto)", budget),
             h("button", { class: "s", style: "align-self:flex-end", onclick: azione(() => api("PUT", "/gestione/ginnasio/impostazioni", { budget: Number(budget.value) })) }, "Salva budget"),
             h("button", { class: im.attivo ? "s" : "p", style: "align-self:flex-end", onclick: azione(() => api("PUT", "/gestione/ginnasio/impostazioni", { attivo: !im.attivo })) }, im.attivo ? "Metti in pausa" : "Attiva la formazione")),
           h("label", { style: "display:flex;gap:8px;align-items:center;margin-top:6px" }, h("input", { type: "checkbox", checked: im.pausa_studio, onchange: azione(() => api("PUT", "/gestione/ginnasio/impostazioni", { pausa_studio: !im.pausa_studio })) }),

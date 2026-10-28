@@ -1,10 +1,10 @@
 """CRM: schede dei contatti, interazioni, opportunita', pipeline e promemoria. Solo titolare."""
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
-from . import cassaforte, crm_dashboard, crm_modello, crm_schede as cs, registro
+from . import cassaforte, crm_dashboard, crm_modello, crm_segmenti, crm_schede as cs, registro
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -208,3 +208,75 @@ def cruscotto(u: dict = Depends(solo_titolare)):
             return crm_dashboard.cruscotto(conn, u["id"])
         except cassaforte.CassaforteNonConfigurata as e:
             raise _err(e) from None
+
+
+# ---- segmenti (liste intelligenti) e ricerca con filtri
+class Filtri(BaseModel):
+    filtri: dict = Field(default_factory=dict)
+    pagina: int = Field(default=1, ge=1, le=10000)
+    per_pagina: int = Field(default=50, ge=1, le=200)
+
+
+def _seg(e: Exception):
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) if isinstance(e, crm_segmenti.ErroreSegmento) else _err(e)
+
+
+@router.post("/contatti/cerca")
+def cerca_filtrata(d: Filtri, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            return crm_segmenti.elenco(conn, d.filtri, d.pagina, d.per_pagina, u["id"])
+        except (crm_segmenti.ErroreSegmento, cassaforte.CassaforteNonConfigurata) as e:
+            raise _seg(e) from None
+
+
+@router.get("/filtri/valori")
+def valori_filtri(u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return crm_segmenti.valori(conn)
+
+
+@router.post("/contatti/esporta")
+def esporta(d: Filtri, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            testo = crm_segmenti.esporta_csv(conn, d.filtri, u["id"])
+        except (crm_segmenti.ErroreSegmento, cassaforte.CassaforteNonConfigurata) as e:
+            raise _seg(e) from None
+        registro.registra(conn, u, "collegamento", "Contatti CRM esportati", f"{testo.count(chr(10)) - 1} righe", "crm_contatto", None)
+    return Response(content="\ufeff" + testo, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="contatti-crm.csv"'})
+
+
+class NuovoSegmento(BaseModel):
+    nome: str = Field(min_length=2, max_length=80)
+    filtri: dict = Field(default_factory=dict)
+
+
+@router.get("/segmenti")
+def segmenti(u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            return {"segmenti": crm_segmenti.elenco_segmenti(conn)}
+        except cassaforte.CassaforteNonConfigurata as e:
+            raise _err(e) from None
+
+
+@router.post("/segmenti", status_code=201)
+def nuovo_segmento(d: NuovoSegmento, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            i = crm_segmenti.salva_segmento(conn, d.nome, d.filtri, u["id"])
+        except crm_segmenti.ErroreSegmento as e:
+            raise _seg(e) from None
+        registro.registra(conn, u, "collegamento", "Segmento CRM creato", d.nome[:80], "crm_segmento", i)
+    return {"id": i}
+
+
+@router.delete("/segmenti/{sid}")
+def elimina_segmento(sid: int, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        r = conn.execute("DELETE FROM crm_segmenti WHERE id = %s RETURNING nome", (sid,)).fetchone()
+        if r is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Segmento inesistente")
+        registro.registra(conn, u, "collegamento", "Segmento CRM eliminato", r["nome"], "crm_segmento", sid)
+    return {"ok": True}

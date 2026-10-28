@@ -37,7 +37,7 @@ def stato(_: dict = Depends(solo_titolare)):
 class Impostazioni(BaseModel):
     attivo: bool | None = None
     pausa_studio: bool | None = None
-    budget: int | None = Field(default=None, ge=1000, le=2000000)
+    budget: int | None = Field(default=None, ge=0, le=100_000_000_000)   # 0 = senza tetto
 
 
 @router.put("/impostazioni")

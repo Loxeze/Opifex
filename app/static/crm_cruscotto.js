@@ -51,7 +51,7 @@ function crmBacheca() {
     catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
   const carica = () => api("GET", "/gestione/crm/pipeline").then(d => {
-    riempi(corpo, [h("p", { class: "aiuto" }, "Trascina le opportunità da una colonna all'altra per cambiare fase, oppure usa il menu su ogni scheda. Si creano dalla scheda di ogni contatto. Aperte e chiuse negli ultimi 60 giorni."), msg,
+    riempi(corpo, [nuovaOpportunitaDaBacheca(carica), h("p", { class: "aiuto" }, "Trascina le opportunità da una colonna all'altra per cambiare fase, oppure usa il menu su ogni scheda. Si creano dalla scheda di ogni contatto. Aperte e chiuse negli ultimi 60 giorni."), msg,
       h("div", { class: "bacheca" }, Object.keys(STATI_OPP).map(s => {
         const col = h("div", { class: "bacheca-col stato-" + s, ondragover: (e) => { e.preventDefault(); col.classList.add("sopra"); }, ondragleave: () => col.classList.remove("sopra"),
           ondrop: (e) => { e.preventDefault(); col.classList.remove("sopra"); const id = Number(e.dataTransfer.getData("text/plain")); if (id) sposta(id, s); } },

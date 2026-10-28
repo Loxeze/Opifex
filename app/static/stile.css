@@ -295,3 +295,6 @@ header{padding-top:max(12px,env(safe-area-inset-top))}
 .crm-importa{margin-bottom:12px;border-color:var(--primario)}
 table.anteprima{border-collapse:collapse;font-size:12px}table.anteprima th,table.anteprima td{border:1px solid var(--bordo);padding:3px 6px;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis;text-align:left}
 @media (max-width:700px){.imbuto-riga{grid-template-columns:80px minmax(0,1fr)}.imbuto-dati{grid-column:1/-1;text-align:left}.bacheca-col{flex-basis:80vw}}
+.casella{display:inline-flex;align-items:center;gap:4px;font-size:13px;cursor:pointer}
+.casella input{width:auto;margin:0}
+.chip-segmento{display:inline-flex;gap:2px}.chip-segmento button:first-child{border-top-right-radius:0;border-bottom-right-radius:0}.chip-segmento button:last-child{border-top-left-radius:0;border-bottom-left-radius:0;padding-left:8px;padding-right:8px}
