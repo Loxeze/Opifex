@@ -50,7 +50,7 @@ class DatiAgente(BaseModel):
     modello: str
     istruzioni: str = Field(min_length=1, max_length=16000)
     fascia_dati_max: str = "pubblico"
-    max_token_risposta: int = Field(default=8000, ge=100, le=16000)
+    max_token_risposta: int = Field(default=16000, ge=100, le=64000)
     budget_token_mensile: int | None = Field(default=None, gt=0)
     accesso_web: bool = True
     siti_consentiti: list[str] = []
@@ -79,9 +79,10 @@ class ModificaAgente(BaseModel):
     livello: str | None = None
     sentinella: bool | None = None
     modello: str | None = None
-    istruzioni: str | None = Field(default=None, min_length=1, max_length=16000)
+    istruzioni: str | None = Field(default=None, min_length=1, max_length=200000)
     fascia_dati_max: str | None = None
-    max_token_risposta: int | None = Field(default=None, ge=100, le=16000)
+    max_token_risposta: int | None = Field(default=None, ge=100, le=64000)
+    sforzo: str | None = Field(default=None, pattern="^(low|medium|high|)$")
     budget_token_mensile: int | None = Field(default=None, gt=0)
     accesso_web: bool | None = None
     siti_consentiti: list[str] | None = None
@@ -153,7 +154,7 @@ QUERY_AGENTI = """
 SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divisione, a.superiore_id,
        a.sentinella,
        CASE WHEN a.sentinella THEN 'sentinella' WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' ELSE a.livello END AS categoria,
-       a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.budget_token_mensile,
+       a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.sforzo, a.budget_token_mensile,
        a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.rimanda_a, a.crm_attivo, a.canva_attivo, ETICHETTA_SQL AS etichetta,
        COALESCE((SELECT json_agg(json_build_object('titolo', f.titolo, 'istruzioni', f.istruzioni, 'approvazione', f.approvazione,
                                                     'parere_superiore', f.parere_superiore) ORDER BY f.posizione)
@@ -243,6 +244,8 @@ def modifica(agente_id: int, d: ModificaAgente, utente: dict = Depends(solo_tito
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Nessuna modifica")
     if campi.get("siti_consentiti") is not None:
         campi["siti_consentiti"] = _pulisci_siti(campi["siti_consentiti"])
+    if "sforzo" in campi:
+        campi["sforzo"] = campi["sforzo"] or None
     with connessione() as conn:
         attuale = conn.execute("SELECT divisione_id, superiore_id, livello, sentinella FROM agenti WHERE id = %s", (agente_id,)).fetchone()
         if attuale is None:

@@ -47,6 +47,8 @@ function extraAgente(r) {
     comp.length ? h("div", { class: "skills" }, mostrate.map(c => h("div", { class: "skill" }, h("span", { class: "skill-nome", title: c.nome }, c.nome), pallini(c.livello))),
       comp.length > 3 ? h("div", { class: "sotto" }, "e altre " + (comp.length - 3)) : null) : h("div", { class: "sotto" }, "Nessuna competenza assegnata."),
     h("div", { class: "sotto" }, formaz),
+    h("div", { class: "sotto" }, [(r.esempi || 0) + " esempi di lavoro eccellente", (r.revisioni_30g || 0) + " revisioni in 30 giorni",
+      r.copertura && r.copertura.sottoposti ? "lavoro assegnato a " + r.copertura.con_lavoro + " di " + r.copertura.sottoposti + " sottoposti (7 giorni)" : null].filter(Boolean).join(" · ")),
     h("div", { class: "extra-titolo" }, "Token nel mese", h("span", { class: "extra-dx" }, _fmtTok(r.token_mese) + (perc !== null ? " · " + perc + "% del budget" : ""))),
     r.token_mese > 0 ? graficoSpesa(r.token_giorni || [], r.__giorniMese || 30, r.budget) : h("div", { class: "sotto" }, "Nessun token speso finora."));
 }

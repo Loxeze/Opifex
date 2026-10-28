@@ -47,7 +47,7 @@ with TestClient(app) as c:
     with connessione() as cn:
         cs = {x["nome"] for x in dialoghi.colleghi(cn, ID["Scout"])}
         cm = {x["nome"] for x in dialoghi.colleghi(cn, ID["Marco"])}
-    ok("Scout parla solo con il suo superiore (Marco)", cs == {"Marco"}, str(cs))
+    ok("Scout parla con il suo superiore (Marco) e con gli agenti speciali", cs == {"Marco", "Padre Casati", "Cerimoniere", "Maestro di chiavi"}, str(cs))
     ok("Marco parla con superiore, subordinati e altri manager, non con Leo", {"Aurora", "Scout", "Valutatrice", "Scadenze", "Giulia", "Dario", "Elena"} <= cm and "Leo" not in cm, str(cm))
     ag = c.get("/gestione/agenti", headers=H).json()
     ok("gli agenti espongono modello_dialogo e dialoghi_attivi (manager acceso, operativi spenti di default)", all(a["modello_dialogo"] is None for a in ag) and {a["nome"]: a["dialoghi_attivi"] for a in ag}["Scout"] is False and {a["nome"]: a["dialoghi_attivi"] for a in ag}["Marco"] is True)
@@ -69,7 +69,7 @@ with TestClient(app) as c:
     ok("i messaggi alternano Marco e Scout", [m["da"] for m in d["messaggi"]] == ["Marco", "Scout", "Marco"])
     ok("usato il modello ECONOMICO per i dialoghi, non il modello di lavoro (opus) di Marco", all(x["modello"] == "claude-haiku-5-5" for x in chiamate_dialogo), str([x["modello"] for x in chiamate_dialogo]))
     ok("le regole di chiarezza sono nel prompt dei dialoghi", "NON indovinare" in chiamate_dialogo[0]["istruzioni"] and "Sei Marco" in chiamate_dialogo[0]["istruzioni"])
-    ok("il tetto di token dei dialoghi e' basso (700)", all(x["max_token"] == 700 for x in chiamate_dialogo))
+    ok("il tetto di token dei dialoghi e' ampio (16000)", all(x["max_token"] == 16000 for x in chiamate_dialogo))
     ok("i costi dei dialoghi sono marcati 'dialogo'", sql("SELECT count(*) FROM costi_api WHERE tipo='dialogo'")[0][0] == 3)
     c.put(f"/gestione/agenti/{ID['Scout']}", headers=H, json={"modello_dialogo": "claude-sonnet-5-5"})
     chiamate_dialogo.clear(); risposte[:] = ["a", "b [CHIARITO]"]
@@ -95,6 +95,7 @@ with TestClient(app) as c:
                   chiama("chiedi_a_agente", {"destinatario": "Marco", "domanda": "Grazie. E l'importo minimo?"}, "c"),
                   chiama("chiedi_a_agente", {"destinatario": "Marco", "domanda": "Una quarta domanda"}, "d"),
                   fine("Ora ho chiaro cosa cercare.")]
+    sql("UPDATE impostazioni_sistema SET valore='3' WHERE chiave='dialoghi_max_domande'")
     ricevuti.clear(); chiamate_dialogo.clear()
     risposte[:] = ["Per Logos, con scadenza oltre 30 giorni. Spiego: cosi' hai il tempo di preparare la domanda.", "Importo minimo 20000 euro."]
     r = c.post(f"/agenti/{ID['Scout']}/chat", headers=H, json={"messaggio": "Cerca bandi sui borghi", "fascia_dati": "pubblico"})

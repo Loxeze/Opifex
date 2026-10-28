@@ -92,7 +92,7 @@ with TestClient(app) as c:
     ok("bozza: riletta dopo la chiusura della pagina", r["bozza"] == "Cosa pensi di" and r["fascia"] == "interno")
     ok("bozza segnalata nell'elenco", [x for x in c.get("/chat/conversazioni", headers=H).json() if x["nome"] == "Dario"][0]["ha_bozza"] is True)
     ok("bozza: fascia non valida rifiutata", c.put(f"/chat/conversazioni/{dario}/bozza", headers=H, json={"testo": "x", "fascia": "boh"}).status_code == 422)
-    ok("bozza: troppo lunga rifiutata", c.put(f"/chat/conversazioni/{dario}/bozza", headers=H, json={"testo": "x" * 20001}).status_code == 422)
+    ok("bozza: oltre un milione di caratteri rifiutata", c.put(f"/chat/conversazioni/{dario}/bozza", headers=H, json={"testo": "x" * 1000001}).status_code == 422)
     c.put(f"/chat/conversazioni/{dario}/bozza", headers=H, json={"testo": "   "})
     ok("bozza vuota = cancellata", c.get(f"/chat/conversazioni/{dario}", headers=H).json()["bozza"] == "" and sql("SELECT count(*) FROM chat_bozze")[0][0] == 0)
     # bozza in una chat nuova: compare nell'elenco anche senza messaggi

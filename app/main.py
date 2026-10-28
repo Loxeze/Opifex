@@ -126,11 +126,12 @@ def _passo(nome: str, f):
 async def _manutenzione():
     """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Ogni passo e' isolato dagli altri."""
     import asyncio
-    from . import allarmi, aurora, backup, cerimoniere, competenze_base, custode, crm_schede, ginnasio, plaud, proposte_sentinelle, prova_ripristino, sintesi_memoria, studio
+    from . import allarmi, qualita, aurora, backup, cerimoniere, competenze_base, custode, crm_schede, ginnasio, plaud, proposte_sentinelle, prova_ripristino, sintesi_memoria, studio
 
     def giro():
         _passo("backup", lambda c: backup.esegui(c) if backup.da_fare(c) else None)
         _passo("backup dei siti (Maestro di chiavi)", lambda c: custode.esegui_notturno(c) if custode.da_fare(c) else None)
+        _passo("revisore qualita' e controllori", lambda c: qualita.applica(c))
         _passo("competenze di base degli agenti", lambda c: competenze_base.applica(c) if competenze_base.da_fare(c) else None)
         _passo("allarmi", allarmi.controlla)
         _passo("elenco agenti (Cerimoniere)", lambda c: cerimoniere.aggiorna_elenco(c) if cerimoniere.da_fare(c) else None)

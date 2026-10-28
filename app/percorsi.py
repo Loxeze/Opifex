@@ -10,7 +10,7 @@ from .db import connessione
 from .esecuzione import EsecuzioneBloccata, esegui_agente
 
 SINCRONO = False          # nei collaudi si esegue nello stesso thread
-MAX_TESTO_PRECEDENTE = 10000
+MAX_TESTO_PRECEDENTE = 400000
 TOKEN_MINIMI_FASE = 4000
 
 

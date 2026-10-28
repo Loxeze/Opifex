@@ -33,6 +33,16 @@ def riepilogo(_: dict = Depends(solo_titolare)):
             a = agenti.get(r["agente_id"])
             if a and 1 <= r["g"] <= oggi:
                 a["token_giorni"][r["g"] - 1] += int(r["tok"]); a["token_mese"] += int(r["tok"])
+        for r in conn.execute("SELECT agente_id, count(*) AS n FROM esempi_eccellenti GROUP BY 1").fetchall():
+            if r["agente_id"] in agenti:
+                agenti[r["agente_id"]]["esempi"] = r["n"]
+        for r in conn.execute("SELECT agente_id, count(*) AS n FROM revisioni_incrociate WHERE creata_il > NOW() - interval '30 days' GROUP BY 1").fetchall():
+            if r["agente_id"] in agenti:
+                agenti[r["agente_id"]]["revisioni_30g"] = r["n"]
+        from . import qualita
+        for r in conn.execute("SELECT DISTINCT superiore_id FROM agenti WHERE superiore_id IS NOT NULL AND attivo").fetchall():
+            if r["superiore_id"] in agenti:
+                agenti[r["superiore_id"]]["copertura"] = qualita.copertura(conn, r["superiore_id"])
         for a in agenti.values():
             a["n_competenze"] = len(a["competenze"])
             a["livello_medio"] = round(sum(c["livello"] for c in a["competenze"]) / len(a["competenze"]), 1) if a["competenze"] else 0

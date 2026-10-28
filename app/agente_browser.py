@@ -187,7 +187,7 @@ def _ripulisci(messaggi: list) -> list:
     return out
 
 
-MAX_CONTINUAZIONI = 3
+MAX_CONTINUAZIONI = 8
 CONTINUA = "La tua risposta e' stata interrotta dal limite di lunghezza. Continua esattamente dal punto in cui ti sei fermato, senza ripetere nulla e senza premesse."
 
 URL_COMPAT = {"openai": ("https://api.openai.com/v1/chat/completions", "OpenAI"), "xai": ("https://api.x.ai/v1/chat/completions", "xAI")}

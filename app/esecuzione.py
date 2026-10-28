@@ -8,6 +8,7 @@ import json
 import time
 
 from .db import connessione
+from . import fornitori, qualita
 from .fornitori import ErroreFornitore, Risposta, chiama_modello
 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
@@ -38,7 +39,7 @@ def _carica_agente(conn, agente_id: int) -> dict:
         """
         SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.tipo, a.fascia_dati_max, a.attivo,
                a.modello AS modello_richiesto,
-               a.max_token_risposta, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.crm_attivo, a.canva_attivo, a.ruolo_speciale, a.usa_biblioteca, a.sandbox_attivo, a.controllore_id, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
+               a.max_token_risposta, a.sforzo, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.crm_attivo, a.canva_attivo, a.ruolo_speciale, a.usa_biblioteca, a.sandbox_attivo, a.controllore_id, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
                m.id AS modello_id, m.nome AS modello_nome,
                m.costo_input_per_milione, m.costo_output_per_milione,
                f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
@@ -88,7 +89,13 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
     t0 = time.monotonic()
     eventi.registra(agente_id, "inizio", " ".join(str(messaggio or "").split())[:150], richiesta_id=richiesta)
     try:
-        out = _esegui_agente_interno(agente_id, messaggio, fascia_dati, utente_id, memorizza, max_token, allegati)
+        with connessione() as _c:
+            _r = _c.execute("SELECT sforzo FROM agenti WHERE id = %s", (agente_id,)).fetchone()
+        tk_s = fornitori.SFORZO.set(_r["sforzo"] if _r else None)
+        try:
+            out = _esegui_agente_interno(agente_id, messaggio, fascia_dati, utente_id, memorizza, max_token, allegati)
+        finally:
+            fornitori.SFORZO.reset(tk_s)
     except Exception as e:  # noqa: BLE001 - si registra e si rilancia: il comportamento non cambia
         eventi.registra(agente_id, "errore", f"{type(e).__name__}: {str(e)[:200]}", richiesta_id=richiesta, durata_ms=int((time.monotonic() - t0) * 1000))
         raise
@@ -108,7 +115,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         t_inizio = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
         a = _carica_agente(conn, agente_id)
 
-        a["istruzioni"] = a["istruzioni"] + richieste.REGOLA + vademecum.blocco(conn) + percorsi_blocco(conn, agente_id)
+        a["istruzioni"] = a["istruzioni"] + richieste.REGOLA + vademecum.blocco(conn) + percorsi_blocco(conn, agente_id) + qualita.blocco(conn, agente_id)
         if max_token:
             a["max_token_risposta"] = max_token
         if not a["attivo"]:

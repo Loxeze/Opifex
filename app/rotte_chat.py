@@ -9,7 +9,7 @@ from .db import connessione
 from .permessi import divisioni_visibili, utente_corrente
 
 router = APIRouter()
-MAX_BOZZA = 20_000
+MAX_BOZZA = 1_000_000
 
 
 def _agente_ok(conn, agente_id: int, utente: dict):

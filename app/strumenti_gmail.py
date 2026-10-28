@@ -10,7 +10,7 @@ import httpx
 from .google import ErroreGoogle, token_accesso
 
 _API = "https://gmail.googleapis.com/gmail/v1/users/me"
-MAX_TESTO = 8000
+MAX_TESTO = 200000
 
 STRUMENTI = [
     {"name": "gmail_cerca", "description": "Cerca email nella casella affidata a te (stessa sintassi di Gmail, es. 'is:unread', 'from:comune.it newer_than:7d'). Restituisce id, mittente, oggetto, data, anteprima.",

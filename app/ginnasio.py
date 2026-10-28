@@ -533,8 +533,39 @@ STRUMENTI = [
      "input_schema": {"type": "object", "properties": {"competenza": {"type": "string"}, "livello": {"type": "integer"}, "agente": {"type": "string", "description": "Nome dell'agente da formare (omesso: solo la libreria)"},
                                                        "motivo": {"type": "string"}, "progetto": {"type": "string"}, "urgenza": {"type": "integer"}}, "required": ["competenza", "livello", "motivo"]}},
 ]
+STRUMENTO_REGISTRO = {"name": "registro_competenze",
+                      "description": "Il registro di tutte le competenze: per ogni agente (o solo per quello indicato, o per i sottoposti di un manager) competenze con livello 1-5 e stato delle formazioni (concluse, in corso, in coda). "
+                                     "E' lo stesso archivio del Ginnasio: non esiste un altro registro e non serve cercarne l'ID.",
+                      "input_schema": {"type": "object", "properties": {"agente": {"type": "string", "description": "Nome di un agente o di un manager (di lui si mostrano i sottoposti); omesso: tutti"}}}}
+
+
+STRUMENTI.append(STRUMENTO_REGISTRO)
+
+
+def registro_testo(conn, filtro: str | None = None) -> str:
+    righe = conn.execute("SELECT id, nome, ruolo, livello, superiore_id FROM agenti WHERE attivo AND NOT sentinella AND ruolo_speciale IS NULL ORDER BY nome").fetchall()
+    f = (filtro or "").strip().lower()
+    if f:
+        sel = [a for a in righe if a["nome"].lower() == f]
+        if sel:
+            sott = [a for a in righe if a["superiore_id"] == sel[0]["id"]]
+            righe = sott or sel
+        else:
+            righe = [a for a in righe if f in a["nome"].lower()]
+        if not righe:
+            return "ERRORE: nessun agente corrisponde (usa il nome esatto)"
+    out = [f"Registro competenze ({len(righe)} agenti). Archivio del Ginnasio, livelli 1 Junior - 5 Master:"]
+    for a in righe:
+        comp = competenze_agente(conn, a["id"])
+        fo = conn.execute("""SELECT count(*) FILTER (WHERE stato = 'conclusa') AS c, count(*) FILTER (WHERE stato IN ('in_corso','da_approvare')) AS i, count(*) FILTER (WHERE stato = 'in_coda') AS q
+                             FROM richieste_formazione WHERE agente_id = %s""", (a["id"],)).fetchone()
+        cs = ", ".join(f"{c['nome']} L{c['livello']}" for c in comp) or "nessuna"
+        out.append(f"- {a['nome']} ({a['ruolo'] or a['livello']}): {cs} | formazioni: {fo['c']} concluse, {fo['i']} in corso, {fo['q']} in coda")
+    return "\n".join(out)
+
+
 AVVISO = ("\n\nFORMAZIONE: se nel lavoro vedi che a te o a un agente manca una competenza, chiedila con formazione_richiedi (motivo concreto, progetto, livello): niente richieste generiche. "
-          "Le competenze che hai le leggi con competenza_leggi.")
+          "Le competenze che hai le leggi con competenza_leggi; il quadro di tutti (livelli e formazioni) lo leggi con registro_competenze: e' il registro, non esiste altro.")
 
 
 def gestore(connessione_, agente_id: int):
@@ -547,6 +578,8 @@ def gestore(connessione_, agente_id: int):
                     if not mie:
                         return "ERRORE: non hai questa competenza. Le tue: " + (", ".join(c["nome"] for c in competenze_agente(conn, agente_id)) or "nessuna")
                     return testo_competenza(conn, mie[0]["id"], mie[0]["livello"])
+                if nome == "registro_competenze":
+                    return registro_testo(conn, dati.get("agente"))
                 if nome == "formazione_richiedi":
                     target = None
                     if str(dati.get("agente") or "").strip():

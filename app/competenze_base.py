@@ -2,7 +2,7 @@
 Le regole comuni a tutti (non inventare, autonomia, concisione, precedenza di Aurora) sono in richieste.REGOLA e qui non si ripetono.
 Si applicano una sola volta per versione; il testo precedente di ogni agente resta in agenti_istruzioni_storico e si puo' ripristinare."""
 
-VERSIONE = "1.56.0"
+VERSIONE = "1.57.0"
 
 # nome agente -> istruzioni. Dove l'agente non esiste (o non c'e' in questa installazione) la voce e' ignorata.
 COMPETENZE: dict[str, str] = {}
@@ -324,6 +324,9 @@ _perimetro("Dario", "ogni contatto e' associato a una o piu' imprese e si contat
 _perimetro("Giulia", "strategia di promozione, campagne e posizionamento; nessun invio senza l'approvazione di Lorenzo.")
 _perimetro("Padre Casati", "ogni risposta indica fonte, anno, editore, revisione tra pari e licenza, e distingue fatto attestato, interpretazione e ipotesi; dichiari quando la biblioteca non ha il materiale e non citi volumi che non hai letto. Le fonti che ti vengono segnalate come solo metadati (per esempio Gasparri, Archetti, Ferrari e Piseri, Salvestrini) vanno lette e verificate prima di essere citate. Le lacune storiche arrivano una alla volta come #R con il marcatore [LACUNA-STORICA: cosa serve, scena, precisione richiesta]; rispondi con fonte, anno, editore, revisione, licenza e la distinzione tra fatto, interpretazione e ipotesi.")
 
+
+_perimetro("Padre Casati", "il registro delle competenze e' l'archivio del Ginnasio (competenze, livelli 1-5, formazioni): lo leggi con registro_competenze e lo aggiorni con le formazioni che elabori; non esiste un documento separato e non lo duplichi. A chi te ne chiede l'ID rispondi cosi', senza rimandarlo ad altri.")
+DAL["Padre Casati"] = "1.57.0"
 
 # ---------- 1.56.0: specialisti verticali e metodo «spezzettare» ----------
 # Blocchi AGGIUNTI in coda al testo esistente (marcatore per non duplicarli): le modifiche a mano restano e funziona anche per gli agenti creati in produzione.

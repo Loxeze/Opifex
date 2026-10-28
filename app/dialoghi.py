@@ -35,7 +35,7 @@ Italiano."""
 REGOLE = REGOLE_BREVI
 
 
-MAX_TOKEN_DIALOGO = 6000
+MAX_TOKEN_DIALOGO = 16000   # nessun tetto pratico: prompt e consegne tra agenti restano interi (la brevita' si chiede nelle regole, non si impone col taglio)
 
 
 class DialogoBloccato(Exception):
@@ -209,7 +209,7 @@ def _risposta_speciale(conn, dest: dict, da_id: int, conv_id: int, domanda: str,
     from .esecuzione import EsecuzioneBloccata, esegui_agente
     chi = conn.execute("SELECT nome, ruolo FROM agenti WHERE id = %s", (da_id,)).fetchone()
     try:
-        r = esegui_agente(dest["id"], (PRIORITA_AURORA if e_aurora(conn, da_id) else "") + f"Domanda del collega {chi['nome']} ({chi['ruolo']}):\n{domanda}", fascia, utente_id, max_token=8000)
+        r = esegui_agente(dest["id"], (PRIORITA_AURORA if e_aurora(conn, da_id) else "") + f"Domanda del collega {chi['nome']} ({chi['ruolo']}):\n{domanda}", fascia, utente_id, max_token=16000)
     except EsecuzioneBloccata as e:
         raise DialogoBloccato(str(e)) from None
     _salva_messaggio(conn, conv_id, dest["id"], da_id, r["risposta"])

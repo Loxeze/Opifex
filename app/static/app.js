@@ -203,7 +203,7 @@ function sezioneProva(a) {
 function modulo(a) {
   const nuovo = a === null;
   const d = a || { nome: "", ruolo: "", divisione_id: null, superiore_id: null, livello: "operativo",
-    modello: stato.opzioni.modelli[0]?.nome, istruzioni: "", fascia_dati_max: "pubblico", max_token_risposta: 8000,
+    modello: stato.opzioni.modelli[0]?.nome, istruzioni: "", fascia_dati_max: "pubblico", max_token_risposta: 16000,
     budget_token_mensile: null, accesso_web: true, siti_consentiti: [], max_ricerche: 3, attivo: true, connessioni: [], aziende: [] };
 
   const nome = h("input", { type: "text", value: d.nome, maxlength: 60 });
@@ -223,7 +223,8 @@ function modulo(a) {
   modello.value = d.modello;
   const fascia = h("select", {}, Object.entries({ pubblico: "Solo dati pubblici", interno: "Dati pubblici e interni", riservato: "Tutti i dati (anche riservati)" }).map(([v, t]) => h("option", { value: v }, t)));
   fascia.value = d.fascia_dati_max;
-  const tetto = h("input", { type: "number", min: 100, max: 16000, value: d.max_token_risposta });
+  const tetto = h("input", { type: "number", min: 100, max: 64000, value: d.max_token_risposta });
+  const sforzo = h("select", {}, [["", "Predefinito del modello"], ["low", "Basso"], ["medium", "Medio"], ["high", "Alto"]].map(([v, t]) => h("option", { value: v }, t))); sforzo.value = d.sforzo || "";
   const budget = h("input", { type: "number", min: 1, value: d.budget_token_mensile ?? "", placeholder: "Nessun limite" });
   const web = h("input", { type: "checkbox" }); web.checked = d.accesso_web;
   const siti = h("textarea", { style: "min-height:80px", placeholder: "esempio.it\nbandi.regione.it" });
@@ -285,7 +286,7 @@ function modulo(a) {
       nome: nome.value.trim(), ruolo: ruolo.value.trim(), rimanda_a: rimanda.value.trim() || null, istruzioni: istr.value.trim(),
       divisione_id: livello.value === "sentinella" ? null : (div.value ? Number(div.value) : null), superiore_id: livello.value === "sentinella" ? null : (sup.value ? Number(sup.value) : null),
       livello: livello.value === "sentinella" ? "manager" : livello.value, sentinella: livello.value === "sentinella", modello: modello.value, fascia_dati_max: fascia.value,
-      max_token_risposta: Number(tetto.value), budget_token_mensile: budget.value ? Number(budget.value) : null,
+      max_token_risposta: Number(tetto.value), sforzo: sforzo.value, budget_token_mensile: budget.value ? Number(budget.value) : null,
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,
       fasi: fasi.filter(f => f.titolo.trim()).map(f => ({ ...f, titolo: f.titolo.trim() })),
@@ -375,6 +376,7 @@ function modulo(a) {
           h("label", {}, "Dati che può ricevere", h("p", { class: "aiuto" }, "Anche se qui scegli un livello alto, i dati escono verso un fornitore solo se il fornitore ha le garanzie attive."), fascia),
           h("div", { class: "riga" },
             h("label", {}, "Lunghezza massima risposta (token)", tetto),
+            h("label", {}, "Sforzo di ragionamento (modelli Claude)", sforzo),
             h("label", {}, "Budget mensile (token)", budget)),
           nuovo ? null : sezioneProva(a)]],
         ["Strumenti", [      h("h3", {}, "Dialoghi con gli altri agenti"),

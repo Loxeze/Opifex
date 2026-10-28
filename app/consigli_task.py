@@ -5,8 +5,8 @@ import threading
 from .db import connessione
 
 SINCRONO = False   # nei collaudi si esegue nello stesso thread
-MAX_DOC = 12000    # caratteri per documento mandati al manager
-MAX_TOT = 30000
+MAX_DOC = 400000    # caratteri per documento mandati al manager
+MAX_TOT = 1500000
 
 
 def _prepara(conn, tid: int):

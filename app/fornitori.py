@@ -43,13 +43,23 @@ PAUSE_RIPROVA = (2, 6, 15)          # secondi tra un tentativo e l'altro
 CODICI_TRANSITORI = {408, 409, 425, 429, 500, 502, 503, 504, 529}   # sovraccarico o guasto momentaneo del fornitore
 
 
+import contextvars
+SFORZO = contextvars.ContextVar("sforzo_agente", default=None)   # 'low' | 'medium' | 'high': sforzo di ragionamento dell'agente in esecuzione (solo modelli Anthropic)
+
+
 def invia(url: str, intestazioni: dict, corpo: dict, timeout: int = 180):
     """POST al fornitore con nuovi tentativi per gli errori momentanei (sovraccarico, limite di richieste, rete lenta).
     Senza questo un singolo 529 o un timeout fermava l'agente. Gli errori definitivi (chiave, richiesta sbagliata) passano subito."""
     ultimo = ""
+    sforzo = SFORZO.get()
+    if sforzo and "api.anthropic.com/v1/messages" in url and "output_config" not in corpo:
+        corpo = {**corpo, "output_config": {"effort": sforzo}}
     for n in range(len(PAUSE_RIPROVA) + 1):
         try:
             r = httpx.post(url, headers=intestazioni, json=corpo, timeout=timeout)
+            if r.status_code == 400 and "output_config" in corpo and "output_config" in r.text:
+                corpo = {k: v for k, v in corpo.items() if k != "output_config"}   # modello senza sforzo: si riprova senza
+                r = httpx.post(url, headers=intestazioni, json=corpo, timeout=timeout)
         except httpx.HTTPError as e:   # timeout, rete interrotta, DNS
             ultimo = type(e).__name__
             r = None

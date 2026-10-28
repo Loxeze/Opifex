@@ -36,7 +36,7 @@ def passa(conn, da_id: int, dati: dict) -> tuple[str, int | None]:
     materiale = str(dati.get("materiale") or "").strip()[:MAX_MATERIALE]
     if len(titolo) < 5 or len(materiale) < 20:
         raise ErroreConsegna("Servono un titolo (almeno 5 caratteri) e il materiale (almeno 20 caratteri)")
-    motivo = str(dati.get("motivo") or "").strip()[:600] or None
+    motivo = str(dati.get("motivo") or "").strip()or None
     scad = str(dati.get("scadenza") or "").strip() or None
     if scad:
         try:
@@ -90,14 +90,14 @@ def _elabora(cid: int, prof: int):
                         "Rispondi con una decisione chiara in massimo 8 righe: cosa farai e perche'. Qualsiasi azione verso l'esterno resta soggetta all'approvazione di Lorenzo.")
             conn.commit()
         try:
-            r = esegui_agente(c["a_agente_id"], prompt, "interno", None, max_token=1800)
+            r = esegui_agente(c["a_agente_id"], prompt, "interno", None, max_token=16000)
             stato, testo = "elaborata", r["risposta"]
         except Exception as e:  # noqa: BLE001 - l'esito va comunque scritto nella task
             stato, testo = "errore", "Elaborazione non riuscita: " + str(e)[:200]
         with connessione() as conn:
-            conn.execute("UPDATE consegne SET stato = %s, esito = %s WHERE id = %s", (stato, testo[:4000], cid))
+            conn.execute("UPDATE consegne SET stato = %s, esito = %s WHERE id = %s", (stato, testo, cid))
             if c["task_id"]:
-                conn.execute("INSERT INTO task_commenti (task_id, agente_id, testo) VALUES (%s,%s,%s)", (c["task_id"], c["a_agente_id"], testo[:4000]))
+                conn.execute("INSERT INTO task_commenti (task_id, agente_id, testo) VALUES (%s,%s,%s)", (c["task_id"], c["a_agente_id"], testo))
                 if stato == "elaborata":
                     conn.execute("UPDATE task SET stato = 'in_corso', aggiornata_il = NOW() WHERE id = %s AND stato = 'da_fare'", (c["task_id"],))
     finally:

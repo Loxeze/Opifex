@@ -278,6 +278,9 @@ def valuta(conn, da_id: int, dati: dict) -> str:
         conn.execute("DELETE FROM valutazioni WHERE da_agente_id = %s AND oggetto = 'task' AND oggetto_id = %s", (da_id, oggetto_id))
     conn.execute("INSERT INTO valutazioni (agente_id, da_agente_id, oggetto, oggetto_id, voto, nota, progetto_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
                  (a["id"], da_id, "task" if oggetto_id else "altro", oggetto_id, voto, nota or None, pid))
+    if voto == 1 and oggetto_id:
+        from . import qualita
+        qualita.salva_esempio(conn, a["id"], oggetto_id)
     if voto == -1:
         from . import memoria_lavoro
         chi = conn.execute("SELECT nome FROM agenti WHERE id = %s", (da_id,)).fetchone()["nome"]
@@ -337,6 +340,9 @@ def organico(conn, manager_id: int) -> str:
         aff = f"{round(st['tasso_approvazione'] * 100)}% su {st['casi']} casi" if st["tasso_approvazione"] is not None else "n.d."
         cs = ", ".join(f"{c['nome']} L{c['livello']}" for c in comp[:6]) or "nessuna competenza registrata"
         out.append(f"- {a['nome']} — {a['ruolo'] or '—'} | competenze: {cs} | task aperte: {aperte} | affidabilita': {aff}")
+    from . import qualita
+    cop = qualita.copertura(conn, manager_id)
+    out.append(f"Ultimi 7 giorni: hai assegnato task a {cop['con_lavoro']} di {cop['sottoposti']} sottoposti." + (" Nessun lavoro assegnato a: " + ", ".join(cop["senza_lavoro"]) + ": coinvolgili nel prossimo compito." if cop["senza_lavoro"] else " Lavorano tutti."))
     return "\n".join(out)
 
 

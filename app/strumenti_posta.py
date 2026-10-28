@@ -13,7 +13,7 @@ from email.message import EmailMessage
 
 from . import cassaforte
 
-MAX_TESTO = 8000
+MAX_TESTO = 200000
 IMAP_TIMEOUT = 20
 
 STRUMENTI = [
