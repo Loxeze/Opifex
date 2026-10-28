@@ -112,9 +112,29 @@ function vistaImpostazioni() {
   const mappa = { profilo: vistaAccount, struttura: vistaStruttura, collegamenti: () => [vistaCollegamenti(), h("hr"), vistaEmail()].flat(Infinity), iniziative: vistaIniziative, connessioni: vistaConnessioni, canali: vistaCanali, percorsi: vistaPercorsi, social: vistaSocial,
     utenti: vistaUtenti, aggiornamenti: vistaAggiornamenti, sicurezza: vistaSicurezza, registro: vistaRegistro, sistema: vistaSistema, memoria: vistaMemoria, sentinelle: vistaSentinelle, misure: vistaMisure, siti: vistaSiti, dossier: vistaDossier, biblioteca: vistaBiblioteca, studi: vistaStudi, cerimoniere: vistaCerimoniere, quando: vistaQuando, smistamento: vistaSmistamento, reparti: vistaReparti, sandbox: vistaSandbox, voce: vistaVoce, app: vistaApp, salute: vistaSalute };
   if (!mappa[stato.sezione]) stato.sezione = "profilo";
+  const nomeSez = (id) => (SEZIONI_IMPOSTAZIONI.find(x => x[0] === id) || [])[1] || id;
+  const noti = new Set(GRUPPI_IMP.flatMap(g => g[1]));
+  const gruppi = GRUPPI_IMP.concat([["Altro", SEZIONI_IMPOSTAZIONI.map(x => x[0]).filter(id => !noti.has(id))]]).map(([t, ids]) => [t, ids.filter(id => mappa[id])]).filter(g => g[1].length);
+  const cerca = h("input", { type: "search", class: "cerca-imp", placeholder: "Cerca nelle impostazioni…", "aria-label": "Cerca nelle impostazioni" });
+  const nav = h("nav", { class: "menu-imp", "aria-label": "Sezioni delle impostazioni" });
+  const disegnaNav = () => {
+    const q = cerca.value.trim().toLowerCase();
+    riempi(nav, gruppi.map(([titolo, ids]) => {
+      const vis = ids.filter(id => !q || (nomeSez(id) + " " + titolo).toLowerCase().includes(q));
+      if (!vis.length) return null;
+      const det = h("details", { class: "gruppo-imp" }, h("summary", {}, titolo),
+        vis.map(id => h("button", { class: stato.sezione === id ? "attivo" : "", "aria-current": stato.sezione === id ? "page" : null, onclick: () => vai("impostazioni", id) }, nomeSez(id))));
+      det.open = !!q || ids.includes(stato.sezione);
+      return det;
+    }));
+    if (!nav.children.length) nav.append(h("p", { class: "sotto" }, "Nessuna voce trovata."));
+  };
+  cerca.addEventListener("input", disegnaNav);
+  disegnaNav();
+  const scelta = h("select", { class: "imp-select", "aria-label": "Sezione delle impostazioni", onchange: (e) => vai("impostazioni", e.target.value) },
+    gruppi.map(([t, ids]) => h("optgroup", { label: t }, ids.map(id => { const o = h("option", { value: id }, nomeSez(id)); if (id === stato.sezione) o.selected = true; return o; }))));
   return h("div", { class: "impostazioni" },
-    h("nav", { class: "menu-imp", "aria-label": "Sezioni delle impostazioni" }, SEZIONI_IMPOSTAZIONI.map(([id, nome]) =>
-      h("button", { class: stato.sezione === id ? "attivo" : "", onclick: () => vai("impostazioni", id) }, nome))),
+    h("div", { class: "menu-imp-box" }, cerca, scelta, nav),
     h("div", { class: "contenuto-imp" }, [mappa[stato.sezione]()].flat(Infinity)));
 }
 

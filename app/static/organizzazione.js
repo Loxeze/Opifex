@@ -1,5 +1,5 @@
 "use strict";
-// Organigramma 3D (canvas, nessuna libreria esterna) e gestione di aziende e dipartimenti.
+// Organigramma 3D a sfera (canvas, nessuna libreria esterna) e gestione di aziende e dipartimenti.
 // I dati arrivano dall'API: nessun testo viene inserito come HTML.
 
 const COL_STATO = { sereno: "#3fd3c0", pressione: "#f3b54a", difficolta: "#e8795a" };
@@ -46,7 +46,11 @@ function calcolaLayout(dati) {   // piani per azienda
   const piani = [];
   if (trasv) piani.push({ id: 0, nome: "Trasversali", colore: "#94a3b8" });
   aziendeAttive.forEach(z => piani.push({ id: z.id, nome: z.nome, colore: z.colore || "#f3b54a" }));
+  // Sfera: ogni azienda e' una fascia di latitudine, ogni livello gerarchico un guscio concentrico attorno a Lorenzo
+  const LAT = 1.0;
   piani.forEach((pi, k) => { pi.y = (k - (piani.length - 1) / 2) * gap; });
+  const latDiY = (y) => piani.length > 1 ? y / (((piani.length - 1) / 2) * gap) * LAT : 0;
+  piani.forEach((pi) => { pi.lat = latDiY(pi.y); });
   // Distribuzione: per ogni piano e per ogni livello i soggetti stanno su un anello, a distanza uguale tra loro.
   // Il raggio dell'anello cresce quando i soggetti sono tanti (in ogni piano) e, se sono molti, si alternano un po' dentro e un po' fuori.
   // chi sta alla stessa altezza (stesso piano, o tra gli stessi piani) divide lo stesso anello
@@ -57,13 +61,16 @@ function calcolaLayout(dati) {   // piani per azienda
   };
   const gruppi = new Map();
   for (const n of nodi) if (!n.centro && !n.esterno && !sottoSent.has(n)) { const k = pianoDi(n) + "|" + n.depth; if (!gruppi.has(k)) gruppi.set(k, []); gruppi.get(k).push(n); }
-  const maxPer = {};
-  for (const l of gruppi.values()) maxPer[l[0].depth] = Math.max(maxPer[l[0].depth] || 0, l.length);
+  const maxPer = {}, maxEff = {};
+  for (const l of gruppi.values()) {
+    maxPer[l[0].depth] = Math.max(maxPer[l[0].depth] || 0, l.length);
+    maxEff[l[0].depth] = Math.max(maxEff[l[0].depth] || 0, l.length / Math.max(0.5, Math.cos(latDiY(pianoDi(l[0])))));   // piu' vicino ai poli, il parallelo e' piu' corto
+  }
   const ARCO_MIN = 0.62, SFALSA = 0.28, MOLTI = 8;
   const R = {}; let prec = 0, precSf = false;
   for (let d = 1; d <= maxD; d++) {
     const nmax = maxPer[d] || 0, sf = nmax > MOLTI;
-    R[d] = Math.max(d === 1 ? 1.5 : prec + (sf || precSf ? 1.4 : 1.1), nmax * ARCO_MIN / (Math.PI * 2));
+    R[d] = Math.max(d === 1 ? 1.5 : prec + (sf || precSf ? 1.4 : 1.1), (maxEff[d] || 0) * ARCO_MIN / (Math.PI * 2));
     prec = R[d]; precSf = sf;
   }
   const raggioDi = (d) => d <= 0 ? 0 : (R[d] !== undefined ? R[d] : R[maxD]);
@@ -78,25 +85,24 @@ function calcolaLayout(dati) {   // piani per azienda
   const rEst = (R[maxD] || 1.5) + (((maxPer[maxD] || 0) > MOLTI) ? SFALSA : 0) + 1.5;
   const nSent = supervisori.length, sfS = nSent > MOLTI;
   supervisori.forEach((s, i) => { s.r = rEst + (sfS ? (i % 2 ? SFALSA : -SFALSA) : 0); });
-  nodi.forEach((n, i) => {
-    if (n.centro) { n.r = 0; n.x = 0; n.z = 0; n.y = 0; return; }
-    n.x = n.r * Math.cos(n.ang || 0); n.z = n.r * Math.sin(n.ang || 0);
-    n.y = 0.06 * Math.sin(i * 2.399 + n.depth);
-  });
-  const yPiano = (id) => (piani.find(pi => pi.id === id) || {}).y;
   const sentinelle = nodi.filter(n => n.esterno && !n.superiore_id);
-  nodi.forEach((n) => {
-    if (n.centro) { n.y = 0; return; }
-    const proprie = (n.aziende || []).map(yPiano).filter(v => v !== undefined);
-    const y0 = n.esterno ? undefined : proprie.length ? proprie.reduce((a, b) => a + b, 0) / proprie.length : (trasv ? yPiano(0) : 0);
-    if (y0 !== undefined) n.y += y0;
+  const latDelNodo = (n) => {
+    const ls = (n.aziende || []).map(id => (piani.find(pi => pi.id === id) || {}).lat).filter(v => v !== undefined);
+    return ls.length ? ls.reduce((a, b) => a + b, 0) / ls.length : (trasv ? piani[0].lat : 0);
+  };
+  nodi.forEach((n, i) => {
+    if (n.centro) { n.r = 0; n.x = 0; n.z = 0; n.y = 0; n.lat = 0; return; }
+    if (!Number.isFinite(n.r)) return;   // chi risponde a una sentinella viene posto vicino al suo capo (sotto)
+    if (n.esterno) { const k = sentinelle.indexOf(n); n.lat = piani.length > 1 && sentinelle.length > 1 ? (k / (sentinelle.length - 1) - 0.5) * 2 * LAT * 0.85 : 0; }
+    else n.lat = latDelNodo(n);
+    const la = n.lat + 0.04 * Math.sin(i * 2.399 + n.depth);
+    n.x = n.r * Math.cos(la) * Math.cos(n.ang || 0); n.z = n.r * Math.cos(la) * Math.sin(n.ang || 0); n.y = n.r * Math.sin(la);
   });
-  sentinelle.forEach((n, k) => { n.y = piani.length ? (k / Math.max(1, sentinelle.length - 1) - 0.5) * (piani.length - 1) * gap : 0; });
-  nodi.filter(n => n.esterno && n.superiore_id).forEach(n => { const s = per.get(n.superiore_id); n.y = s ? s.y : 0; });
-  const rMax = Math.max(1.6, ...nodi.filter(n => !n.esterno && !n.centro).map(n => n.r)) + 0.7;
+  const rMax = Math.max(1.6, ...nodi.filter(n => !n.esterno && !n.centro && Number.isFinite(n.r)).map(n => n.r)) + 0.7;
+  piani.forEach((pi) => { pi.ye = rMax * Math.sin(pi.lat); pi.re = rMax * Math.cos(pi.lat); });
   // figli di un supervisore esterno: restano vicini al loro capo
   const sposta = (n) => n.figli.forEach((f, k) => { f.esterno = n.esterno; f.r = n.r + 0.9 * (k + 1) / (n.figli.length + 1) + 0.4;
-    f.ang = n.ang + (k - (n.figli.length - 1) / 2) * 0.25; f.x = f.r * Math.cos(f.ang); f.z = f.r * Math.sin(f.ang); sposta(f); });
+    f.ang = n.ang + (k - (n.figli.length - 1) / 2) * 0.25; f.lat = n.lat; f.x = f.r * Math.cos(f.lat) * Math.cos(f.ang); f.z = f.r * Math.cos(f.lat) * Math.sin(f.ang); f.y = f.r * Math.sin(f.lat); sposta(f); });
   supervisori.forEach(sposta);
   const estensione = Math.max(rMax, ...nodi.filter(n => n.esterno).map(n => n.r)) + 0.6;
   // se la struttura cresce, la scena si rimpicciolisce per restare tutta nel riquadro
@@ -148,28 +154,39 @@ function vistaOrganigramma(incorniciata) {
     if (!layout) {
       cx.fillStyle = "#7d8a99"; cx.font = "13px Inter, system-ui, sans-serif"; cx.textAlign = "center"; cx.fillText("Caricamento…", W / 2, H / 2); return;
     }
-    // asse verticale di Lorenzo che attraversa tutti i piani
-    if (layout.piani.length) {
-      const a0 = proietta(0, layout.piani[0].y - 0.8, 0), a1 = proietta(0, layout.piani[layout.piani.length - 1].y + 0.8, 0);
-      cx.strokeStyle = "rgba(243,181,74,0.35)"; cx.lineWidth = 1.5; cx.beginPath(); cx.moveTo(a0.px, a0.py); cx.lineTo(a1.px, a1.py); cx.stroke();
+    // la sfera: involucro, gusci dei livelli, meridiani, fasce di latitudine delle aziende e asse polare di Lorenzo
+    const rM = layout.rMax, p0 = proietta(0, 0, 0), pe = proietta(rM * Math.cos(rotY), 0, -rM * Math.sin(rotY));
+    const pr = Math.hypot(pe.px - p0.px, pe.py - p0.py), unita = rM ? pr / rM : 1;
+    const gl = cx.createRadialGradient(p0.px - pr * 0.3, p0.py - pr * 0.35, pr * 0.1, p0.px, p0.py, pr);
+    gl.addColorStop(0, "rgba(243,181,74,0.10)"); gl.addColorStop(0.7, "rgba(80,120,200,0.05)"); gl.addColorStop(1, "rgba(120,160,255,0.16)");
+    cx.fillStyle = gl; cx.beginPath(); cx.arc(p0.px, p0.py, pr, 0, Math.PI * 2); cx.fill();
+    cx.strokeStyle = "rgba(160,190,255,0.35)"; cx.lineWidth = 1.5; cx.stroke();
+    cx.strokeStyle = "rgba(243,181,74,0.13)"; cx.lineWidth = 1;
+    for (const r of layout.raggi) { cx.beginPath(); cx.arc(p0.px, p0.py, r * unita, 0, Math.PI * 2); cx.stroke(); }
+    cx.strokeStyle = "rgba(160,190,255,0.10)";
+    for (let m = 0; m < 6; m++) {
+      const mer = m / 6 * Math.PI;
+      cx.beginPath();
+      for (let t = 0; t <= 48; t++) { const la = -Math.PI / 2 + t / 48 * Math.PI; const p = proietta(rM * Math.cos(la) * Math.cos(mer), rM * Math.sin(la), rM * Math.cos(la) * Math.sin(mer)); t ? cx.lineTo(p.px, p.py) : cx.moveTo(p.px, p.py); }
+      cx.stroke();
     }
+    const asseA = proietta(0, -rM - 0.4, 0), asseB = proietta(0, rM + 0.4, 0);
+    cx.strokeStyle = "rgba(243,181,74,0.35)"; cx.lineWidth = 1.5; cx.beginPath(); cx.moveTo(asseA.px, asseA.py); cx.lineTo(asseB.px, asseB.py); cx.stroke();
     const cerchio = (R, y) => { cx.beginPath(); for (let t = 0; t <= 72; t++) { const an = t / 72 * Math.PI * 2; const p = proietta(R * Math.cos(an), y, R * Math.sin(an)); t ? cx.lineTo(p.px, p.py) : cx.moveTo(p.px, p.py); } };
-    // i piani, dal piu' lontano al piu' vicino
-    const ordPiani = layout.piani.slice().sort((a, b) => proietta(0, b.y, 0).z - proietta(0, a.y, 0).z);
+    // le fasce delle aziende (paralleli), dalla piu' lontana alla piu' vicina
+    const ordPiani = layout.piani.slice().sort((a, b) => proietta(0, b.ye, 0).z - proietta(0, a.ye, 0).z);
     for (const pi of ordPiani) {
       const attivo = !azienda || pi.id === Number(azienda) || pi.id === 0;
       cx.globalAlpha = attivo ? 1 : 0.25;
-      cerchio(layout.rMax, pi.y); cx.fillStyle = pi.colore + "17"; cx.fill(); cx.strokeStyle = pi.colore + "aa"; cx.lineWidth = 1.5; cx.stroke();
-      cx.strokeStyle = pi.colore + "33"; cx.lineWidth = 1;
-      for (const r of layout.raggi) { cerchio(r, pi.y); cx.stroke(); }
-      const lp = proietta(-layout.rMax, pi.y, 0);
+      cerchio(pi.re, pi.ye); cx.fillStyle = pi.colore + "17"; cx.fill(); cx.strokeStyle = pi.colore + "cc"; cx.lineWidth = 1.5; cx.stroke();
+      const lp = proietta(-pi.re, pi.ye, 0);
       cx.fillStyle = pi.colore; cx.font = "bold 11px Inter, system-ui, sans-serif"; cx.textAlign = "right"; cx.fillText(pi.nome, lp.px - 6, lp.py + 4);
     }
     cx.globalAlpha = 1;
-    // anello delle sentinelle
+    // guscio delle sentinelle
     if (layout.nodi.some(n => n.esterno && !n.superiore_id)) {
       const re = layout.nodi.find(n => n.esterno && !n.superiore_id).r;
-      cx.setLineDash([5, 6]); cx.strokeStyle = "rgba(154,123,216,0.4)"; cerchio(re, 0); cx.stroke(); cx.setLineDash([]);
+      cx.setLineDash([5, 6]); cx.strokeStyle = "rgba(154,123,216,0.45)"; cx.lineWidth = 1; cx.beginPath(); cx.arc(p0.px, p0.py, re * unita, 0, Math.PI * 2); cx.stroke(); cx.setLineDash([]);
     }
     for (const n of layout.nodi) n.p = proietta(n.x, n.y, n.z);
     for (const n of layout.nodi) {

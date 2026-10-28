@@ -73,7 +73,10 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Dashboard"], ["plancia", "Plancia"], ["task", "Task"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["crm", "CRM"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE = [["plancia", "Plancia"], ["dashboard", "Dashboard"], ["chat", "Chat"], ["task", "Task"], ["progetti", "Progetti"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["crm", "CRM"], ["documenti", "Documenti"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const GRUPPI_IMP = [["Io e account", ["profilo", "voce", "app"]], ["Organizzazione", ["struttura", "utenti", "reparti", "cerimoniere", "quando", "smistamento"]],
+  ["Collegamenti", ["collegamenti", "connessioni", "siti", "canali", "social", "percorsi"]], ["Conoscenza e formazione", ["biblioteca", "studi", "memoria", "dossier"]],
+  ["Controllo e sicurezza", ["sicurezza", "registro", "sentinelle", "salute", "sandbox"]], ["Sistema", ["aggiornamenti", "misure", "sistema"]]];
 const VISTE_COLLABORATORE = [["task", "Task"], ["progetti", "Progetti"], ["iniziative", "Iniziative"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Collegamenti (Google, posta)"], ["connessioni", "Connessioni a siti e app"], ["siti", "Siti e hosting (chiavi)"],
   ["canali", "Canali (Telegram)"], ["social", "Social"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["misure", "Consumi (dove vanno i token)"], ["sistema", "Backup e costi"]];
@@ -156,8 +159,16 @@ function vistaAgenti() {
         h("button", { class: "p", onclick: () => modulo(null) }, "+ Nuovo agente"))),
     garanzie.length ? avviso("I dati interni e riservati restano bloccati verso: " +
       garanzie.map(f => f.nome).join(", ") + " (mancano le garanzie di non conservazione/DPA). Gli agenti lavorano solo su dati pubblici.", "avv") : null,
-    [...gruppi].map(([nome, lista]) => [h("h3", {}, nome), h("div", { class: "griglia" }, lista.map(carta))]),
+    (() => { const blocco = h("div", {}, [...gruppi].map(([nome, lista]) => [h("h3", {}, nome), h("div", { class: "griglia" }, lista.map(carta))])); riempiExtraAgenti(blocco); return blocco; })(),
   ];
+}
+
+// Schede (tab) dentro i moduli lunghi: tutti i campi restano nel documento, se ne vede una sezione alla volta
+function schede(elenco, iniziale) {
+  const corpi = elenco.map(([nome, figli], i) => h("div", { class: "scheda-corpo", role: "tabpanel", hidden: i !== (iniziale || 0) }, figli));
+  const bott = elenco.map(([nome], i) => h("button", { type: "button", role: "tab", class: "scheda-tab" + (i === (iniziale || 0) ? " attivo" : ""), "aria-selected": i === (iniziale || 0) ? "true" : "false",
+    onclick: () => { bott.forEach((b, j) => { b.classList.toggle("attivo", i === j); b.setAttribute("aria-selected", i === j ? "true" : "false"); corpi[j].hidden = i !== j; }); } }, nome));
+  return h("div", { class: "schede" }, h("div", { class: "scheda-barra", role: "tablist" }, bott), corpi);
 }
 
 function carta(a) {
@@ -170,7 +181,8 @@ function carta(a) {
       h("span", { class: "etichetta" }, a.modello),
       a.accesso_web ? null : h("span", { class: "etichetta avv" }, "Senza web"),
       a.connessioni.length ? h("span", { class: "etichetta" }, a.connessioni.length + " conn.") : null),
-    h("div", { class: "sotto" }, "Questo mese: " + a.token_mese.toLocaleString("it-IT") + " token"));
+    h("div", { class: "sotto" }, "Questo mese: " + a.token_mese.toLocaleString("it-IT") + " token"),
+    h("div", { class: "agente-extra-posto", "data-id": String(a.id) }));
 }
 
 function sezioneProva(a) {
@@ -343,27 +355,29 @@ function modulo(a) {
     h("div", { class: "pannello", role: "dialog", "aria-label": nuovo ? "Nuovo agente" : "Modifica " + d.nome },
       h("h2", {}, nuovo ? "Nuovo agente" : d.nome),
       h("div", { class: "interruttore" }, attivo, h("span", {}, "Agente attivo (se spento non risponde e non lavora)")),
-      h("label", {}, "Nome", nome),
-      h("label", {}, "Compito specifico (lo vedono anche gli altri agenti)", ruolo),
-      h("label", {}, "Cosa NON fa / a chi rimanda (facoltativo)", rimanda),
-      h("h3", {}, "Prompt"),
-      assistentePrompt(istr, () => ({ nome: nome.value.trim(), ruolo: ruolo.value.trim(), rimanda_a: rimanda.value.trim(), livello: livello.value,
-        divisione: div.selectedOptions[0] ? div.selectedOptions[0].textContent : "", aziende: (stato.opzioni.aziende || []).filter(z => (d.aziende || []).includes(z.id)).map(z => z.nome).join(", ") })),
-      h("label", {}, "Cosa deve fare", h("p", { class: "aiuto" }, "In italiano, come lo spiegheresti a un collaboratore: i suoi compiti, le sue relazioni con gli altri agenti, cosa deve guardare e cosa scaricare, il tono, cosa non deve fare."), istr),
-      nuovo ? null : versioniPrecedenti(a, istr),
-      h("h3", {}, "Fasi di lavoro"),
-      h("p", { class: "aiuto" }, "Facoltative. Se le lasci vuote l'agente non ha percorsi da seguire. Se le scrivi, per un lavoro avviato dalla pagina «Percorsi» l'agente le svolge una alla volta, nell'ordine, senza saltarne né anticiparne: a fine fase mostra il risultato e (se lo chiedi) aspetta la tua decisione."), contFasi,
-      h("div", { class: "riga" }, h("label", {}, "Dipartimento", div), h("label", {}, "Risponde a", sup)),
-      h("label", {}, "Aziende per cui lavora", h("p", { class: "aiuto" }, "Una o più. Se non ne scegli nessuna lavora per tutte (agente trasversale)."),
-        azCb.length ? azCb.map(([z, cb]) => h("label", { class: "spunta" }, cb, z.nome)) : h("p", { class: "aiuto" }, "Nessuna azienda: creale nella scheda Struttura.")),
-      h("div", { class: "riga" }, h("label", {}, "Categoria", h("p", { class: "aiuto" }, "La sentinella osserva e segnala, sta fuori dai dipartimenti. Per tutte le altre scegli dipartimento o superiore."), livello), h("label", {}, "Modello AI", modello)),
-      h("h3", {}, "Riservatezza e costi"),
-      h("label", {}, "Dati che può ricevere", h("p", { class: "aiuto" }, "Anche se qui scegli un livello alto, i dati escono verso un fornitore solo se il fornitore ha le garanzie attive."), fascia),
-      h("div", { class: "riga" },
-        h("label", {}, "Lunghezza massima risposta (token)", tetto),
-        h("label", {}, "Budget mensile (token)", budget)),
-      nuovo ? null : sezioneProva(a),
-      h("h3", {}, "Dialoghi con gli altri agenti"),
+      schede([
+        ["Identità", [
+          h("label", {}, "Nome", nome),
+          h("label", {}, "Compito specifico (lo vedono anche gli altri agenti)", ruolo),
+          h("label", {}, "Cosa NON fa / a chi rimanda (facoltativo)", rimanda),
+          h("div", { class: "riga" }, h("label", {}, "Dipartimento", div), h("label", {}, "Risponde a", sup)),
+          h("label", {}, "Aziende per cui lavora", h("p", { class: "aiuto" }, "Una o più. Se non ne scegli nessuna lavora per tutte (agente trasversale)."),
+            azCb.length ? azCb.map(([z, cb]) => h("label", { class: "spunta" }, cb, z.nome)) : h("p", { class: "aiuto" }, "Nessuna azienda: creale nella scheda Struttura.")),
+          h("div", { class: "riga" }, h("label", {}, "Categoria", h("p", { class: "aiuto" }, "La sentinella osserva e segnala, sta fuori dai dipartimenti. Per tutte le altre scegli dipartimento o superiore."), livello), h("label", {}, "Modello AI", modello))]],
+        ["Prompt", [
+          assistentePrompt(istr, () => ({ nome: nome.value.trim(), ruolo: ruolo.value.trim(), rimanda_a: rimanda.value.trim(), livello: livello.value,
+            divisione: div.selectedOptions[0] ? div.selectedOptions[0].textContent : "", aziende: (stato.opzioni.aziende || []).filter(z => (d.aziende || []).includes(z.id)).map(z => z.nome).join(", ") })),
+          h("label", {}, "Cosa deve fare", h("p", { class: "aiuto" }, "In italiano, come lo spiegheresti a un collaboratore: i suoi compiti, le sue relazioni con gli altri agenti, cosa deve guardare e cosa scaricare, il tono, cosa non deve fare."), istr),
+          nuovo ? null : versioniPrecedenti(a, istr),
+          h("h3", {}, "Fasi di lavoro"),
+          [h("p", { class: "aiuto" }, "Facoltative. Se le lasci vuote l'agente non ha percorsi da seguire. Se le scrivi, per un lavoro avviato dalla pagina «Percorsi» l'agente le svolge una alla volta, nell'ordine, senza saltarne né anticiparne: a fine fase mostra il risultato e (se lo chiedi) aspetta la tua decisione."), contFasi]]],
+        ["Dati e costi", [
+          h("label", {}, "Dati che può ricevere", h("p", { class: "aiuto" }, "Anche se qui scegli un livello alto, i dati escono verso un fornitore solo se il fornitore ha le garanzie attive."), fascia),
+          h("div", { class: "riga" },
+            h("label", {}, "Lunghezza massima risposta (token)", tetto),
+            h("label", {}, "Budget mensile (token)", budget)),
+          nuovo ? null : sezioneProva(a)]],
+        ["Strumenti", [      h("h3", {}, "Dialoghi con gli altri agenti"),
       h("div", { class: "interruttore" }, dialoga, h("span", {}, "Può fare domande a superiore, subordinati e altri manager mentre lavora")),
       h("div", { class: "interruttore" }, vedeTutto, h("span", {}, "Vede cosa fai e cosa ti dicono gli altri agenti (sintesi recente, nei limiti di riservatezza)")),
       h("label", {}, "Casella di posta che gestisce (legge e prepara bozze, non invia)", gmailSel),
@@ -376,11 +390,12 @@ function modulo(a) {
       h("h3", {}, "Accesso al web"),
       h("div", { class: "interruttore" }, web, h("span", {}, "Può cercare sul web (attivo per tutti; spegni per bloccarlo a questo agente — solo modelli Claude per ora)")),
       h("label", {}, "Siti consentiti", h("p", { class: "aiuto" }, "Un sito per riga. Se lasci vuoto può cercare su qualsiasi sito."), siti),
-      h("label", {}, "Ricerche massime per risposta", ricerche),
-      h("h3", {}, "Documento di riferimento"), sezioneDoc,
-      h("h3", {}, "Connessioni"),
-      conn.length ? conn.map(([c, cb]) => h("label", { class: "spunta" }, cb, c.nome + " (" + c.tipo + ")"))
-        : h("p", { class: "aiuto" }, "Nessuna connessione ancora: creale nella scheda Connessioni."),
+      h("label", {}, "Ricerche massime per risposta", ricerche)]],
+        ["Fonti", [h("h3", {}, "Documento di riferimento"), sezioneDoc,
+          h("h3", {}, "Connessioni"),
+          conn.length ? conn.map(([c, cb]) => h("label", { class: "spunta" }, cb, c.nome + " (" + c.tipo + ")"))
+            : h("p", { class: "aiuto" }, "Nessuna connessione ancora: creale nella scheda Connessioni.")]],
+      ]),
       msg,
       h("div", { class: "azioni" },
         h("button", { class: "p", onclick: salva }, nuovo ? "Crea agente" : "Salva modifiche"),
