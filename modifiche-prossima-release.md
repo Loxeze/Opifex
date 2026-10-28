@@ -104,3 +104,6 @@
 
 ## 1.11.0 (fatto)
 - Memoria di lavoro: voci (decisione/fatto/preferenza/lezione/sintesi) con ambito azienda/progetto/dipartimento, approvazione, ricerca, strumento memoria_proponi per gli agenti, proposte automatiche da risposte alle richieste e note dei percorsi, sintesi settimanale (manager + Aurora), pannello in Chat e pagina in Impostazioni.
+
+## Da fare (28/10, Lorenzo)
+- Numerini di notifica (come quello della Chat) anche su Ginnasio, Progetti, Documenti e ogni altra pagina dove c'è un aggiornamento: il numero indica la pagina in cui devo intervenire. Idealmente anche dentro la pagina, sulla voce specifica (progetto, documento, corso).
