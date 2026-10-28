@@ -156,6 +156,14 @@ async function esegui(testo) {
       const r = await api("/v1/crm/cerca?q=" + encodeURIComponent(m[2]));
       return scrivi("ai", r.sintesi + (r.risultati.length ? "\n" + r.risultati.slice(0, 5).map((x) => "• " + [x.nome, x.ente].filter(Boolean).join(" — ")).join("\n") : ""), true);
     }
+    if ((m = testo.match(/^(documento|nota lunga|nota per aurora|detta ad aurora|scrivi la nota)\s*:?\s*(.+)/is))) {
+      const r = await api("/note-aurora", { metodo: "POST", corpo: { testo: m[2] } });
+      return scrivi("ai", r.sintesi + " Quando vuoi, di' «affida la nota» e ti chiedo conferma.", true);
+    }
+    if ((m = n.match(/^(affida|manda|passa)\s+(la\s+)?(nota|documento)(\s+(?:a|al|ad)\s+(\S+))?/))) {
+      const man = m[5] ? m[5].charAt(0).toUpperCase() + m[5].slice(1) : undefined;
+      return preparaAzione("nota.affida", man ? { manager: man } : {});
+    }
     if ((m = testo.match(/^(nota|appunta|ricorda)\s*:?\s*(.+)/i))) {
       const r = await api("/v1/note", { metodo: "POST", corpo: { testo: m[2] } });
       return scrivi("ai", r.sintesi, true);

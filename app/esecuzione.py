@@ -15,7 +15,7 @@ STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strume
 from . import eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
-from . import vademecum
+from . import vademecum, note_aurora
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
 
@@ -465,6 +465,12 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     with connessione() as c3:
                         avviso_extra += consegne.regole_per(c3, agente_id)
                     gestori["passa_a"] = consegne.strumento(agente_id)
+                if ok_int and a["nome"] == "Aurora" and a["tipo"] == "sistema":
+                    extra.extend(note_aurora.STRUMENTI)
+                    avviso_extra += note_aurora.AVVISO
+                    gna = note_aurora.strumento(agente_id)
+                    for s_ in note_aurora.STRUMENTI:
+                        gestori[s_["name"]] = gna
                 if mem_tool:
                     extra.append(memoria_lavoro.STRUMENTO)
                     avviso_extra += ("\n\nMEMORIA: se durante il lavoro emerge una decisione, un fatto o una preferenza di Lorenzo che servira' in futuro, "

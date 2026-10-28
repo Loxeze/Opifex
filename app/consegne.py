@@ -9,7 +9,7 @@ from . import trigger
 from .db import connessione
 
 SINCRONO = False   # nei collaudi si esegue nello stesso thread
-MAX_MATERIALE = 6000
+MAX_MATERIALE = 200000
 MAX_AUTO_AL_GIORNO = 10     # consegne elaborate in automatico per destinatario ogni 24 ore
 MAX_REGOLE_NEL_PROMPT = 15
 

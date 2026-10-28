@@ -424,7 +424,37 @@ def _esegui_task(conn, u: dict, p: dict) -> str:
     return f"Task creata (numero {r['id']})."
 
 
-AZIONI = {"email.invia": (_prepara_email, _esegui_email, "Invio email"), "task.crea": (_prepara_task, _esegui_task, "Nuova task")}
+def _prepara_nota(conn, u: dict, p: dict) -> tuple[dict, str]:
+    from . import note_aurora
+    try:
+        if p.get("nota_id"):
+            n = note_aurora._nota(conn, int(p["nota_id"]))
+        else:
+            n = conn.execute("SELECT * FROM note_aurora WHERE stato IN ('proposta','bozza') ORDER BY id DESC LIMIT 1").fetchone()
+            if n is None:
+                raise note_aurora.ErroreNota("Non ci sono note da affidare")
+        if n["stato"] == "affidata":
+            raise note_aurora.ErroreNota("La nota e' gia' stata affidata")
+        nome = p.get("manager") or (conn.execute("SELECT nome FROM agenti WHERE id=%s", (n["manager_id"],)).fetchone()["nome"] if n["manager_id"] else None)
+        if not nome:
+            raise note_aurora.ErroreNota("Aurora non ha ancora proposto un manager: indica a chi affidarla")
+        m = note_aurora._manager(conn, nome)
+    except note_aurora.ErroreNota as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
+    analisi = str(p.get("analisi") or n["analisi"] or "").strip()
+    return ({"nota_id": n["id"], "manager": m["nome"], "analisi": analisi or None},
+            f"Affido la nota «{n['titolo']}» a {m['nome']}" + (f" per: {analisi[:160]}" if analisi else "") + ". Confermi?")
+
+
+def _esegui_nota(conn, u: dict, p: dict) -> str:
+    from . import consegne, note_aurora
+    try:
+        return note_aurora.affida(conn, int(p["nota_id"]), p.get("manager"), p.get("analisi"))
+    except (note_aurora.ErroreNota, consegne.ErroreConsegna) as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
+
+
+AZIONI = {"nota.affida": (_prepara_nota, _esegui_nota, "Nota a un manager"), "email.invia": (_prepara_email, _esegui_email, "Invio email"), "task.crea": (_prepara_task, _esegui_task, "Nuova task")}
 
 
 class PreparaAzione(BaseModel):
