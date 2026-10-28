@@ -73,7 +73,7 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Dashboard"], ["task", "Task"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["crm", "CRM"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE = [["dashboard", "Dashboard"], ["plancia", "Plancia"], ["task", "Task"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["chat", "Chat"], ["crm", "CRM"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
 const VISTE_COLLABORATORE = [["task", "Task"], ["progetti", "Progetti"], ["iniziative", "Iniziative"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Collegamenti (Google, posta)"], ["connessioni", "Connessioni a siti e app"], ["siti", "Siti e hosting (chiavi)"],
   ["canali", "Canali (Telegram)"], ["social", "Social"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["misure", "Consumi (dove vanno i token)"], ["sistema", "Backup e costi"]];
@@ -88,13 +88,14 @@ function cornice(contenuto) {
           nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : ""),
           id === "chat" ? h("span", { id: "badge-chat", class: "badge-chat", style: stato.chatNonLetti ? "" : "display:none" }, stato.chatNonLetti ? String(stato.chatNonLetti) : "") : null))),
       h("button", { class: "s", onclick: esci }, "Esci")),
-    h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" ? "largo" : "" }, contenuto));
+    h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "plancia" ? "largo" : "" }, contenuto));
 }
 
 async function avvia() {
   try {
     const io = await api("GET", "/io");
     stato.ruolo = io.ruolo_globale;
+    await Vetro.carica();
     ripristinaVista();
     avviaConteggioChat(); avviaUso();
     if (stato.ruolo !== "titolare") {   // il collaboratore vede solo la chat con gli agenti delle sue divisioni
@@ -127,7 +128,7 @@ function disegna() {
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
   if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, plancia: vistaPlancia, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
 
