@@ -39,7 +39,7 @@ async function api(metodo, percorso, corpo) {
   });
   let dati = null;
   try { dati = await r.json(); } catch (e) { /* risposta vuota */ }
-  if (r.status === 401 && percorso !== "/login") { esci(); throw new Error("Sessione scaduta: rientra"); }
+  if (r.status === 401 && percorso !== "/login" && percorso !== "/v1/accesso") { esci(); throw new Error("Sessione scaduta: rientra"); }
   if (!r.ok) throw new Error(messaggioErrore(dati));
   return dati;
 }
@@ -68,7 +68,7 @@ function mostraAccesso(errore) {
     h("h2", {}, "Opifex"),
     h("form", { onsubmit: invia, class: "carta" },
       h("label", {}, "Email", email), h("label", {}, "Password", pw),
-      msg, h("div", { class: "azioni" }, h("button", { class: "p", type: "submit" }, "Entra")))));
+      msg, h("div", { class: "azioni" }, h("button", { class: "p", type: "submit" }, "Entra"), (typeof Passkey !== "undefined") ? Passkey.pulsanteAccesso(msg) : null))));
   if (errore) msg.replaceChildren(avviso(errore, "no"));
 }
 

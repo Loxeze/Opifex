@@ -64,6 +64,7 @@ from .rotte_pwa import router as router_pwa
 from .rotte_dossier import router as router_dossier
 from .rotte_crm import router as router_crm
 from .rotte_voce_el import router as router_voce_el
+from .assistente_v1 import router as router_assistente_v1
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
 
@@ -276,6 +277,7 @@ app.include_router(router_pwa)
 app.include_router(router_dossier)
 app.include_router(router_crm)
 app.include_router(router_voce_el)
+app.include_router(router_assistente_v1)
 
 
 @app.get("/", include_in_schema=False)

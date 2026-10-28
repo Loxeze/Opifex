@@ -29,10 +29,10 @@ def verifica_password(password: str, hash_salvato: str) -> bool:
 HASH_FINTO = cifra_password("password-finta-per-uniformare-i-tempi")
 
 
-def crea_token(utente_id: int, ruolo: str) -> str:
+def crea_token(utente_id: int, ruolo: str, minuti: int | None = None) -> str:
     adesso = datetime.now(timezone.utc)
-    payload = {"sub": str(utente_id), "ruolo": ruolo, "iat": int(adesso.timestamp()),
-               "exp": adesso + timedelta(hours=impostazioni.token_durata_ore)}
+    durata = timedelta(minutes=minuti) if minuti else timedelta(hours=impostazioni.token_durata_ore)
+    payload = {"sub": str(utente_id), "ruolo": ruolo, "iat": int(adesso.timestamp()), "exp": adesso + durata}
     return jwt.encode(payload, impostazioni.secret_key, algorithm=ALGORITMO)
 
 

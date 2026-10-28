@@ -117,7 +117,8 @@ function vistaAccount() {
           h("div", { class: "interruttore" }, (() => { const c = h("input", { type: "checkbox" }); c.checked = Voce.leggiRisposte; c.addEventListener("change", () => { Voce.leggiRisposte = c.checked; }); return c; })(),
             h("span", {}, "Leggi ad alta voce le risposte degli agenti (su questo dispositivo)")),
           h("p", { class: "aiuto" }, Voce.supportoLettura ? "Nella Chat trovi il pulsante «Parla» per dettare i messaggi e il «Vivavoce» per conversare a voce." : "Questo browser non supporta la lettura vocale.")),
-        h("h3", {}, "Secondo fattore"), h("div", { class: "carta" }, sezione2fa), msg]);
+        h("h3", {}, "Secondo fattore"), h("div", { class: "carta" }, sezione2fa),
+        Passkey.sezioneAccount(), msg]);
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };
   carica();
