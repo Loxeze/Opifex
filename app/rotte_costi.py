@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from . import costi
+from . import costi, registro, spesa
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -56,3 +56,23 @@ def imposta_cambio(d: Cambio, _: dict = Depends(solo_titolare)):
     with connessione() as conn:
         conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('cambio_eur_per_usd', %s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (str(round(d.euro_per_dollaro, 4)),))
     return {"euro_per_dollaro": round(d.euro_per_dollaro, 4)}
+
+
+@router.get("/gestione/spesa-reparti")
+def spesa_reparti(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return {"reparti": spesa.reparti(conn)}
+
+
+class TettoReparto(BaseModel):
+    tetto: float | None = Field(default=None, gt=0, le=1_000_000)
+
+
+@router.put("/gestione/spesa-reparti/{did}")
+def tetto_reparto(did: int, d: TettoReparto, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        r = conn.execute("UPDATE divisioni SET tetto_spesa_mese = %s WHERE id = %s RETURNING nome", (d.tetto, did)).fetchone()
+        if r is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Reparto inesistente")
+        registro.registra(conn, u, "tetto_spesa", "impostato", f"Tetto mensile del reparto {r['nome']}", dettagli={"tetto": d.tetto})
+    return {"ok": True}

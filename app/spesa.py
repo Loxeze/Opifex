@@ -61,3 +61,35 @@ def modelli_senza_prezzo(conn) -> list[str]:
     return [r["nome"] for r in conn.execute(
         """SELECT m.nome FROM modelli_ai m WHERE (m.costo_input_per_milione IS NULL OR m.costo_output_per_milione IS NULL)
            AND EXISTS (SELECT 1 FROM agenti a WHERE a.modello = m.nome AND a.attivo) ORDER BY m.nome""").fetchall()]
+
+
+# ---------- tetto per reparto ----------
+def reparti(conn) -> list[dict]:
+    """Per ogni reparto: spesa del mese (costo stimato degli agenti che vi appartengono) e tetto mensile, se impostato."""
+    return conn.execute("""
+        SELECT d.id, d.nome, d.tetto_spesa_mese AS tetto,
+               COALESCE((SELECT SUM(c.costo_stimato) FROM costi_api c JOIN agenti a ON a.id = c.agente_id
+                         WHERE a.divisione_id = d.id AND c.creato_il >= date_trunc('month', NOW())), 0)::float AS speso
+        FROM divisioni d ORDER BY d.nome""").fetchall()
+
+
+def controlla_reparto(conn, divisione_id: int) -> str | None:
+    """Motivo del blocco se il reparto ha esaurito il tetto del mese; avvisa una volta all'80% e una al 100%."""
+    r = conn.execute("SELECT nome, tetto_spesa_mese FROM divisioni WHERE id = %s", (divisione_id,)).fetchone()
+    if r is None or not r["tetto_spesa_mese"]:
+        return None
+    tetto = float(r["tetto_spesa_mese"])
+    speso = float(conn.execute("""SELECT COALESCE(SUM(c.costo_stimato), 0) AS s FROM costi_api c JOIN agenti a ON a.id = c.agente_id
+                                  WHERE a.divisione_id = %s AND c.creato_il >= date_trunc('month', NOW())""", (divisione_id,)).fetchone()["s"])
+    marca = datetime.now(timezone.utc).strftime("%Y-%m")
+    for livello, soglia in (("100", tetto), ("80", tetto * SOGLIA)):
+        if speso >= soglia:
+            chiave = f"spesa_reparto_{divisione_id}_{livello}"
+            if _imp(conn, chiave) != marca:
+                conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (chiave, marca))
+                conn.execute("INSERT INTO notifiche (testo, urgente, critica) VALUES (%s, TRUE, %s)",
+                             (f"Reparto {r['nome']}: spesa del mese a {speso:.2f} su {tetto:.2f}" + (" - gli agenti del reparto sono fermi fino al mese prossimo o finche' non alzi il tetto." if livello == "100" else "."), livello == "100"))
+            break
+    if speso >= tetto:
+        return f"Tetto di spesa mensile del reparto {r['nome']} raggiunto ({speso:.2f} su {tetto:.2f})"
+    return None

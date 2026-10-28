@@ -69,6 +69,7 @@ from .rotte_preferenze import router as router_preferenze
 from .note_aurora import router as router_note_aurora
 from .posta_decisioni import router as router_posta_decisioni
 from .miglioramento import router as router_miglioramento
+from .dipendenze import router as router_dipendenze
 from .rotte_riepilogo import router as router_riepilogo
 from .sicurezza import HASH_FINTO, cifra_password, crea_token, verifica_password
 
@@ -129,7 +130,7 @@ def _passo(nome: str, f):
 async def _manutenzione():
     """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Ogni passo e' isolato dagli altri."""
     import asyncio
-    from . import allarmi, qualita, aurora, backup, cerimoniere, competenze_base, custode, crm_schede, ginnasio, miglioramento, plaud, proposte_sentinelle, prova_ripristino, sintesi_memoria, studio
+    from . import allarmi, qualita, aurora, backup, cerimoniere, competenze_base, custode, crm_schede, ginnasio, miglioramento, dipendenze, plaud, proposte_sentinelle, prova_ripristino, sintesi_memoria, studio
 
     def giro():
         _passo("backup", lambda c: backup.esegui(c) if backup.da_fare(c) else None)
@@ -145,6 +146,7 @@ async def _manutenzione():
         _passo("studi", lambda c: studio.rileva_e_segna(c) if studio.da_fare(c) else None)
         _passo("ginnasio", ginnasio.giro)
         _passo("miglioramento degli agenti (Padre Casati)", miglioramento.giro)
+        _passo("controllo dipendenze", lambda c: dipendenze.controlla(c) if dipendenze.da_fare(c) else None)
         _passo("eventi", lambda c: eventi.pulisci(c))
         _passo("promemoria CRM", crm_schede.promemoria)
         _passo("proposte sentinelle", lambda c: proposte_sentinelle.scansiona(c) if proposte_sentinelle.da_fare(c) else None)
@@ -289,6 +291,7 @@ app.include_router(router_preferenze)
 app.include_router(router_note_aurora)
 app.include_router(router_posta_decisioni)
 app.include_router(router_miglioramento)
+app.include_router(router_dipendenze)
 app.include_router(router_riepilogo)
 
 

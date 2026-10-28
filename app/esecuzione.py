@@ -126,6 +126,11 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         if blocco_spesa:
             conn.commit()
             raise EsecuzioneBloccata(blocco_spesa)
+        if a["divisione_id"] and a["tipo"] != "sistema":
+            blocco_rep = spesa.controlla_reparto(conn, a["divisione_id"])
+            if blocco_rep:
+                conn.commit()
+                raise EsecuzioneBloccata(blocco_rep)
         if a["budget_token_mensile"] is not None and _token_del_mese(conn, agente_id) >= a["budget_token_mensile"]:
             raise EsecuzioneBloccata("Budget mensile di token esaurito per questo agente")
         if a["fornitore"] is None:
