@@ -169,6 +169,20 @@ def cartella(tok: str, nome: str, genitore: str, esistente: str | None = None) -
                  json={"name": nome, "mimeType": "application/vnd.google-apps.folder", "parents": [genitore]})["id"]
 
 
+def pota_cartella(tok: str, cartella_id: str, conserva: int, prefisso: str = "") -> int:
+    """Tiene solo gli ultimi `conserva` file della cartella (i piu' recenti) e mette gli altri nel cestino di Drive (recuperabili per 30 giorni)."""
+    h = {"Authorization": "Bearer " + tok}
+    q = f"'{_q(cartella_id)}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'"
+    if prefisso:
+        q += f" and name contains '{_q(prefisso)}'"
+    files = _http("GET", _DRIVE, params={"q": q, "fields": "files(id,name,createdTime)", "orderBy": "createdTime desc", "pageSize": 200}, headers=h).get("files", [])
+    n = 0
+    for f in files[max(1, conserva):]:
+        _http("PATCH", f"{_DRIVE}/{f['id']}", params={"fields": "id"}, headers=h, json={"trashed": True})
+        n += 1
+    return n
+
+
 def rinomina_cartella(tok: str, cartella_id: str, nome: str):
     _http("PATCH", f"{_DRIVE}/{cartella_id}", params={"fields": "id"}, headers={"Authorization": "Bearer " + tok}, json={"name": nome})
 

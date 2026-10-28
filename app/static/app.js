@@ -131,6 +131,9 @@ function disegna() {
   cornice(vista());
 }
 
+// I fornitori fatturano in dollari: si mostrano in euro con il cambio impostato in Backup e costi.
+function euro(usd) { const c = (stato.opzioni && stato.opzioni.cambio_eur) || 0.92; const v = Number(usd) * c; return "€ " + v.toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: v < 1 ? 3 : 2 }); }
+
 const ETICHETTA_FASCIA = { pubblico: "Solo dati pubblici", interno: "Dati interni", riservato: "Dati riservati" };
 
 // ---------- Agenti ----------

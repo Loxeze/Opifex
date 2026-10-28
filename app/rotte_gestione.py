@@ -176,6 +176,14 @@ def elenco(_: dict = Depends(solo_titolare)):
         return conn.execute(QUERY_AGENTI + " ORDER BY a.id").fetchall()
 
 
+def _cambio(conn) -> float:
+    r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'cambio_eur_per_usd'").fetchone()
+    try:
+        return float(r["valore"]) if r else 0.92
+    except ValueError:
+        return 0.92
+
+
 @router.get("/opzioni")
 def opzioni(_: dict = Depends(solo_titolare)):
     """Voci per i menu a tendina dei moduli."""
@@ -190,6 +198,7 @@ def opzioni(_: dict = Depends(solo_titolare)):
             "fornitori": conn.execute(
                 """SELECT nome, non_conservazione_attiva, dpa_firmato, fascia_dati_max
                    FROM fornitori_ai ORDER BY nome""").fetchall(),
+            "cambio_eur": _cambio(conn),
         }
 
 

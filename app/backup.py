@@ -97,6 +97,10 @@ def _su_drive(conn, dati: bytes, nome: str) -> str:
             (f"\r\n--{limite}\r\nContent-Type: application/octet-stream\r\n\r\n").encode() + dati + f"\r\n--{limite}--".encode()
     google._http("POST", "https://www.googleapis.com/upload/drive/v3/files", params={"uploadType": "multipart", "fields": "id"},
                  headers={"Authorization": "Bearer " + tok, "Content-Type": f"multipart/related; boundary={limite}"}, content=corpo)
+    try:
+        google.pota_cartella(tok, cart, CONSERVA, "opifex-backup-")   # su Drive restano le ultime copie, come sul server
+    except google.ErroreGoogle:
+        pass
     return "caricato su Drive"
 
 

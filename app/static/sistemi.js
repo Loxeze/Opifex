@@ -233,7 +233,12 @@ function bloccoCosti() {
       corpo.replaceChildren(h("div", { class: "carta" },
         h("pre", { class: "sotto", style: "white-space:pre-wrap" }, q.testo),
         h("p", { class: "aiuto" }, "Per vedere la spesa reale (non solo la stima) inserisci le chiavi ADMIN dei fornitori: Anthropic (console → Settings → Admin keys) e OpenAI (Organization → Admin keys). Sono diverse dalle chiavi normali, sono solo di lettura sui costi e vengono cifrate. Aurora e le sentinelle le usano per consultare i costi."),
-        msg, campo("anthropic", "Anthropic"), campo("openai", "OpenAI")));
+        msg, campo("anthropic", "Anthropic"), campo("openai", "OpenAI"),
+        (() => {
+          const c = h("input", { type: "number", step: "0.01", min: "0.2", max: "5", value: String((stato.opzioni && stato.opzioni.cambio_eur) || 0.92) });
+          return h("label", {}, "Cambio: euro per 1 dollaro (i costi si vedono in euro)", c, h("div", { class: "azioni" },
+            h("button", { class: "s", onclick: async () => { try { const r = await api("PUT", "/gestione/costi/cambio", { euro_per_dollaro: Number(c.value) }); stato.opzioni.cambio_eur = r.euro_per_dollaro; msg.replaceChildren(avviso("Cambio salvato", "ok")); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Salva cambio")));
+        })()));
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };
   carica();

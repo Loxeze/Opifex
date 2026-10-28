@@ -30,3 +30,29 @@ def chiavi(d: Chiave, _: dict = Depends(solo_titolare)):
             return costi.chiavi_presenti(conn)
     except costi.ErroreCosti as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+
+def cambio_eur(conn) -> float:
+    r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'cambio_eur_per_usd'").fetchone()
+    try:
+        return float(r["valore"]) if r else 0.92
+    except ValueError:
+        return 0.92
+
+
+class Cambio(BaseModel):
+    euro_per_dollaro: float = Field(gt=0.2, lt=5)
+
+
+@router.get("/gestione/costi/cambio")
+def leggi_cambio(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return {"euro_per_dollaro": cambio_eur(conn)}
+
+
+@router.put("/gestione/costi/cambio")
+def imposta_cambio(d: Cambio, _: dict = Depends(solo_titolare)):
+    """I fornitori fatturano in dollari: con questo cambio (che aggiorni tu) i costi si vedono anche in euro."""
+    with connessione() as conn:
+        conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('cambio_eur_per_usd', %s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (str(round(d.euro_per_dollaro, 4)),))
+    return {"euro_per_dollaro": round(d.euro_per_dollaro, 4)}

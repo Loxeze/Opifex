@@ -56,6 +56,11 @@ def controlla(conn, percorso_disco: str = "/") -> list[str]:
     for r in conn.execute("""SELECT split_part(dettagli->>'errore', ':', 1) AS fornitore, count(*) AS n FROM registro_azioni
                              WHERE azione = 'errore_modello' AND creata_il >= NOW() - interval '30 minutes' GROUP BY 1 HAVING count(*) >= 3""").fetchall():
         invia("modello_" + (r["fornitore"] or "ignoto")[:30], f"{r['n']} errori in 30 minuti da «{(r['fornitore'] or 'fornitore sconosciuto')[:40]}»: controlla chiave, credito e stato in Impostazioni → Sicurezza → Verifica ora.")
+    # risposte vuote: gli agenti non scrivono nulla (limite, rifiuti, troppi passaggi)
+    vuote = conn.execute("""SELECT count(*) AS n, string_agg(DISTINCT a.nome, ', ') AS agenti FROM registro_azioni z JOIN agenti a ON a.id = z.agente_id
+                            WHERE z.azione = 'risposta_vuota' AND z.creata_il >= NOW() - interval '60 minutes'""").fetchone()
+    if vuote["n"] >= 3:
+        invia("risposte_vuote", f"{vuote['n']} risposte vuote in un'ora ({(vuote['agenti'] or '')[:120]}): gli agenti non riescono a scrivere. Dettagli nel registro delle azioni.")
     # backup
     if _imp(conn, "backup_attivo", "1") == "1":
         if not _imp(conn, "backup_chiave_cifrata"):

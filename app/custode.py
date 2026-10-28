@@ -28,6 +28,7 @@ CHUNK = 1_000_000
 MAGIA = b"OPXB1"
 CARTELLA_DRIVE = "Maestro di chiavi - backup siti"
 CONSERVA_GIORNI_DEPOSITO = 30
+CONSERVA_COPIE_DRIVE = 14   # per ogni sito: le ultime 14 copie notturne
 
 
 class ErroreCustode(Exception):
@@ -308,6 +309,10 @@ def backup_sito(conn, s: dict) -> dict:
             byte = cf.seek(0, 2)
             tok, cart = _drive_cartelle(conn, s["nome"])
             fid = _carica_drive(tok, nome, cart, cf, byte)
+            try:
+                esito["potati"] = google.pota_cartella(tok, cart, CONSERVA_COPIE_DRIVE)   # i backup piu' vecchi vanno nel cestino di Drive
+            except google.ErroreGoogle:
+                pass
         esito.update(ok=True, file=n, byte=byte, drive=fid)
         sh._memorizza_impronta(conn, s)
     except (ErroreCustode, sh.ErroreSito, cassaforte.CassaforteNonConfigurata) as e:

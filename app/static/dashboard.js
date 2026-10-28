@@ -85,8 +85,8 @@ function vistaDashboard() {
       const g = grafico.getContext("2d"), mx = Math.max(1, ...x.giorni.map(d => d.token));
       g.fillStyle = "#f3b54a"; x.giorni.forEach((d, i) => { const hh = Math.max(1, Math.round(26 * d.token / mx)); g.fillRect(i * 17 + 1, 28 - hh, 13, hh); });
       riempi(barra, [
-        tessera("Token oggi", fm(x.token_oggi), "$ " + x.costo_oggi.toFixed(2) + " stimati", grafico),
-        tessera("Token del mese", fm(x.token_mese), "$ " + x.costo_mese.toFixed(2) + " · in " + fm(x.input_mese) + " · out " + fm(x.output_mese)),
+        tessera("Token oggi", fm(x.token_oggi), euro(x.costo_oggi) + " stimati", grafico),
+        tessera("Token del mese", fm(x.token_mese), euro(x.costo_mese) + " · in " + fm(x.input_mese) + " · out " + fm(x.output_mese)),
         tessera("Più attivi del mese", x.top_agenti.length ? x.top_agenti.map(t => t.nome).join(", ") : "—", x.top_agenti.length ? fm(x.top_agenti[0].token) + " token il primo" : "nessun consumo"),
         tessera("Messaggi tra agenti oggi", String(x.messaggi_oggi), x.limite_dialoghi_giorno ? "dialoghi: " + fm(x.token_dialoghi_oggi) + " / " + fm(x.limite_dialoghi_giorno) + " token" : null),
         tessera("Agenti attivi", x.agenti_attivi + " / " + x.agenti_totali, null),

@@ -4,7 +4,7 @@
 function vistaMisure() {
   const corpo = h("div"), msg = h("div");
   const periodo = h("select", {}, [["1", "Ultime 24 ore"], ["7", "Ultimi 7 giorni"], ["30", "Ultimi 30 giorni"], ["90", "Ultimi 90 giorni"]].map(([v, t]) => h("option", { value: v, selected: v === "7" }, t)));
-  const usd = (x) => "$ " + Number(x).toFixed(x < 1 ? 3 : 2);
+  const usd = (x) => euro(x);
   const num = (x) => Number(x).toLocaleString("it-IT");
   const tab = (teste, righe) => h("div", { class: "tabscorri" }, h("table", { class: "tabella" }, h("thead", {}, h("tr", {}, teste.map(t => h("th", {}, t)))), h("tbody", {}, righe.map(r => h("tr", {}, r.map(c => h("td", {}, c)))))));
   const barra = (quota) => h("div", { class: "barra" }, h("div", { style: "width:" + Math.min(100, quota) + "%;height:8px;background:var(--accento,#3b6fd4);border-radius:4px" }));

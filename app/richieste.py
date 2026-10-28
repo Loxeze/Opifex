@@ -34,6 +34,18 @@ def _norm(t: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (t or "").lower())).strip()
 
 
+_VUOTE = {"il", "lo", "la", "i", "gli", "le", "un", "una", "di", "a", "da", "in", "con", "su", "per", "tra", "fra", "e", "o", "che", "del", "della", "dei", "delle",
+          "al", "alla", "ai", "alle", "nel", "nella", "come", "quale", "quali", "devo", "dobbiamo", "vuoi", "puoi", "posso", "possiamo", "mi", "ci", "si", "non", "e'", "è"}
+
+
+def _stesso_argomento(m: str, n: str) -> bool:
+    """Stesse parole significative (anche in ordine diverso o con parole di contorno): e' la stessa domanda posta in altro modo."""
+    a, b = {w for w in m.split() if w not in _VUOTE and len(w) > 2}, {w for w in n.split() if w not in _VUOTE and len(w) > 2}
+    if len(a) < 3 or len(b) < 3:
+        return False
+    return len(a & b) / len(a | b) >= 0.75
+
+
 def _gia_chiesta(conn, domanda: str) -> bool:
     """Una domanda uguale o quasi (anche posta da un altro agente) gia' aperta o con risposta recente non va richiesta a Lorenzo."""
     n = _norm(domanda)
@@ -41,7 +53,7 @@ def _gia_chiesta(conn, domanda: str) -> bool:
                              WHERE stato = 'aperta' OR (stato = 'risposta' AND risposta_il > NOW() - INTERVAL '60 days')
                              ORDER BY id DESC LIMIT 300""").fetchall():
         m = _norm(r["domanda"])
-        if m == n or SequenceMatcher(None, m, n).ratio() >= 0.8:
+        if m == n or SequenceMatcher(None, m, n).ratio() >= 0.8 or _stesso_argomento(m, n):
             return True
     return False
 
