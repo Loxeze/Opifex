@@ -1,4 +1,4 @@
-// Reparti pronti (Legale, Sviluppo software) e Sandbox. Solo titolare.
+// Reparti pronti (Legale, Sviluppo software, Casa editrice) e Sandbox. Solo titolare.
 function vistaReparti() {
   const corpo = h("div"), msg = h("div");
   const carica = async () => {

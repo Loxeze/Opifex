@@ -1,4 +1,4 @@
-"""Reparti pronti (Legale, Sviluppo software) e sandbox del codice. Solo titolare."""
+"""Reparti pronti (Legale, Sviluppo software, Casa editrice) e sandbox del codice. Solo titolare."""
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
