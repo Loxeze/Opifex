@@ -1,7 +1,7 @@
 "use strict";
 // CRM: contatti con filtri combinabili, segmenti salvati (liste intelligenti), esportazione CSV e nuova opportunità dalla bacheca.
 
-const FILTRI_MENU = [["genere", "Persone / enti"], ["tipo", "Tipo"], ["regione", "Regione"], ["provincia", "Provincia"], ["settore", "Settore"], ["relazione", "Relazione"], ["categoria", "Categoria"], ["lista_id", "Lista"]];
+const FILTRI_MENU = [["genere", "Persone / enti"], ["tipo", "Tipo"], ["regione", "Regione"], ["provincia", "Provincia"], ["settore", "Settore"], ["relazione", "Relazione"], ["categoria", "Categoria"], ["lista_id", "Lista"], ["impresa_id", "A nome di (impresa)"], ["reparto_id", "Reparto utile"]];
 const FILTRI_FLAG = [["con_email", "Ha l'email"], ["con_telefono", "Ha il telefono"], ["da_ricontattare", "Da ricontattare"], ["mai_contattati", "Mai contattati"], ["con_opportunita", "Con opportunità aperte"], ["senza_responsabile", "Senza responsabile"]];
 
 function crmContatti() {
@@ -10,7 +10,7 @@ function crmContatti() {
   const campi = {};
   const filtri = () => {
     const f = {};
-    FILTRI_MENU.forEach(([k]) => { if (campi[k] && campi[k].value) f[k] = k === "lista_id" ? Number(campi[k].value) : campi[k].value; });
+    FILTRI_MENU.forEach(([k]) => { if (campi[k] && campi[k].value) f[k] = ["lista_id", "impresa_id", "reparto_id"].includes(k) ? Number(campi[k].value) : campi[k].value; });
     FILTRI_FLAG.forEach(([k]) => { if (campi[k] && campi[k].checked) f[k] = true; });
     if (campi.q.value.trim().length >= 2) f.q = campi.q.value.trim();
     return f;
@@ -47,7 +47,7 @@ function crmContatti() {
     campi.q = h("input", { type: "search", placeholder: "Cerca per nome, ente, email o telefono", maxlength: 100 });
     campi.q.addEventListener("keydown", (e) => { if (e.key === "Enter") cerca(1); });
     FILTRI_MENU.forEach(([k, etichetta]) => {
-      const opz = k === "genere" ? [["persona", "Persone"], ["organizzazione", "Enti"]] : k === "lista_id" ? valori.liste.map(l => [l.id, l.nome]) : (valori[k] || []).map(v => [v, v]);
+      const opz = k === "genere" ? [["persona", "Persone"], ["organizzazione", "Enti"]] : k === "lista_id" ? valori.liste.map(l => [l.id, l.nome]) : k === "impresa_id" ? valori.imprese.map(l => [l.id, l.nome]) : k === "reparto_id" ? valori.reparti.map(l => [l.id, l.nome]) : (valori[k] || []).map(v => [v, v]);
       campi[k] = h("select", { onchange: () => cerca(1) }, h("option", { value: "" }, etichetta + ": tutti"), opz.map(([v, t]) => h("option", { value: v }, t)));
     });
     FILTRI_FLAG.forEach(([k, etichetta]) => { campi[k] = h("input", { type: "checkbox", onchange: () => cerca(1) }); });

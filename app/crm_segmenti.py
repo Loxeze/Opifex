@@ -7,7 +7,7 @@ from . import crm, crm_schede as cs
 
 TESTO = ("genere", "tipo", "regione", "provincia", "settore", "relazione", "categoria")
 FLAG = ("con_email", "con_telefono", "da_ricontattare", "mai_contattati", "con_opportunita", "senza_responsabile")
-CHIAVI = TESTO + FLAG + ("lista_id", "q")
+CHIAVI = TESTO + FLAG + ("lista_id", "impresa_id", "reparto_id", "q")
 MAX_PAGINA = 200
 
 
@@ -21,7 +21,7 @@ def pulisci(filtri: dict | None) -> dict:
     for k, v in (filtri or {}).items():
         if k not in CHIAVI or v in (None, "", False):
             continue
-        if k == "lista_id":
+        if k in ("lista_id", "impresa_id", "reparto_id"):
             try:
                 out[k] = int(v)
             except (TypeError, ValueError):
@@ -44,6 +44,10 @@ def _dove(f: dict) -> tuple[str, dict]:
             w.append(f"c.{k} = %({k})s"); p[k] = f[k]
     if "lista_id" in f:
         w.append("c.lista_id = %(lista_id)s"); p["lista_id"] = f["lista_id"]
+    if "impresa_id" in f:
+        w.append("EXISTS (SELECT 1 FROM crm_contatto_imprese ci WHERE ci.contatto_id = c.id AND ci.azienda_id = %(impresa_id)s)"); p["impresa_id"] = f["impresa_id"]
+    if "reparto_id" in f:
+        w.append("EXISTS (SELECT 1 FROM crm_contatto_reparti cr WHERE cr.contatto_id = c.id AND cr.divisione_id = %(reparto_id)s)"); p["reparto_id"] = f["reparto_id"]
     if "categoria" in f:
         w.append("EXISTS (SELECT 1 FROM crm_contatto_categorie k WHERE k.contatto_id = c.id AND k.categoria = %(categoria)s)"); p["categoria"] = f["categoria"]
     if f.get("con_email"):
@@ -93,17 +97,20 @@ def valori(conn) -> dict:
         return [r["v"] for r in conn.execute(f"SELECT DISTINCT {col} AS v FROM crm_contatti WHERE {col} IS NOT NULL AND {col} <> '' ORDER BY 1 LIMIT 300").fetchall()]
     return {"tipo": distinti("tipo"), "regione": distinti("regione"), "provincia": distinti("provincia"), "settore": distinti("settore"), "relazione": distinti("relazione"),
             "categoria": [r["nome"] for r in conn.execute("SELECT nome FROM crm_categorie ORDER BY nome").fetchall()],
-            "liste": conn.execute("SELECT id, nome FROM crm_liste ORDER BY nome").fetchall()}
+            "liste": conn.execute("SELECT id, nome FROM crm_liste ORDER BY nome").fetchall(),
+            "imprese": conn.execute("SELECT id, nome FROM aziende WHERE attiva ORDER BY nome").fetchall(),
+            "reparti": conn.execute("SELECT id, nome FROM divisioni ORDER BY nome").fetchall()}
 
 
 def esporta_csv(conn, filtri: dict | None, utente_id: int | None = None) -> str:
     f = pulisci(filtri)
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
-    w.writerow(["Nome", "Ente", "Email", "Telefono", "Tipo", "Regione", "Provincia", "Settore", "Relazione", "Ultimo contatto"])
+    w.writerow(["Nome", "Ente", "Email", "Telefono", "Tipo", "Regione", "Provincia", "Settore", "Relazione", "Ultimo contatto", "Imprese associate"])
     n = 0
     for c in _righe(conn, f):
-        w.writerow([c["nome"], c["ente"], c["email"], c["telefono"], c["tipo"], c["regione"] or "", c["provincia"] or "", c["settore"] or "", c["relazione"], c["ultimo_contatto"] or ""])
+        w.writerow([c["nome"], c["ente"], c["email"], c["telefono"], c["tipo"], c["regione"] or "", c["provincia"] or "", c["settore"] or "", c["relazione"], c["ultimo_contatto"] or "",
+                    "; ".join(r["nome"] for r in conn.execute("SELECT a.nome FROM crm_contatto_imprese i JOIN aziende a ON a.id = i.azienda_id WHERE i.contatto_id = %s ORDER BY a.nome", (c["id"],)).fetchall())])
         n += 1
     crm._registra(conn, None, utente_id, "esporta_titolare", {k: bool(v) for k, v in f.items()}, n)
     return buf.getvalue()

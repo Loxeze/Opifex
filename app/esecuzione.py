@@ -14,6 +14,7 @@ STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strume
 from . import eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
+from . import vademecum
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
 
@@ -107,7 +108,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         t_inizio = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
         a = _carica_agente(conn, agente_id)
 
-        a["istruzioni"] = a["istruzioni"] + richieste.REGOLA + percorsi_blocco(conn, agente_id)
+        a["istruzioni"] = a["istruzioni"] + richieste.REGOLA + vademecum.blocco(conn) + percorsi_blocco(conn, agente_id)
         if max_token:
             a["max_token_risposta"] = max_token
         if not a["attivo"]:

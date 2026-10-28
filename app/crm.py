@@ -12,7 +12,7 @@ from .config import impostazioni
 
 MINIMO = 5
 MAX_RIGHE = 50_000
-FILTRI = {"tipo", "regione", "provincia", "fascia_dimensione", "settore", "relazione", "lista_id"}
+FILTRI = {"tipo", "regione", "provincia", "fascia_dimensione", "settore", "relazione", "lista_id", "impresa", "reparto"}
 RAGGRUPPA = {"tipo", "regione", "provincia", "fascia_dimensione", "settore", "relazione"}
 
 SINONIMI = {
@@ -366,6 +366,10 @@ def _dove(filtri: dict) -> tuple[str, list]:
             continue
         if k == "lista_id":
             cond.append("lista_id = %s"); par.append(int(v))
+        elif k == "impresa":
+            cond.append("id IN (SELECT ci.contatto_id FROM crm_contatto_imprese ci JOIN aziende az ON az.id = ci.azienda_id WHERE lower(az.nome) = lower(%s))"); par.append(str(v))
+        elif k == "reparto":
+            cond.append("id IN (SELECT cr.contatto_id FROM crm_contatto_reparti cr JOIN divisioni dv ON dv.id = cr.divisione_id WHERE lower(dv.nome) = lower(%s))"); par.append(str(v))
         else:
             cond.append(f"lower({k}) = lower(%s)"); par.append(str(v))
     return (" WHERE " + " AND ".join(cond)) if cond else "", par
@@ -398,12 +402,13 @@ def conta(conn, filtri: dict | None, raggruppa_per: str | None = None, agente_id
 STRUMENTO = {"name": "crm_conta",
              "description": ("Conta i contatti del CRM per tipo, zona, dimensione o relazione. Restituisce solo numeri aggregati: mai nomi, email o telefoni. "
                              f"Sotto {MINIMO} contatti risponde «meno di {MINIMO}». Filtri ammessi: tipo (es. comune), regione, provincia (sigla), "
-                             "fascia_dimensione (es. «piccolo (<5.000 ab.)»), settore, relazione (nessuna/contattato/collaborato/cliente), lista_id. "
+                             "fascia_dimensione (es. «piccolo (<5.000 ab.)»), settore, relazione (nessuna/contattato/collaborato/cliente), lista_id, impresa (nome: contatti associati a quell'impresa), reparto (nome del reparto di Opifex a cui possono servire). "
                              "Con raggruppa_per ottieni la ripartizione (es. per regione)."),
              "input_schema": {"type": "object", "properties": {
                  "filtri": {"type": "object", "additionalProperties": {"type": "string"}},
                  "raggruppa_per": {"type": "string", "enum": sorted(RAGGRUPPA)}}, "required": []}}
 AVVISO = ("\n\nCRM: puoi contare i contatti con crm_conta (solo numeri). Non puoi vedere elenchi, nomi o recapiti e non devi chiederli. "
+          "Ogni contatto e' associato a una o piu' imprese e si contatta solo a nome di quelle (filtro impresa); per un'altra impresa serve prima una nuova associazione con motivo e data, che fa Lorenzo. "
           "Se per un invio serve la lista, indica a Lorenzo quali criteri usare: la selezione e l'invio li approva lui.")
 
 

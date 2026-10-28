@@ -59,6 +59,7 @@ from .rotte_reparti import router as router_reparti
 from .rotte_progetto import router as router_progetto
 from .rotte_crm_schede import router as router_crm_schede
 from .rotte_crm_modello import router as router_crm_modello
+from .rotte_crm_imprese import router as router_crm_imprese
 from .rotte_pwa import router as router_pwa
 from .rotte_dossier import router as router_dossier
 from .rotte_crm import router as router_crm
@@ -270,6 +271,7 @@ app.include_router(router_reparti)
 app.include_router(router_progetto)
 app.include_router(router_crm_schede)
 app.include_router(router_crm_modello)
+app.include_router(router_crm_imprese)
 app.include_router(router_pwa)
 app.include_router(router_dossier)
 app.include_router(router_crm)

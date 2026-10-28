@@ -88,6 +88,7 @@ function vistaContatto() {
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("PUT", "/gestione/crm/contatti/" + c.id, { nome: f.nome.value, ente: f.ente.value, email: f.email.value, telefono: f.telefono.value, note: f.note.value, genere: f.genere.value, tipo: f.tipo.value || "altro", comune: f.comune.value,
               prossimo_passo: passo.value || null, prossimo_passo_il: passoIl.value || null, responsabile_utente_id: resp.value ? Number(resp.value) : null }); msg.replaceChildren(avviso("Salvato.", "ok")); await carica(); } catch (e) { err(e); } } }, "Salva la scheda"),
             h("button", { class: "r", onclick: async () => { if (!confirm("Eliminare il contatto con tutta la sua storia?")) return; try { await api("DELETE", "/gestione/crm/contatti/" + c.id); vai("crm"); } catch (e) { err(e); } } }, "Elimina"))),
+        impreseReparti(c, carica, err),
         ...modelloScheda(d, c, carica, err),
         h("h3", {}, "Opportunità"),
         d.opportunita.length ? d.opportunita.map(o => {
@@ -211,4 +212,40 @@ function campiPersonalizzati() {
   };
   carica();
   return corpo;
+}
+
+
+// ---- imprese del gruppo e reparti di Opifex associati al contatto ----
+// Un contatto si contatta solo a nome delle imprese associate; per un'altra impresa serve prima una nuova associazione con motivo e data.
+function impreseReparti(c, carica, err) {
+  const base = "/gestione/crm/contatti/" + c.id;
+  const corpo = h("div", {});
+  const ok = async (f) => { try { await f(); await disegna(); } catch (e) { err(e); } };
+  const disegna = async () => {
+    let d;
+    try { d = await api("GET", base + "/imprese"); } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); return; }
+    const aziendaSel = h("select", {}, [h("option", { value: "" }, "Scegli l'impresa…")].concat(d.imprese_disponibili.filter(a => !d.imprese.some(x => x.azienda_id === a.id)).map(a => h("option", { value: a.id }, a.nome))));
+    const motivo = h("input", { maxlength: 500, placeholder: "Motivo dell'associazione (obbligatorio)" });
+    const dal = h("input", { type: "date", value: new Date().toISOString().slice(0, 10) });
+    const repSel = h("select", {}, [h("option", { value: "" }, "Scegli il reparto…")].concat(d.reparti_disponibili.map(r => h("option", { value: r.id }, r.nome))));
+    const nota = h("input", { maxlength: 500, placeholder: "Perché può servire a questo reparto" });
+    riempi(corpo, [
+      h("h4", {}, "Si può contattare a nome di"),
+      d.imprese.length ? d.imprese.map(x => h("div", { class: "riga", style: "align-items:center" },
+        h("div", { style: "flex:1" }, h("strong", {}, x.impresa), h("div", { class: "sotto" }, "dal " + new Date(x.dal).toLocaleDateString("it-IT") + " · " + x.motivo + (x.da ? " · " + x.da : ""))),
+        h("button", { class: "s", onclick: () => ok(() => api("DELETE", base + "/imprese/" + x.azienda_id)) }, "Togli")))
+        : h("p", { class: "aiuto" }, "Nessuna impresa associata: finché non ne associ una, questo contatto non può essere contattato a nome di nessuno."),
+      h("div", { class: "riga" }, h("label", {}, "Impresa", aziendaSel), h("label", {}, "Dal", dal)), h("label", {}, "Motivo", motivo),
+      h("div", { class: "azioni" }, h("button", { class: "p", onclick: () => { if (!aziendaSel.value) { err(new Error("Scegli l'impresa")); return; }
+        ok(() => api("POST", base + "/imprese", { azienda_id: Number(aziendaSel.value), motivo: motivo.value, dal: dal.value || null })); } }, "Associa impresa")),
+      h("h4", {}, "Reparti di Opifex a cui può essere utile"),
+      d.reparti.length ? d.reparti.map(x => h("div", { class: "riga", style: "align-items:center" },
+        h("div", { style: "flex:1" }, h("strong", {}, x.reparto), h("div", { class: "sotto" }, x.nota)),
+        h("button", { class: "s", onclick: () => ok(() => api("DELETE", base + "/reparti/" + x.divisione_id)) }, "Togli"))) : h("p", { class: "aiuto" }, "Nessun reparto indicato."),
+      h("div", { class: "riga" }, h("label", {}, "Reparto", repSel), h("label", {}, "Nota", nota)),
+      h("div", { class: "azioni" }, h("button", { class: "s", onclick: () => { if (!repSel.value) { err(new Error("Scegli il reparto")); return; }
+        ok(() => api("PUT", base + "/reparti", { divisione_id: Number(repSel.value), nota: nota.value })); } }, "Aggiungi reparto"))]);
+  };
+  disegna();
+  return h("div", { class: "carta" }, h("h3", {}, "Imprese e reparti"), corpo);
 }
