@@ -267,6 +267,9 @@ def modifica(agente_id: int, d: ModificaAgente, utente: dict = Depends(solo_tito
             raise HTTPException(status.HTTP_409_CONFLICT, "Esiste gia' un agente con questo nome")
         ids = campi.pop("connessioni", None)
         fasi = campi.pop("fasi", None)
+        if "istruzioni" in campi:
+            from . import competenze_base
+            competenze_base.salva_storico(conn, agente_id, "modifica", campi["istruzioni"])      # il testo precedente non si perde
         if "divisione_id" in campi:
             campi["tipo"] = "divisione" if campi["divisione_id"] else "sistema"
         if campi:
@@ -420,3 +423,22 @@ def salute_agenti(_=Depends(solo_titolare)):
                       "dettagli": (e.get("dettagli") if e else None)})
     conteggio = {k: sum(1 for r in righe if r["stato"] == k) for k in ("ok", "vuota", "errore", "bloccato", "spento")}
     return {"agenti": righe, "conteggio": conteggio}
+
+
+# ---- competenze di base: storico delle istruzioni ed elenco scaricabile
+@router.get("/agenti/{agente_id}/istruzioni-storico")
+def istruzioni_storico(agente_id: int, _: dict = Depends(solo_titolare)):
+    from . import competenze_base
+    with connessione() as conn:
+        if conn.execute("SELECT 1 FROM agenti WHERE id = %s", (agente_id,)).fetchone() is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Agente inesistente")
+        return {"versioni": competenze_base.storico(conn, agente_id)}
+
+
+@router.get("/competenze/esporta")
+def esporta_competenze(_: dict = Depends(solo_titolare)):
+    from fastapi.responses import Response
+    from . import competenze_base
+    with connessione() as conn:
+        testo = competenze_base.esporta_markdown(conn)
+    return Response(content=testo, media_type="text/markdown; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="agenti-competenze.md"'})

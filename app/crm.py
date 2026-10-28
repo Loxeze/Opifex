@@ -16,10 +16,10 @@ FILTRI = {"tipo", "regione", "provincia", "fascia_dimensione", "settore", "relaz
 RAGGRUPPA = {"tipo", "regione", "provincia", "fascia_dimensione", "settore", "relazione"}
 
 SINONIMI = {
-    "nome": {"nome", "name", "referente", "cognome nome", "contatto"},
-    "ente": {"ente", "organizzazione", "azienda", "comune", "denominazione", "ragione sociale", "organization"},
-    "email": {"email", "e-mail", "mail", "pec", "posta elettronica"},
-    "telefono": {"telefono", "tel", "cellulare", "phone", "recapito"},
+    "nome": {"nome", "name", "referente", "cognome nome", "contatto", "persona", "persona / ufficio", "persona/ufficio", "nominativo", "responsabile", "cognome e nome", "nome e cognome"},
+    "ente": {"ente", "organizzazione", "azienda", "comune", "denominazione", "ragione sociale", "organization", "ente principale", "progetto / rete", "progetto/rete", "istituzione", "societa", "società"},
+    "email": {"email", "e-mail", "mail", "pec", "posta elettronica", "email pubblica", "indirizzo email", "e-mail pubblica", "email professionale"},
+    "telefono": {"telefono", "tel", "cellulare", "phone", "recapito", "telefono pubblico", "numero di telefono", "tel.", "cell"},
     "tipo": {"tipo", "categoria", "tipologia", "type"},
     "regione": {"regione", "region"},
     "provincia": {"provincia", "prov", "sigla provincia", "province"},
@@ -29,7 +29,7 @@ SINONIMI = {
     "relazione": {"relazione", "rapporto", "stato relazione"},
     "ultimo_contatto": {"ultimo_contatto", "ultimo contatto", "data ultimo contatto", "last contact"},
     "consenso": {"consenso", "consenso_marketing", "consenso marketing", "privacy", "opt-in"},
-    "note": {"note", "annotazioni", "notes"},
+    "note": {"note", "annotazioni", "notes", "ruolo documentato", "ruolo", "note dell'utente", "note dell’utente"},
 }
 
 
@@ -197,6 +197,9 @@ def _righe_xlsx(contenuto: bytes):
     return fogli, righe_foglio
 
 
+_PESO = {"nome": 3, "ente": 3, "email": 3, "telefono": 2}     # le colonne che identificano un contatto contano di piu' di una semplice «regione»
+
+
 def _scegli_intestazioni(righe, massimo: int = 15):
     """La riga di intestazioni non e' sempre la prima (titoli, righe vuote): si cerca tra le prime quella con piu' colonne riconosciute."""
     buffer = []
@@ -205,7 +208,7 @@ def _scegli_intestazioni(righe, massimo: int = 15):
         buffer.append(riga)
         if n < massimo:
             nomi = [str(x).strip().lower() for x in riga]
-            punti = sum(1 for k, sin in SINONIMI.items() if any(h in sin for h in nomi))
+            punti = sum(_PESO.get(k, 1) for k, sin in SINONIMI.items() if any(h in sin for h in nomi))
             if punti > migliore[0]:
                 migliore = (punti, n)
         if n >= massimo:
@@ -247,11 +250,9 @@ def _carica(contenuto: bytes, foglio: int | None = None, righe_max: int = MAX_RI
                 scelta = scelta or (0, i, origine, apri, None, buffer, pieno)
                 continue
             pos = pieno[0]
-        cand = (punti, i, origine, apri, pos, buffer, pieno)
+        # con piu' fogli vince quello che somiglia di piu' a un elenco di contatti (non il primo che ha una colonna «regione»)
         if scelta is None or scelta[4] is None or punti > scelta[0]:
-            scelta = cand
-        if foglio is None and punti > 0:
-            break
+            scelta = (punti, i, origine, apri, pos, buffer, pieno)
     if scelta is None:
         raise ErroreCrm("Il file non contiene dati")
     punti, i, origine, apri, pos, buffer, pieno = scelta

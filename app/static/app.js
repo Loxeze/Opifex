@@ -148,7 +148,11 @@ function vistaAgenti() {
   return [
     h("div", { class: "riga", style: "align-items:center" },
       h("h2", {}, "Agenti"),
-      h("div", { style: "text-align:right;flex:0 0 auto" }, h("button", { class: "p", onclick: () => modulo(null) }, "+ Nuovo agente"))),
+      h("div", { style: "text-align:right;flex:0 0 auto;display:flex;gap:8px" },
+        h("button", { class: "s", title: "Scarica l'elenco di tutti gli agenti con compito e istruzioni", onclick: async () => {
+          try { const r = await fetch("/gestione/competenze/esporta", { headers: { Authorization: "Bearer " + token } }); if (!r.ok) throw new Error("Download non riuscito");
+            const l = h("a", { href: URL.createObjectURL(await r.blob()), download: "agenti-competenze.md" }); document.body.append(l); l.click(); l.remove(); } catch (e) { alert(e.message); } } }, "Scarica competenze"),
+        h("button", { class: "p", onclick: () => modulo(null) }, "+ Nuovo agente"))),
     garanzie.length ? avviso("I dati interni e riservati restano bloccati verso: " +
       garanzie.map(f => f.nome).join(", ") + " (mancano le garanzie di non conservazione/DPA). Gli agenti lavorano solo su dati pubblici.", "avv") : null,
     [...gruppi].map(([nome, lista]) => [h("h3", {}, nome), h("div", { class: "griglia" }, lista.map(carta))]),
@@ -345,6 +349,7 @@ function modulo(a) {
       assistentePrompt(istr, () => ({ nome: nome.value.trim(), ruolo: ruolo.value.trim(), rimanda_a: rimanda.value.trim(), livello: livello.value,
         divisione: div.selectedOptions[0] ? div.selectedOptions[0].textContent : "", aziende: (stato.opzioni.aziende || []).filter(z => (d.aziende || []).includes(z.id)).map(z => z.nome).join(", ") })),
       h("label", {}, "Cosa deve fare", h("p", { class: "aiuto" }, "In italiano, come lo spiegheresti a un collaboratore: i suoi compiti, le sue relazioni con gli altri agenti, cosa deve guardare e cosa scaricare, il tono, cosa non deve fare."), istr),
+      nuovo ? null : versioniPrecedenti(a, istr),
       h("h3", {}, "Fasi di lavoro"),
       h("p", { class: "aiuto" }, "Facoltative. Se le lasci vuote l'agente non ha percorsi da seguire. Se le scrivi, per un lavoro avviato dalla pagina «Percorsi» l'agente le svolge una alla volta, nell'ordine, senza saltarne né anticiparne: a fine fase mostra il risultato e (se lo chiedi) aspetta la tua decisione."), contFasi,
       h("div", { class: "riga" }, h("label", {}, "Dipartimento", div), h("label", {}, "Risponde a", sup)),
@@ -746,3 +751,18 @@ function vistaSicurezza() {
 // del server potrebbe arrivare prima che l'ultimo sia pronto.
 function parti() { if (token) avvia(); else mostraAccesso(); }
 if (document.readyState === "complete") parti(); else window.addEventListener("load", parti);
+
+
+// Versioni precedenti delle istruzioni di un agente: si possono rimettere nel campo e poi salvare
+function versioniPrecedenti(agente, campo) {
+  const box = h("div", { class: "sotto" });
+  const bottone = h("button", { class: "s", type: "button", onclick: async () => {
+    try {
+      const d = await api("GET", "/gestione/agenti/" + agente.id + "/istruzioni-storico");
+      if (!d.versioni.length) { box.replaceChildren("Nessuna versione precedente."); return; }
+      const sel = h("select", {}, d.versioni.map((v, i) => h("option", { value: i }, new Date(v.creato_il).toLocaleString("it-IT") + " · " + v.motivo)));
+      box.replaceChildren(sel, h("button", { class: "s", type: "button", style: "margin-left:8px", onclick: () => { campo.value = d.versioni[Number(sel.value)].istruzioni; box.append(h("div", {}, "Messa nel campo: premi Salva per confermare.")); } }, "Rimetti nel campo"));
+    } catch (e) { box.replaceChildren(e.message); }
+  } }, "Versioni precedenti");
+  return h("div", { style: "margin:6px 0" }, bottone, box);
+}

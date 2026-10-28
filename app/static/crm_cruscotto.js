@@ -136,7 +136,11 @@ function importazioneGuidata(chiudi) {
     const bImp = h("button", { class: "p", onclick: (ev) => lancia(false, ev.currentTarget) }, "Importa " + anteprima.righe_totali.toLocaleString("it-IT") + " righe");
     riempi(radice, [h("div", { class: "nome" }, "Importa contatti · 2 di 3 — abbina le colonne"),
       h("p", { class: "sotto" }, anteprima.origine + " · " + anteprima.righe_totali.toLocaleString("it-IT") + " righe" + (anteprima.riconosciute ? "" : " · non ho riconosciuto le intestazioni: abbina tu le colonne")),
-      anteprima.fogli.length > 1 ? h("p", { class: "sotto" }, "Fogli nel file: " + anteprima.fogli.join(", ") + ". Uso quello indicato sopra.") : null,
+      anteprima.fogli.length > 1 ? h("label", {}, "Foglio da importare (il file ne contiene " + anteprima.fogli.length + "; ho scelto quello che somiglia di più a un elenco di contatti)",
+        h("select", { onchange: async (ev) => {
+          try { const fd = new FormData(); fd.append("file", file); fd.append("foglio", ev.target.value); anteprima = await api("POST", "/gestione/crm/importa/anteprima", fd); passo2(dest); }
+          catch (e) { msg2.replaceChildren(avviso(e.message, "no")); } } },
+          anteprima.fogli.map((nome, i) => h("option", { value: i, selected: i === anteprima.foglio }, nome.replace(/^Excel, foglio «|»$/g, ""))))) : null,
       tabella, h("div", { class: "griglia", style: "margin-top:10px" }, anteprima.campi.map(c => h("label", {}, c.etichetta, selezioni[c.chiave]))),
       h("div", { class: "riga" }, h("label", {}, "Se un contatto esiste già (stessa email)", modo), h("label", {}, "Cerca i doppioni", dove)),
       esito, msg2, h("div", { class: "azioni" }, bCtrl, bImp, h("button", { class: "s", onclick: chiudi }, "Annulla"))]);
