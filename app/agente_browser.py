@@ -116,11 +116,11 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
             testi.append(testo_finale.strip())
             continuate = []
         if stop == "pause_turn":  # la ricerca web del fornitore chiede di proseguire
-            messaggi.append({"role": "assistant", "content": d["content"]})
+            _aggiungi_assistente(messaggi, d["content"])
             continue
         if stop != "tool_use":
             break
-        messaggi.append({"role": "assistant", "content": d["content"]})
+        _aggiungi_assistente(messaggi, d["content"])
         risultati = []
         for b in d["content"]:
             if b.get("type") == "tool_use":
@@ -142,7 +142,7 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
             tetto = min(16000, max_token * 2) if stop == "max_tokens" else max_token
             diag["max_token_ritentativo"] = tetto
             d = _chiama_api({"model": modello, "max_tokens": tetto, "system": sistema,
-                             "messages": _con_richiesta_finale(messaggi), "tools": strumenti, "tool_choice": {"type": "none"}})
+                             "messages": _con_richiesta_finale(_ripulisci(messaggi)), "tools": strumenti, "tool_choice": {"type": "none"}})
             t_in += d["usage"]["input_tokens"]; t_out += d["usage"]["output_tokens"]
             extra_t = "".join(b.get("text", "") for b in d["content"] if b.get("type") == "text").strip()
             diag["ritentativo"] = True; diag["stop_ritentativo"] = d.get("stop_reason") or ""
@@ -156,6 +156,35 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
     if stop == "limite_passi" and testo:
         testo += "\n\n(Interrotto: raggiunto il limite di passaggi di navigazione.)"
     return Risposta(testo, t_in, t_out, diag)
+
+
+def _aggiungi_assistente(messaggi: list, contenuto: list) -> None:
+    """Accoda il turno dell'assistente; se l'ultimo messaggio e' gia' dell'assistente (pause_turn) i blocchi vanno nello stesso messaggio,
+    altrimenti la ricerca web resta spezzata tra due messaggi e l'API risponde 400."""
+    if messaggi and messaggi[-1]["role"] == "assistant" and isinstance(messaggi[-1]["content"], list):
+        messaggi[-1] = {"role": "assistant", "content": messaggi[-1]["content"] + list(contenuto)}
+    else:
+        messaggi.append({"role": "assistant", "content": list(contenuto)})
+
+
+def _ripulisci(messaggi: list) -> list:
+    """Toglie le ricerche web rimaste a meta' (server_tool_use senza il suo web_search_tool_result, o viceversa) e i messaggi rimasti vuoti."""
+    out = []
+    for m in messaggi:
+        c = m["content"]
+        if m["role"] == "assistant" and isinstance(c, list):
+            risultati = {b.get("tool_use_id") for b in c if b.get("type") == "web_search_tool_result"}
+            usi = {b.get("id") for b in c if b.get("type") == "server_tool_use"}
+            c = [b for b in c if not (b.get("type") == "server_tool_use" and b.get("id") not in risultati)
+                 and not (b.get("type") == "web_search_tool_result" and b.get("tool_use_id") not in usi)]
+            if not c:
+                continue
+            m = {"role": "assistant", "content": c}
+        if out and out[-1]["role"] == m["role"] == "assistant" and isinstance(out[-1]["content"], list) and isinstance(m["content"], list):
+            out[-1] = {"role": "assistant", "content": out[-1]["content"] + m["content"]}
+        else:
+            out.append(m)
+    return out
 
 
 MAX_CONTINUAZIONI = 3

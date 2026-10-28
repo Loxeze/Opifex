@@ -468,6 +468,22 @@ function modulo_accesso(c) {
 }
 
 
+// Pulsante microfono per un campo di testo: detta la risposta con la voce (stesso motore della chat)
+function bottoneMic(campo, msg) {
+  if (typeof Voce === "undefined" || !Voce.supportoDettatura) return null;
+  const b = h("button", { class: "s", type: "button", title: "Detta la risposta con la voce" }, "🎤");
+  const stile = (on) => { b.textContent = on ? "⏹" : "🎤"; b.classList.toggle("p", !!on); };
+  const fine = () => stile(false);
+  const stato_ = (s) => { if (s === null) stile(false); else if (s === "ascolto") { stile(true); msg.replaceChildren(); } else if (s === "trascrivo") msg.replaceChildren(avviso("Trascrivo la registrazione…", "ok")); else if (s) msg.replaceChildren(avviso(s, "avv")); };
+  b.addEventListener("click", () => {
+    if (Voce.inAscolto()) { Voce.viva = false; Voce.termina(); stile(false); return; }
+    Voce.viva = false;
+    if (Voce.modo === "server") { if (!Voce.registra(campo, fine, stato_, "")) msg.replaceChildren(avviso("Questo browser non può registrare dal microfono.", "avv")); return; }
+    if (!Voce.ascolta(campo, fine, stato_)) msg.replaceChildren(avviso("Il tuo browser non supporta la dettatura vocale: usa Chrome, Edge o Safari.", "avv"));
+  });
+  return b;
+}
+
 // ---------- Richieste (informazioni che servono agli agenti) ----------
 function vistaRichieste() {
   const lista = h("div");
@@ -489,7 +505,7 @@ function vistaRichieste() {
           h("div", { class: "nome" }, (r.bloccante ? "BLOCCANTE · " : "") + r.agente),
           h("div", { class: "risposta" }, r.domanda),
           h("div", { class: "sotto" }, new Date(r.creata_il).toLocaleString("it-IT")),
-          r.stato === "aperta" ? [ris, h("div", { class: "azioni" },
+          r.stato === "aperta" ? [ris, h("div", { class: "azioni" }, bottoneMic(ris, msg),
             h("button", { class: "p", onclick: async () => {
               try { await api("POST", "/gestione/richieste/" + r.id + "/risposta", { risposta: ris.value }); carica(); }
               catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Rispondi"),
@@ -639,7 +655,7 @@ function pannelloRichieste(dopo) {
         h("summary", {}, (r.bloccante ? "BLOCCANTE · " : "") + (r.domanda.length > 110 ? r.domanda.slice(0, 110) + "…" : r.domanda)),
         h("div", { class: "risposta" }, r.domanda),
         h("div", { class: "sotto" }, new Date(r.creata_il).toLocaleString("it-IT")), ris,
-        h("div", { class: "azioni" }, h("button", { class: "p", onclick: () => invia(r, ris) }, "Rispondi"),
+        h("div", { class: "azioni" }, bottoneMic(ris, msg), h("button", { class: "p", onclick: () => invia(r, ris) }, "Rispondi"),
           h("button", { class: "s", onclick: async () => { try { await api("POST", "/gestione/richieste/" + r.id + "/annulla"); aperte.delete(r.id); carica(true); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Non serve più")));
       if (aperte.has(r.id)) d.open = true;
       d.addEventListener("toggle", () => { if (d.open) aperte.add(r.id); else aperte.delete(r.id); });
