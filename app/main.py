@@ -151,10 +151,11 @@ async def _manutenzione():
 async def _trigger_orari():
     """Ogni minuto controlla i trigger a orario accesi e li avvia; poi invia le notifiche push."""
     import asyncio
-    from . import trigger, webpush
+    from . import attese, trigger, webpush
 
     def giro():
         _passo("trigger a orario", trigger.tick)
+        _passo("attese scadute e Ginnasio automatico", attese.controlla)
         _passo("notifiche push", webpush.invia_notifiche)
     await asyncio.sleep(45)
     while True:

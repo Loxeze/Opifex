@@ -401,8 +401,20 @@ def _lavora(rid: int):
                            (comp["id"], r["livello"], corpo, descr, ver, token)).fetchone()["id"]
         conn.execute("UPDATE richieste_formazione SET stato = 'da_approvare', competenza_id = %s, livello_id = %s, token_usati = %s, conclusa_il = NOW() WHERE id = %s",
                      (comp["id"], lid, token, rid))
-        conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
-                     (f"Padre Casati ha scritto «{r['competenza_nome']}» livello {r['livello']} ({LIVELLI[r['livello']]}): leggila e approvala nel Ginnasio.",))
+        auto = False
+        if impostazione(conn, "ginnasio_approva_auto", "1") == "1":
+            try:
+                with conn.transaction():
+                    decidi_livello(conn, lid, True, None)
+                auto = True
+            except ErroreGinnasio:
+                auto = False  # per esempio un livello precedente non ancora approvato: resta da approvare a mano
+        if auto:
+            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
+                         (f"Padre Casati ha scritto «{r['competenza_nome']}» livello {r['livello']} ({LIVELLI[r['livello']]}) e l'ha assegnata: la trovi nel Ginnasio con lo storico.",))
+        else:
+            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
+                         (f"Padre Casati ha scritto «{r['competenza_nome']}» livello {r['livello']} ({LIVELLI[r['livello']]}): leggila e approvala nel Ginnasio.",))
 
 
 # ---------- approvazione e assegnazione ----------
