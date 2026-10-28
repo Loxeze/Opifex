@@ -31,7 +31,7 @@ function vistaGinnasio() {
   const ORIGINI = { manuale: "tu", manager: "un manager", pm: "un project manager", lacuna: "lacuna rilevata", cerimoniere: "Cerimoniere" };
   const errore = (e) => msg.replaceChildren(avviso(e.message, "no"));
   const livelloOpz = () => [1, 2, 3, 4, 5].map(n => h("option", { value: n }, n + " — " + NOMI[n]));
-  let timer = null;
+  let timer = null, versoLivello = -1;  // -1: dal più formato al meno formato
   const carica = async () => {
     try {
       const d = await api("GET", "/gestione/ginnasio"), im = d.impostazioni;
@@ -95,8 +95,10 @@ function vistaGinnasio() {
         d.competenze.length ? d.competenze.map(c => schedaCompetenza(c, d, carica, errore)) : h("p", { class: "sotto" }, "Nessuna competenza ancora: nasce dalla prima formazione approvata."),
         h("h4", {}, "Livello di formazione degli agenti"),
         h("p", { class: "aiuto" }, "Il numero è la media dei livelli delle competenze dell'agente e dice cosa gli è stato installato, non quanto lavora bene (per quello c'è il dossier)."),
-        h("table", { class: "tabella" }, h("thead", {}, h("tr", {}, ["Agente", "Ruolo", "Livello"].map(t => h("th", {}, t)))),
-          h("tbody", {}, d.agenti.slice().sort((a, b) => (b.tipo === "pm") - (a.tipo === "pm") || (b.tipo === "manager") - (a.tipo === "manager") || a.livello_formazione - b.livello_formazione).map(a => h("tr", {},
+        h("table", { class: "tabella" }, h("thead", {}, h("tr", {}, ["Agente", "Ruolo", "Livello"].map(t => t === "Livello"
+          ? h("th", { style: "cursor:pointer", title: "Cambia l'ordine", onclick: () => { versoLivello = -versoLivello; carica(); } }, "Livello " + (versoLivello < 0 ? "▼" : "▲"))
+          : h("th", {}, t)))),
+          h("tbody", {}, d.agenti.slice().sort((a, b) => versoLivello * (a.livello_formazione - b.livello_formazione) || a.nome.localeCompare(b.nome, "it")).map(a => h("tr", {},
             h("td", {}, a.nome), h("td", {}, a.tipo === "pm" ? "Project manager" : a.tipo === "manager" ? "Manager" : a.ruolo || "—"), h("td", {}, String(a.livello_formazione))))))]);
       if ((im.in_corso || d.recenti.some(x => x.stato === "in_corso")) && !timer) timer = setInterval(() => { if (!document.body.contains(destra)) { clearInterval(timer); return; } carica(); }, 8000);
       if (!im.in_corso && timer) { clearInterval(timer); timer = null; }
