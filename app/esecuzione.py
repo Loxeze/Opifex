@@ -15,7 +15,7 @@ STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strume
 from . import eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
-from . import vademecum, note_aurora
+from . import vademecum, note_aurora, scheda_impresa
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
 
@@ -205,6 +205,9 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         sp_ctx = scheda_progetto.contesto(conn, a_f)
         if sp_ctx:
             prefisso.append(sp_ctx); dim["scheda_progetto"] = len(sp_ctx)
+        im_ctx = scheda_impresa.contesto(conn, a_f) if memoria._ok(a_f, "interno") else ""
+        if im_ctx:
+            prefisso.append(im_ctx); dim["scheda_impresa"] = len(im_ctx)
         gi_ctx = ginnasio.contesto(conn, a_f, messaggio) if memoria._ok(a_f, "interno") else ""
         if gi_ctx:
             prefisso.append(gi_ctx); dim["competenze"] = len(gi_ctx)
@@ -476,6 +479,9 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     gna = note_aurora.strumento(agente_id)
                     for s_ in note_aurora.STRUMENTI:
                         gestori[s_["name"]] = gna
+                if ok_int and a["livello"] in ("manager", "referente"):
+                    extra.append(scheda_impresa.STRUMENTO)
+                    gestori["impresa_proponi"] = scheda_impresa.strumento(agente_id)
                 if mem_tool:
                     extra.append(memoria_lavoro.STRUMENTO)
                     avviso_extra += ("\n\nMEMORIA: se durante il lavoro emerge una decisione, un fatto o una preferenza di Lorenzo che servira' in futuro, "

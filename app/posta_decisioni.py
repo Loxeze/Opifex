@@ -9,8 +9,8 @@ from .db import connessione
 from .permessi import solo_titolare
 
 router = APIRouter(prefix="/v1/decisioni", tags=["decisioni"])
-TIPI = ("richiesta", "memoria", "regola", "iniziativa", "nota", "miglioramento")
-ETICHETTA = {"richiesta": "Domanda di un agente", "memoria": "Memoria da approvare", "regola": "Regola di smistamento", "iniziativa": "Iniziativa da approvare", "nota": "Nota da affidare", "miglioramento": "Miglioramento di un agente"}
+TIPI = ("richiesta", "memoria", "regola", "iniziativa", "nota", "miglioramento", "impresa")
+ETICHETTA = {"richiesta": "Domanda di un agente", "memoria": "Memoria da approvare", "regola": "Regola di smistamento", "iniziativa": "Iniziativa da approvare", "nota": "Nota da affidare", "miglioramento": "Miglioramento di un agente", "impresa": "Modifica alla scheda d'impresa"}
 
 
 def elenco(conn) -> list[dict]:
@@ -29,6 +29,10 @@ def elenco(conn) -> list[dict]:
         out.append({"tipo": "nota", "id": r["id"], "titolo": f"Nota «{r['titolo'][:120]}» da affidare a {r['nome']}", "urgente": False, "azioni": ["approva", "respingi"]})
     for r in conn.execute("""SELECT m.id, a.nome, m.sintesi FROM miglioramenti m JOIN agenti a ON a.id = m.agente_id WHERE m.stato = 'proposta' ORDER BY m.id LIMIT 30""").fetchall():
         out.append({"tipo": "miglioramento", "id": r["id"], "titolo": f"Padre Casati propone istruzioni migliori per {r['nome']}: {r['sintesi'][:200]}", "urgente": False, "azioni": ["approva", "respingi"]})
+    for r in conn.execute("""SELECT p.id, az.nome, p.campo, p.testo, a.nome AS agente FROM schede_impresa_proposte p JOIN aziende az ON az.id = p.azienda_id
+                             LEFT JOIN agenti a ON a.id = p.agente_id WHERE p.stato = 'proposta' ORDER BY p.id LIMIT 30""").fetchall():
+        from .scheda_impresa import CAMPI
+        out.append({"tipo": "impresa", "id": r["id"], "titolo": f"{r['agente'] or 'Un agente'} propone per {r['nome']} ({CAMPI[r['campo']]}): {r['testo'][:160]}", "urgente": False, "azioni": ["approva", "respingi"]})
     for i, x in enumerate(out, 1):
         x["n"] = i
     return out
@@ -92,6 +96,12 @@ def decidi(conn, u: dict, tipo: str, did: int, azione: str, testo: str | None = 
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Regola inesistente o gia' decisa")
         registro.registra(conn, u, "organizzazione", "regola approvata" if azione == "approva" else "regola disattivata", r["quando"][:120], "regola", did)
         return "Regola approvata." if azione == "approva" else "Regola scartata."
+    if tipo == "impresa":
+        from . import scheda_impresa
+        try:
+            return scheda_impresa.decidi_proposta(conn, did, azione == "approva", u)
+        except scheda_impresa.ErroreImpresa as e:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
     if tipo == "miglioramento":
         from . import miglioramento
         try:
