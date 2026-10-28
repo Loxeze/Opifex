@@ -1,0 +1,27 @@
+# Quando si pubblica un tag vX.Y.Z costruisce il pacchetto di aggiornamento e crea la release con i suoi file,
+# cosi' l'aggiornamento automatico di Opifex la trova senza passaggi a mano.
+name: Rilascio
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+permissions:
+  contents: write
+jobs:
+  rilascio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pacchetto
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          echo "$VER" > VERSIONE
+          find . -name __pycache__ -type d -prune -exec rm -rf {} +
+          tar czf "opifex-$VER.tgz" app sql requirements.txt VERSIONE crea_titolare.py crea_briefing.py .env.example
+          sha256sum "opifex-$VER.tgz" | cut -d' ' -f1 > "opifex-$VER.tgz.sha256"
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          if [ -f "note/$VER.md" ]; then NOTE="note/$VER.md"; else printf 'Versione %s' "$VER" > /tmp/n.md; NOTE=/tmp/n.md; fi
+          gh release create "$GITHUB_REF_NAME" "opifex-$VER.tgz" "opifex-$VER.tgz.sha256" --title "$VER" --notes-file "$NOTE" --latest
