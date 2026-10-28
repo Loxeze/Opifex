@@ -1,9 +1,10 @@
-# Quando si pubblica un tag vX.Y.Z costruisce il pacchetto di aggiornamento e crea la release con i suoi file,
-# cosi' l'aggiornamento automatico di Opifex la trova senza passaggi a mano.
+# Quando cambia il numero in VERSIONE sul ramo main costruisce il pacchetto di aggiornamento e crea la release vX.Y.Z con i suoi file,
+# cosi' l'aggiornamento automatico di Opifex la trova senza passaggi a mano. Se la release esiste gia' non fa nulla.
 name: Rilascio
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    branches: [main]
+    paths: [VERSIONE, .github/workflows/rilascio.yml]
 permissions:
   contents: write
 jobs:
@@ -11,17 +12,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Pacchetto
-        run: |
-          VER="${GITHUB_REF_NAME#v}"
-          echo "$VER" > VERSIONE
-          find . -name __pycache__ -type d -prune -exec rm -rf {} +
-          tar czf "opifex-$VER.tgz" app sql requirements.txt VERSIONE crea_titolare.py crea_briefing.py .env.example
-          sha256sum "opifex-$VER.tgz" | cut -d' ' -f1 > "opifex-$VER.tgz.sha256"
-      - name: Release
+      - name: Pacchetto e release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VER="${GITHUB_REF_NAME#v}"
+          VER="$(tr -d '[:space:]' < VERSIONE)"
+          echo "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "VERSIONE non valida"; exit 1; }
+          if gh release view "v$VER" >/dev/null 2>&1; then echo "La release v$VER esiste gia'"; exit 0; fi
+          find . -name __pycache__ -type d -prune -exec rm -rf {} +
+          tar czf "opifex-$VER.tgz" app sql requirements.txt VERSIONE crea_titolare.py crea_briefing.py .env.example
+          sha256sum "opifex-$VER.tgz" | cut -d' ' -f1 > "opifex-$VER.tgz.sha256"
           if [ -f "note/$VER.md" ]; then NOTE="note/$VER.md"; else printf 'Versione %s' "$VER" > /tmp/n.md; NOTE=/tmp/n.md; fi
-          gh release create "$GITHUB_REF_NAME" "opifex-$VER.tgz" "opifex-$VER.tgz.sha256" --title "$VER" --notes-file "$NOTE" --latest
+          gh release create "v$VER" "opifex-$VER.tgz" "opifex-$VER.tgz.sha256" --target "$GITHUB_SHA" --title "$VER" --notes-file "$NOTE" --latest
