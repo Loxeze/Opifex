@@ -1,11 +1,13 @@
 """Ciclo di miglioramento degli agenti: se un agente riceve molti «giu» (o Lorenzo lo chiede), Padre Casati legge i motivi e propone istruzioni migliori.
 Nulla cambia da solo: la proposta compare tra le decisioni e, se approvata, le istruzioni vecchie restano nello storico (si puo' tornare indietro)."""
+import json
+import threading
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from . import competenze_base, ginnasio
+from . import casi_prova, competenze_base, ginnasio
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -18,6 +20,58 @@ M_SINT, M_IST = "[[SINTESI]]", "[[ISTRUZIONI]]"
 
 class ErroreMiglioramento(Exception):
     pass
+
+
+SINCRONO = False   # nei collaudi la prova gira nello stesso thread
+CASI_AUTOMATICI = 6
+
+
+def _medie(conn, lotto_id: int) -> dict:
+    return {r["caso_id"]: r for r in conn.execute("SELECT caso_id, punteggio, giudizio FROM prove_esiti WHERE lotto_id = %s", (lotto_id,)).fetchall()}
+
+
+def _esegui_prova(mid: int):
+    """Stessi casi di prova con le istruzioni attuali e con quelle proposte; il risultato resta nella proposta, nulla viene applicato."""
+    try:
+        with connessione() as conn:
+            m = conn.execute("SELECT agente_id, istruzioni_base, proposta FROM miglioramenti WHERE id = %s", (mid,)).fetchone()
+            n = conn.execute("SELECT count(*) AS n FROM casi_prova WHERE agente_id = %s AND attivo", (m["agente_id"],)).fetchone()["n"]
+            if n == 0:
+                casi_prova.genera_casi(conn, m["agente_id"], CASI_AUTOMATICI)
+                conn.commit()
+            prima = casi_prova.avvia(conn, m["agente_id"], f"attuali (miglioramento {mid})", sincrono=True, istruzioni=m["istruzioni_base"])
+            dopo = casi_prova.avvia(conn, m["agente_id"], f"proposte (miglioramento {mid})", sincrono=True, istruzioni=m["proposta"])
+        with connessione() as conn:
+            lp, ld = (conn.execute("SELECT id, media, stato FROM prove_lotti WHERE id = %s", (x,)).fetchone() for x in (prima, dopo))
+            if lp["stato"] != "finito" or ld["stato"] != "finito":
+                raise ErroreMiglioramento("Una delle due prove non e' terminata")
+            ep, ed = _medie(conn, prima), _medie(conn, dopo)
+            casi = [{"richiesta": r["richiesta"], "prima": ep.get(r["id"], {}).get("punteggio"), "dopo": ed.get(r["id"], {}).get("punteggio"),
+                     "giudizio": ed.get(r["id"], {}).get("giudizio")}
+                    for r in conn.execute("SELECT id, richiesta FROM casi_prova WHERE id = ANY(%s) ORDER BY id", (list(ed.keys()),)).fetchall()]
+            mp = float(lp["media"]) if lp["media"] is not None else None
+            md = float(ld["media"]) if ld["media"] is not None else None
+            esito = {"media_prima": mp, "media_dopo": md, "differenza": round(md - mp, 2) if mp is not None and md is not None else None, "casi": casi}
+            conn.execute("UPDATE miglioramenti SET prova_stato = 'finita', prova = %s WHERE id = %s", (json.dumps(esito), mid))
+    except Exception as e:  # noqa: BLE001
+        with connessione() as conn:
+            conn.execute("UPDATE miglioramenti SET prova_stato = 'errore', prova = %s WHERE id = %s", (json.dumps({"errore": str(e)[:300]}), mid))
+
+
+def prova(conn, mid: int):
+    m = conn.execute("SELECT stato, prova_stato FROM miglioramenti WHERE id = %s", (mid,)).fetchone()
+    if m is None:
+        raise ErroreMiglioramento("Proposta inesistente")
+    if m["stato"] != "proposta":
+        raise ErroreMiglioramento("La proposta non e' piu' in attesa")
+    if m["prova_stato"] == "in_corso":
+        raise ErroreMiglioramento("Prova gia' in corso")
+    conn.execute("UPDATE miglioramenti SET prova_stato = 'in_corso', prova = NULL WHERE id = %s", (mid,))
+    conn.commit()
+    if SINCRONO:
+        _esegui_prova(mid)
+    else:
+        threading.Thread(target=_esegui_prova, args=(mid,), daemon=True).start()
 
 
 def _attivo(conn) -> bool:
@@ -132,7 +186,7 @@ class Decisione(BaseModel):
 @router.get("")
 def elenco(stato: str = "proposta", _: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        righe = conn.execute("""SELECT m.id, m.agente_id, a.nome AS agente, m.stato, m.sintesi, m.evidenze, m.proposta, m.istruzioni_base, m.creata_il
+        righe = conn.execute("""SELECT m.id, m.agente_id, a.nome AS agente, m.stato, m.sintesi, m.evidenze, m.proposta, m.istruzioni_base, m.creata_il, m.prova_stato, m.prova
                                 FROM miglioramenti m JOIN agenti a ON a.id = m.agente_id WHERE (%s = 'tutte' OR m.stato = %s) ORDER BY m.id DESC LIMIT 50""", (stato, stato)).fetchall()
         return {"proposte": righe, "candidati": candidati(conn), "attivo": _attivo(conn), "soglia": _soglia(conn)}
 
@@ -145,6 +199,16 @@ def analizza(d: Analisi, _: dict = Depends(solo_titolare)):
         except ErroreMiglioramento as e:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
     return {"id": mid, "sintesi": "Proposta pronta: la trovi tra le decisioni."}
+
+
+@router.post("/{mid}/prova", status_code=202)
+def prova_rotta(mid: int, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            prova(conn, mid)
+        except ErroreMiglioramento as e:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
+    return {"sintesi": "Prova avviata: confronto i casi di prova con le istruzioni attuali e con quelle proposte."}
 
 
 @router.post("/{mid}/decisione")

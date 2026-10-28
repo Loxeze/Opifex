@@ -1,6 +1,15 @@
 "use strict";
 // Miglioramento degli agenti: Padre Casati propone istruzioni migliori per chi riceve molti «giù»; qui si leggono e si approvano.
 
+function provaMiglioramento(p) {
+  const r = p.prova || {};
+  if (p.prova_stato === "in_corso") return h("p", { class: "aiuto" }, "Prova in corso: ricarica fra qualche minuto.");
+  if (p.prova_stato === "errore") return h("p", { class: "aiuto" }, "Prova non riuscita: " + (r.errore || ""));
+  const d = r.differenza;
+  return h("div", { class: "risposta" }, h("b", {}, "Prova sui casi: media " + r.media_prima + " → " + r.media_dopo + (d !== null && d !== undefined ? " (" + (d >= 0 ? "+" : "") + d + ")" : "")),
+    (r.casi || []).map(c => h("div", { class: "sotto" }, c.prima + " → " + c.dopo + " · " + c.richiesta.slice(0, 120))));
+}
+
 function vistaMiglioramenti() {
   const corpo = h("div"), msg = h("div"), cand = h("div");
   const carica = async () => {
@@ -18,7 +27,9 @@ function vistaMiglioramenti() {
           h("div", { class: "risposta", style: "white-space:pre-wrap" }, p.sintesi),
           h("details", {}, h("summary", {}, "Perché (voti e note)"), h("div", { class: "risposta", style: "white-space:pre-wrap" }, p.evidenze || "")),
           h("details", {}, h("summary", {}, "Nuove istruzioni complete"), h("div", { class: "risposta", style: "white-space:pre-wrap;max-height:320px;overflow:auto" }, p.proposta)),
-          h("div", { class: "azioni" }, h("button", { class: "p", onclick: () => decidi("approva") }, "Applica"), h("button", { class: "s", onclick: () => decidi("respingi") }, "Respingi")));
+          p.prova_stato ? provaMiglioramento(p) : null,
+          h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => { try { const r = await api("POST", "/gestione/miglioramenti/" + p.id + "/prova"); msg.replaceChildren(avviso(r.sintesi, "ok")); await carica(); }
+            catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Prova prima di applicare"), h("button", { class: "p", onclick: () => decidi("approva") }, "Applica"), h("button", { class: "s", onclick: () => decidi("respingi") }, "Respingi")));
       }) : h("p", { class: "sotto" }, "Nessuna proposta in attesa."));
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };

@@ -11,7 +11,7 @@ import psycopg
 from datetime import date, timedelta
 from fastapi.testclient import TestClient
 from app.main import app
-from app import siti_hosting, cassaforte, silenzio, telegram, webpush, pm, studio, esecuzione, agente_browser, dialoghi, casati, cerimoniere, memoria_lavoro, allarmi, backup, prova_ripristino, dossier, miglioramento, consegne, scheda_progetto, memoria, ginnasio, squadre
+from app import siti_hosting, cassaforte, silenzio, telegram, webpush, pm, studio, esecuzione, agente_browser, dialoghi, casati, cerimoniere, memoria_lavoro, allarmi, backup, prova_ripristino, dossier, miglioramento, casi_prova, consegne, scheda_progetto, memoria, ginnasio, squadre
 from app.db import connessione
 from app.sicurezza import cifra_password
 from aiuto2fa import accedi
@@ -118,4 +118,34 @@ with TestClient(app) as c:
     ok("impostazioni salvate", r.status_code == 200 and c.get("/gestione/miglioramenti", headers=H).json()["soglia"] == 5)
     ok("soglia fuori limite rifiutata", c.put("/gestione/miglioramenti/impostazioni", headers=H, json={"attivo": True, "soglia": 0}).status_code == 422)
     ok("vista servita", "vistaMiglioramenti" in c.get("/app/miglioramenti.js").text)
+
+    # prova delle istruzioni proposte prima di applicarle
+    from types import SimpleNamespace
+    def finto_modello(fornitore, modello, sis, cont, mt=1500, web=None):
+        if "valutatore" in sis:
+            return SimpleNamespace(testo=json.dumps({"punteggio": 9 if "migliore" in cont else 6, "giudizio": "ok"}), token_input=10, token_output=5)
+        return SimpleNamespace(testo=json.dumps([{"richiesta": f"Domanda {i}", "criteri": f"Criterio {i}"} for i in range(3)]), token_input=10, token_output=5)
+    casi_prova.chiama_modello = finto_modello
+    def api_per_istruzioni(corpo):
+        sistema = corpo.get("system") if isinstance(corpo.get("system"), str) else json.dumps(corpo.get("system"))
+        return fine("Risposta migliore" if "esito finale in una riga" in sistema else "Risposta base")
+    agente_browser._chiama_api = api_per_istruzioni
+    miglioramento.SINCRONO = True
+    sql("UPDATE miglioramenti SET stato='respinta' WHERE stato='proposta'")
+    sql("UPDATE miglioramenti SET creata_il = NOW() - interval '40 days'")
+    base = sql("SELECT istruzioni FROM agenti WHERE id=%s", (dario,))[0][0]
+    pro = base + " Chiudi sempre con l'esito finale in una riga."
+    mid3 = sql("INSERT INTO miglioramenti (agente_id, istruzioni_base, proposta, sintesi) VALUES (%s,%s,%s,'Aggiunge l''esito') RETURNING id", (dario, base, pro))[0][0]
+    ok("nessun caso di prova all'inizio", sql("SELECT count(*) FROM casi_prova WHERE agente_id=%s", (dario,))[0][0] == 0)
+    r = c.post(f"/gestione/miglioramenti/{mid3}/prova", headers=H)
+    ok("prova avviata", r.status_code == 202, r.text[:200])
+    pv = sql("SELECT prova_stato, prova FROM miglioramenti WHERE id=%s", (mid3,))[0]
+    ok("prova finita", pv[0] == "finita", str(pv))
+    ok("i casi sono stati generati da soli", sql("SELECT count(*) FROM casi_prova WHERE agente_id=%s", (dario,))[0][0] == 3)
+    ok("le istruzioni proposte vanno meglio", pv[1]["media_prima"] == 6.0 and pv[1]["media_dopo"] == 9.0 and pv[1]["differenza"] == 3.0 and len(pv[1]["casi"]) == 3, str(pv[1])[:300])
+    ok("l'agente non e' stato toccato dalla prova", sql("SELECT istruzioni FROM agenti WHERE id=%s", (dario,))[0][0] == base)
+    ok("la prova e' nell'elenco", c.get("/gestione/miglioramenti", headers=H).json()["proposte"][0]["prova_stato"] == "finita")
+    ok("due lotti registrati con etichette", [x[0] for x in sql("SELECT etichetta FROM prove_lotti WHERE agente_id=%s ORDER BY id", (dario,))] == [f"attuali (miglioramento {mid3})", f"proposte (miglioramento {mid3})"])
+    ok("proposta inesistente", c.post("/gestione/miglioramenti/99999/prova", headers=H).status_code == 422)
+    ok("Carla non prova", c.post(f"/gestione/miglioramenti/{mid3}/prova", headers=HC).status_code == 403)
 print("TOTALE", sum(ris), "/", len(ris))

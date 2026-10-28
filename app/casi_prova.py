@@ -8,7 +8,7 @@ import threading
 from . import catalogo_modelli
 from .db import connessione
 from .fornitori import chiama_modello
-from .esecuzione import esegui_agente
+from .esecuzione import esegui_agente, PROVA_ISTRUZIONI
 
 MAX_CASI = 20
 
@@ -38,9 +38,9 @@ def _json(testo: str):
         raise ErroreProve("risposta del modello non leggibile") from None
 
 
-def impronta(conn, agente_id: int) -> str:
+def impronta(conn, agente_id: int, istruzioni: str | None = None) -> str:
     a = conn.execute("SELECT istruzioni, modello, ruolo FROM agenti WHERE id=%s", (agente_id,)).fetchone()
-    return hashlib.sha256(f"{a['ruolo']}|{a['modello']}|{a['istruzioni']}".encode()).hexdigest()[:12]
+    return hashlib.sha256(f"{a['ruolo']}|{a['modello']}|{istruzioni if istruzioni is not None else a['istruzioni']}".encode()).hexdigest()[:12]
 
 
 def genera_casi(conn, agente_id: int, quanti: int = 10) -> int:
@@ -73,7 +73,8 @@ def giudica(conn, agente_id: int, caso: dict, risposta: str) -> tuple[int, str]:
     return max(0, min(10, int(j.get("punteggio", 0)))), str(j.get("giudizio", ""))[:500]
 
 
-def _lavora(lotto_id: int, agente_id: int):
+def _lavora(lotto_id: int, agente_id: int, istruzioni: str | None = None):
+    tk = PROVA_ISTRUZIONI.set((agente_id, istruzioni)) if istruzioni else None
     try:
         with connessione() as conn:
             casi = [dict(c) for c in conn.execute("SELECT id, richiesta, criteri FROM casi_prova WHERE agente_id=%s AND attivo ORDER BY id", (agente_id,)).fetchall()]
@@ -92,21 +93,24 @@ def _lavora(lotto_id: int, agente_id: int):
     except Exception as e:  # noqa: BLE001
         with connessione() as conn:
             conn.execute("UPDATE prove_lotti SET stato='errore', errore=%s WHERE id=%s", (str(e)[:300], lotto_id))
+    finally:
+        if tk is not None:
+            PROVA_ISTRUZIONI.reset(tk)
 
 
-def avvia(conn, agente_id: int, etichetta: str | None = None, sincrono: bool = False) -> int:
+def avvia(conn, agente_id: int, etichetta: str | None = None, sincrono: bool = False, istruzioni: str | None = None) -> int:
     casi = conn.execute("SELECT count(*) AS n FROM casi_prova WHERE agente_id=%s AND attivo", (agente_id,)).fetchone()["n"]
     if not casi:
         raise ErroreProve("Nessun caso di prova attivo per questo agente")
     if conn.execute("SELECT 1 FROM prove_lotti WHERE agente_id=%s AND stato='in_corso' AND creato_il > NOW() - INTERVAL '1 hour'", (agente_id,)).fetchone():
         raise ErroreProve("C'e' gia' una prova in corso per questo agente")
     lid = conn.execute("INSERT INTO prove_lotti (agente_id, etichetta, impronta, totale) VALUES (%s,%s,%s,%s) RETURNING id",
-                       (agente_id, (etichetta or "")[:60] or None, impronta(conn, agente_id), casi)).fetchone()["id"]
+                       (agente_id, (etichetta or "")[:60] or None, impronta(conn, agente_id, istruzioni), casi)).fetchone()["id"]
     conn.commit()
     if sincrono:
-        _lavora(lid, agente_id)
+        _lavora(lid, agente_id, istruzioni)
     else:
-        threading.Thread(target=_lavora, args=(lid, agente_id), daemon=True).start()
+        threading.Thread(target=_lavora, args=(lid, agente_id, istruzioni), daemon=True).start()
     return lid
 
 
