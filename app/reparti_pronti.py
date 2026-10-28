@@ -70,7 +70,8 @@ EDITORIA = {
     ],
 }
 from .reparto_social import SOCIALE, REGOLE_SOC
-REPARTI = {"legale": LEGALE, "sviluppo": SVILUPPO, "editoria": EDITORIA, "social": SOCIALE}
+from .reparto_ricerca import RICERCA, REGOLE_RS
+REPARTI = {"legale": LEGALE, "sviluppo": SVILUPPO, "editoria": EDITORIA, "social": SOCIALE, "ricerca": RICERCA}
 
 
 def _crea(conn, div_id, sup_id, nome, ruolo, livello, modello, istr, **extra):
@@ -89,7 +90,7 @@ def stato(conn) -> list[dict]:
     out = []
     for chiave, d in REPARTI.items():
         n_att = conn.execute("""SELECT count(*) AS n FROM agenti a JOIN divisioni dv ON dv.id = a.divisione_id WHERE dv.nome = %s""", (d["divisione"][0],)).fetchone()["n"]
-        out.append({"chiave": chiave, "nome": d["divisione"][0], "descrizione": d["divisione"][1], "attivo": n_att > 0, "agenti": n_att})
+        out.append({"chiave": chiave, "nome": d["divisione"][0], "descrizione": d["divisione"][1], "attivo": n_att >= len(d["operativi"]) + 1, "agenti": n_att})
     return out
 
 
@@ -105,7 +106,12 @@ def attiva(conn, chiave: str, utente: dict | None = None) -> dict:
     man, nuovo = _crea(conn, div_id, aurora["id"] if aurora else None, nome_m, ruolo_m, "manager", modello_m, istr_m, **(extra_m[0] if extra_m else {}))
     creati = [nome_m] if nuovo else []
     for voce in d["operativi"]:
-        if chiave == "social":
+        if chiave == "ricerca":
+            nome, ruolo, istr, extra = voce
+            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", "claude-sonnet-5-5", istr + " " + REGOLE_RS, **{"usa_biblioteca": True, **extra})
+            if nuovo:
+                creati.append(nome)
+        elif chiave == "social":
             nome, ruolo, istr, extra = voce
             aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", "claude-sonnet-5-5", istr + " " + REGOLE_SOC, usa_biblioteca=True, **extra)
             if nuovo:

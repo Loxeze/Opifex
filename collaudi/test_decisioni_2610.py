@@ -95,5 +95,5 @@ with TestClient(app) as c:
     ok("regole comuni: tre livelli, codici, deleghe, formato e decisioni di Lorenzo", all(x in R_ for x in ("fatto verificato", "#R richiesta", "#D dubbio", "DELEGHE:", "FORMATO DI OGNI CONSEGNA", "DECISIONI DI LORENZO", "Vademecum", "valuta_agente")))
     ok("Dario: regole del CRM nelle competenze", "associato a una o piu' imprese" in cb.COMPETENZE["Dario"] and "Trascrizione" in cb.COMPETENZE["Dario"])
     ok("Capo sviluppo: il codice non va in uso, pubblica il Maestro di chiavi", "Maestro di chiavi" in cb.COMPETENZE["Capo sviluppo"] and "non lo metti in uso tu" in cb.COMPETENZE["Capo sviluppo"])
-    ok("competenze 1.52.0: aggiornati solo i ruoli del prompt", {n for n, v in cb.DAL.items() if v == "1.52.0"} == {"Capo sviluppo", "Aurora", "Elena", "Radar", "Tendenze", "Legal Master", "Architetto", "Marco", "Dario", "Giulia"}) and cb.DAL["Padre Casati"] == "1.57.0"
+    ok("competenze 1.52.0: aggiornati solo i ruoli del prompt", {n for n, v in cb.DAL.items() if v == "1.52.0"} == {"Capo sviluppo", "Aurora", "Radar", "Tendenze", "Legal Master", "Architetto", "Marco", "Dario", "Giulia"}) and cb.DAL["Padre Casati"] == "1.57.0" and cb.DAL["Elena"] == "1.59.0"
 print("TOTALE", sum(ris), "/", len(ris))

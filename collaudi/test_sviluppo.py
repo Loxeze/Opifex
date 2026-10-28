@@ -59,7 +59,7 @@ with TestClient(app) as c:
     ok("solo titolare", c.get("/gestione/reparti", headers=HC).status_code == 403 and c.get("/gestione/sandbox", headers=HC).status_code == 403)
     n0 = sql("SELECT count(*) FROM agenti")[0][0]
     r = c.get("/gestione/reparti", headers=H).json()["reparti"]
-    ok("all'inizio nessun reparto attivo", [x["attivo"] for x in r] == [False, False, False, False], str(r))
+    ok("all'inizio nessun reparto attivo", [x["attivo"] for x in r] == [False, False, False, False, False], str(r))
     ok("chiave sconosciuta: 404", c.post("/gestione/reparti/boh/attiva", headers=H).status_code == 404)
     # ---- Legale
     x = c.post("/gestione/reparti/legale/attiva", headers=H).json()
