@@ -15,13 +15,9 @@ from .documenti import FileNonLeggibile, dividi_in_pezzi, estrai_testo, query_ri
 from .riservatezza import puo_uscire
 
 MAX_PDF_BYTE = 25 * 1024 * 1024
-MAX_PROPOSTE_APERTE = 10
-MAX_PROPOSTE_GIORNO = 20
 MAX_RICERCHE_ESECUZIONE = 8
 # durante una formazione Padre Casati puo' scaricare da solo, ma poco: tetti per richiesta (li imposta il Ginnasio)
 FORMAZIONE = contextvars.ContextVar("formazione_casati", default=None)
-MAX_DOC_FORMAZIONE = 6
-MAX_BYTE_FORMAZIONE = 25_000_000
 MAX_DISPENSA = 24000
 ARCHIVI = ("wikipedia", "openalex", "semanticscholar", "arxiv")
 UA = {"User-Agent": "Opifex/1.16 (biblioteca di studio; uso interno)"}
@@ -258,18 +254,18 @@ def elenco_biblioteca(conn, a: dict) -> str:
 
 
 # ---------- coda dei download ----------
+def _approvazione_richiesta(conn) -> bool:
+    """Per riportare l'approvazione di Lorenzo: impostazione casati_download_approvazione = 'richiesta'."""
+    r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'casati_download_approvazione'").fetchone()
+    return bool(r) and str(r["valore"]).strip().lower() == "richiesta"
+
+
 def proponi_download(conn, agente_id, dati: dict) -> str:
     url = url_valido(str(dati.get("url") or ""))
     titolo = _pulisci(dati.get("titolo"), 250)
     if len(titolo) < 3:
         raise ErroreCasati("Manca il titolo del documento")
     archivio = str(dati.get("archivio") or "")[:30] or "altro"
-    aperte = conn.execute("SELECT count(*) AS n FROM biblioteca_coda WHERE stato = 'proposto'").fetchone()["n"]
-    if aperte >= MAX_PROPOSTE_APERTE:
-        raise ErroreCasati(f"Ci sono gia' {aperte} documenti in attesa di approvazione: aspetta che Lorenzo li esamini")
-    oggi = conn.execute("SELECT count(*) AS n FROM biblioteca_coda WHERE creata_il >= NOW() - interval '1 day'").fetchone()["n"]
-    if oggi >= MAX_PROPOSTE_GIORNO:
-        raise ErroreCasati("Limite giornaliero di proposte raggiunto")
     if conn.execute("SELECT 1 FROM biblioteca_coda WHERE url = %s AND stato IN ('proposto','scaricato')", (url,)).fetchone():
         raise ErroreCasati("Questo documento e' gia' stato proposto o scaricato")
     anno = dati.get("anno")
@@ -277,6 +273,12 @@ def proponi_download(conn, agente_id, dati: dict) -> str:
         """INSERT INTO biblioteca_coda (url, titolo, autori, anno, archivio, licenza, motivo, proposto_da_agente_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (url, titolo, _pulisci(dati.get("autori"), 300) or None, anno if isinstance(anno, int) and 1000 < anno < 2200 else None, archivio,
          _pulisci(dati.get("licenza"), 120) or None, _pulisci(dati.get("motivo"), 500) or None, agente_id)).fetchone()["id"]
+    if agente_id and not _approvazione_richiesta(conn):
+        # Nessun limite e nessuna attesa: Padre Casati scarica subito (restano i controlli di sicurezza su indirizzo e dimensione del singolo file).
+        esito = decidi_download(conn, cid, True, None)
+        if esito["stato"] == "scaricato":
+            return f"Scaricato e salvato «{titolo}» (#{cid}, {esito['caratteri']} caratteri). Leggilo con biblioteca_leggi."
+        return f"Download non riuscito (#{cid}): {esito.get('errore', '')[:200]}. Puoi riproporlo o scegliere un'altra fonte."
     if agente_id:
         conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"Padre Casati propone di scaricare «{titolo[:100]}»: lo trovi in Impostazioni → Biblioteca.",))
     return f"Proposta registrata (#{cid}): il documento entra in biblioteca solo dopo l'approvazione di Lorenzo."
@@ -365,7 +367,7 @@ STRUMENTI = [
     {"name": "cerca_fonti", "description": "Cerca fonti online ad accesso aperto. archivio: wikipedia, openalex, semanticscholar (studi accademici) o arxiv. Restituisce titolo, autori, anno, licenza e link; "
                                           "non scarica nulla. Non inserire mai nella ricerca dati riservati.",
      "input_schema": {"type": "object", "properties": {"archivio": {"type": "string", "enum": list(ARCHIVI)}, "testo": {"type": "string"}, "lingua": {"type": "string"}}, "required": ["archivio", "testo"]}},
-    {"name": "proponi_download", "description": "Proponi di scaricare un PDF ad accesso aperto nella biblioteca. Non scarica: lo scarica il sistema solo se Lorenzo approva. "
+    {"name": "proponi_download", "description": "Proponi di scaricare un PDF ad accesso aperto nella biblioteca. Scarica subito, senza limiti di numero e senza attendere approvazioni (restano il tetto di 25 MB per file e il controllo dell'indirizzo). "
                                                   "Indica sempre archivio, licenza e perche' serve.",
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}, "titolo": {"type": "string"}, "autori": {"type": "string"}, "anno": {"type": "integer"},
                                                        "archivio": {"type": "string"}, "licenza": {"type": "string"}, "motivo": {"type": "string"}}, "required": ["url", "titolo"]}},
@@ -379,7 +381,7 @@ STRUMENTI = [
 ]
 
 STRUMENTO_SCARICA = {"name": "scarica_materiale",
-                     "description": "SOLO durante una formazione: scarica subito nella biblioteca un PDF ad accesso aperto (trovato con cerca_fonti) da studiare. Massimo 6 documenti e 25 MB per formazione; "
+                     "description": "SOLO durante una formazione: scarica subito nella biblioteca un PDF ad accesso aperto (trovato con cerca_fonti) da studiare. Nessun limite di numero di documenti; "
                                     "scegli solo fonti pertinenti, rigorose e con licenza aperta. Indica titolo, autori, anno, licenza.",
                      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}, "titolo": {"type": "string"}, "autori": {"type": "string"}, "anno": {"type": "integer"},
                                                                        "licenza": {"type": "string"}}, "required": ["url", "titolo"]}}
@@ -389,8 +391,6 @@ def scarica_per_formazione(conn, agente_id, dati: dict) -> str:
     f = FORMAZIONE.get()
     if not f:
         raise ErroreCasati("Lo scaricamento diretto e' consentito solo durante una formazione")
-    if f["n"] >= MAX_DOC_FORMAZIONE or f["byte"] >= MAX_BYTE_FORMAZIONE:
-        raise ErroreCasati("Hai gia' scaricato il massimo di materiale per questa formazione: passa a studiarlo")
     url = url_valido(str(dati.get("url") or ""))
     titolo = _pulisci(dati.get("titolo"), 250)
     if len(titolo) < 3:
@@ -410,7 +410,7 @@ def scarica_per_formazione(conn, agente_id, dati: dict) -> str:
     conn.execute("INSERT INTO formazione_materiale (richiesta_id, documento_id, url, byte) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING", (f["richiesta"], did, url, len(pdf)))
     conn.execute("INSERT INTO registro_azioni (azione, dettagli) VALUES ('biblioteca_download_formazione', %s::jsonb)", ('{"documento_id": %d, "richiesta": %d, "byte": %d}' % (did, f["richiesta"], len(pdf)),))
     f["n"] += 1; f["byte"] += len(pdf)
-    return f"Scaricato e salvato «{titolo}» ({len(pdf) // 1024} KB, {f['n']}/{MAX_DOC_FORMAZIONE}). Leggilo con biblioteca_leggi."
+    return f"Scaricato e salvato «{titolo}» ({len(pdf) // 1024} KB, {f['n']} in questa formazione). Leggilo con biblioteca_leggi."
 
 
 AVVISO = ("\n\nBIBLIOTECA E FONTI: usa biblioteca_cerca e biblioteca_leggi per rispondere dai documenti, cita sempre documento e brano; se la risposta non c'e' dillo e, se utile, cerca fonti "

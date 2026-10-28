@@ -297,7 +297,7 @@ def _precedenti(conn, r: dict) -> str:
 def _prompt_ricerca(conn, r: dict) -> str:
     return (_contesto_richiesta(conn, r) + "\nFASE 1 di 3 — RICERCA DEL MATERIALE. Non scrivere ancora la competenza.\n"
             "1) biblioteca_cerca: guarda cosa c'e' gia'. 2) cerca_fonti con poche ricerche mirate (archivi diversi: openalex, arxiv, wikipedia, semanticscholar), senza dati riservati. "
-            f"3) scarica con scarica_materiale i PDF ad accesso aperto davvero utili (al massimo {casati.MAX_DOC_FORMAZIONE}, preferisci manuali, rassegne e linee guida a post e opinioni). "
+            f"3) scarica con scarica_materiale i PDF ad accesso aperto davvero utili (quanti ne servono, senza limiti: preferisci manuali, rassegne e linee guida a post e opinioni). "
             "Chiudi con una lista breve: cosa hai scaricato, cosa gia' c'era, cosa non hai trovato.")
 
 
