@@ -9,8 +9,8 @@ from .db import connessione
 from .permessi import solo_titolare
 
 router = APIRouter(prefix="/v1/decisioni", tags=["decisioni"])
-TIPI = ("richiesta", "memoria", "regola", "iniziativa", "nota")
-ETICHETTA = {"richiesta": "Domanda di un agente", "memoria": "Memoria da approvare", "regola": "Regola di smistamento", "iniziativa": "Iniziativa da approvare", "nota": "Nota da affidare"}
+TIPI = ("richiesta", "memoria", "regola", "iniziativa", "nota", "miglioramento")
+ETICHETTA = {"richiesta": "Domanda di un agente", "memoria": "Memoria da approvare", "regola": "Regola di smistamento", "iniziativa": "Iniziativa da approvare", "nota": "Nota da affidare", "miglioramento": "Miglioramento di un agente"}
 
 
 def elenco(conn) -> list[dict]:
@@ -27,6 +27,8 @@ def elenco(conn) -> list[dict]:
         out.append({"tipo": "iniziativa", "id": r["id"], "titolo": r["titolo"][:200], "urgente": False, "azioni": ["approva", "respingi"]})
     for r in conn.execute("""SELECT n.id, n.titolo, a.nome FROM note_aurora n JOIN agenti a ON a.id = n.manager_id WHERE n.stato = 'proposta' ORDER BY n.id LIMIT 30""").fetchall():
         out.append({"tipo": "nota", "id": r["id"], "titolo": f"Nota «{r['titolo'][:120]}» da affidare a {r['nome']}", "urgente": False, "azioni": ["approva", "respingi"]})
+    for r in conn.execute("""SELECT m.id, a.nome, m.sintesi FROM miglioramenti m JOIN agenti a ON a.id = m.agente_id WHERE m.stato = 'proposta' ORDER BY m.id LIMIT 30""").fetchall():
+        out.append({"tipo": "miglioramento", "id": r["id"], "titolo": f"Padre Casati propone istruzioni migliori per {r['nome']}: {r['sintesi'][:200]}", "urgente": False, "azioni": ["approva", "respingi"]})
     for i, x in enumerate(out, 1):
         x["n"] = i
     return out
@@ -90,6 +92,13 @@ def decidi(conn, u: dict, tipo: str, did: int, azione: str, testo: str | None = 
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Regola inesistente o gia' decisa")
         registro.registra(conn, u, "organizzazione", "regola approvata" if azione == "approva" else "regola disattivata", r["quando"][:120], "regola", did)
         return "Regola approvata." if azione == "approva" else "Regola scartata."
+    if tipo == "miglioramento":
+        from . import miglioramento
+        try:
+            return miglioramento.decidi(conn, did, azione == "approva", u["id"])
+        except miglioramento.ErroreMiglioramento as e:
+            conn.commit()
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
     # nota
     try:
         if azione == "approva":
