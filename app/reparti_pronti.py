@@ -94,6 +94,15 @@ def stato(conn) -> list[dict]:
     return out
 
 
+# In fase di prova i reparti nuovi girano su Haiku (costo basso); i revisori restano sul modello migliore
+PROVA_ECONOMICA = ("editoria", "social", "ricerca")
+MODELLO_PROVA = "claude-haiku-5-5"
+
+
+def _mod(chiave, nome, modello):
+    return MODELLO_PROVA if chiave in PROVA_ECONOMICA and "revisore" not in nome.lower() else modello
+
+
 def attiva(conn, chiave: str, utente: dict | None = None) -> dict:
     d = REPARTI.get(chiave)
     if d is None:
@@ -103,22 +112,22 @@ def attiva(conn, chiave: str, utente: dict | None = None) -> dict:
     div_id = r["id"] if r else conn.execute("INSERT INTO divisioni (nome, descrizione) VALUES (%s,%s) RETURNING id", (nome_div, descr)).fetchone()["id"]
     aurora = conn.execute("SELECT id FROM agenti WHERE nome = 'Aurora'").fetchone()
     nome_m, ruolo_m, modello_m, istr_m, *extra_m = d["manager"]
-    man, nuovo = _crea(conn, div_id, aurora["id"] if aurora else None, nome_m, ruolo_m, "manager", modello_m, istr_m, **(extra_m[0] if extra_m else {}))
+    man, nuovo = _crea(conn, div_id, aurora["id"] if aurora else None, nome_m, ruolo_m, "manager", _mod(chiave, nome_m, modello_m), istr_m, **(extra_m[0] if extra_m else {}))
     creati = [nome_m] if nuovo else []
     for voce in d["operativi"]:
         if chiave == "ricerca":
             nome, ruolo, istr, extra = voce
-            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", "claude-sonnet-5-5", istr + " " + REGOLE_RS, **{"usa_biblioteca": True, **extra})
+            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", _mod(chiave, nome, "claude-sonnet-5-5"), istr + " " + REGOLE_RS, **{"usa_biblioteca": True, **extra})
             if nuovo:
                 creati.append(nome)
         elif chiave == "social":
             nome, ruolo, istr, extra = voce
-            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", "claude-sonnet-5-5", istr + " " + REGOLE_SOC, usa_biblioteca=True, **extra)
+            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", _mod(chiave, nome, "claude-sonnet-5-5"), istr + " " + REGOLE_SOC, usa_biblioteca=True, **extra)
             if nuovo:
                 creati.append(nome)
         elif chiave in ("legale", "editoria"):
             nome, ruolo, istr = voce
-            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", "claude-sonnet-5-5", istr, usa_biblioteca=True)
+            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", _mod(chiave, nome, "claude-sonnet-5-5"), istr, usa_biblioteca=True)
             if nuovo:
                 creati.append(nome)
         else:

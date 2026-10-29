@@ -28,4 +28,6 @@ with psycopg.connect(DSN, row_factory=dict_row, autocommit=True) as conn:
     y = rp.attiva(conn, "editoria")
     ok("seconda attivazione: nessun duplicato", y["creati"] == [] and conn.execute("SELECT count(*) AS n FROM agenti a JOIN divisioni d ON d.id=a.divisione_id WHERE d.nome='Casa editrice'").fetchone()["n"] == 10)
     ok("Sviluppo e Legale non toccati", not st["sviluppo"]["attivo"] or True)
+    m = {r["nome"]: r["modello"] for r in conn.execute("SELECT a.nome, a.modello FROM agenti a JOIN divisioni d ON d.id=a.divisione_id WHERE d.nome='Casa editrice'").fetchall()}
+    ok("reparto nuovo su Haiku, tranne i revisori", m["Direttore editoriale"] == "claude-haiku-5-5" and m["Scrittore"] == "claude-haiku-5-5" if "Scrittore" in m else all(v == "claude-haiku-5-5" for k, v in m.items() if "evisore" not in k) and all(v == "claude-sonnet-5-5" for k, v in m.items() if "evisore" in k), str(m))
 print("TOTALE", sum(ris), "/", len(ris))
