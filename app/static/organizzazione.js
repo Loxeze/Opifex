@@ -90,14 +90,43 @@ function calcolaLayout(dati) {   // piani per azienda
     const ls = (n.aziende || []).map(id => (piani.find(pi => pi.id === id) || {}).lat).filter(v => v !== undefined);
     return ls.length ? ls.reduce((a, b) => a + b, 0) / ls.length : (trasv ? piani[0].lat : 0);
   };
+  // I trasversali (senza azienda) non stanno piu' tutti sullo stesso piano: per ogni guscio si spalmano su tutta la sfera (spirale di Fibonacci)
+  const trasversali = nodi.filter(n => !n.centro && !n.esterno && !sottoSent.has(n) && Number.isFinite(n.r)
+    && !(n.aziende || []).some(id => aziendeAttive.some(z => z.id === id)));
+  const spalma = new Map();
+  const perGuscio = new Map();
+  trasversali.forEach(n => { if (!perGuscio.has(n.depth)) perGuscio.set(n.depth, []); perGuscio.get(n.depth).push(n); });
+  for (const [d, l] of perGuscio) {
+    l.sort((a, b) => String(a.nome).localeCompare(String(b.nome)));
+    l.forEach((n, j) => spalma.set(n, { lat: Math.max(-1.2, Math.min(1.2, Math.asin(1 - 2 * (j + 0.5) / l.length))), ang: j * 2.399963 + d * 0.9 }));
+  }
   nodi.forEach((n, i) => {
     if (n.centro) { n.r = 0; n.x = 0; n.z = 0; n.y = 0; n.lat = 0; return; }
     if (!Number.isFinite(n.r)) return;   // chi risponde a una sentinella viene posto vicino al suo capo (sotto)
     if (n.esterno) { const k = sentinelle.indexOf(n); n.lat = piani.length > 1 && sentinelle.length > 1 ? (k / (sentinelle.length - 1) - 0.5) * 2 * LAT * 0.85 : 0; }
     else n.lat = latDelNodo(n);
+    if (spalma.has(n)) { n.lat = spalma.get(n).lat; n.ang = spalma.get(n).ang; }
     const la = n.lat + 0.04 * Math.sin(i * 2.399 + n.depth);
     n.x = n.r * Math.cos(la) * Math.cos(n.ang || 0); n.z = n.r * Math.cos(la) * Math.sin(n.ang || 0); n.y = n.r * Math.sin(la);
   });
+  // distensione: i trasversali spalmati si allontanano da chi e' troppo vicino, restando sul proprio guscio
+  const MIND = 0.62;
+  for (let it = 0; it < 40 && spalma.size; it++) {
+    let mosso = false;
+    for (const n of spalma.keys()) {
+      let fx = 0, fy = 0, fz = 0;
+      for (const m of nodi) {
+        if (m === n || m.centro || !Number.isFinite(m.x)) continue;
+        const dx = n.x - m.x, dy = n.y - m.y, dz = n.z - m.z, dd = Math.hypot(dx, dy, dz);
+        if (dd < MIND) { const k = (MIND - dd) / (dd || 1e-3) * 0.5; fx += dx * k; fy += dy * k; fz += dz * k; mosso = true; }
+      }
+      if (fx || fy || fz) {
+        const nx = n.x + fx + 1e-4, ny = n.y + fy, nz = n.z + fz, ln = Math.hypot(nx, ny, nz) || 1;
+        n.x = nx / ln * n.r; n.y = ny / ln * n.r; n.z = nz / ln * n.r;
+      }
+    }
+    if (!mosso) break;
+  }
   const rMax = Math.max(1.6, ...nodi.filter(n => !n.esterno && !n.centro && Number.isFinite(n.r)).map(n => n.r)) + 0.7;
   piani.forEach((pi) => { pi.ye = rMax * Math.sin(pi.lat); pi.re = rMax * Math.cos(pi.lat); });
   // figli di un supervisore esterno: restano vicini al loro capo
@@ -201,7 +230,7 @@ function vistaOrganigramma(incorniciata) {
     const ord = layout.nodi.slice().sort((a, b) => b.p.z - a.p.z);
     const daEtichettare = [];
     for (const n of ord) {
-      const r = Math.max((n.centro ? 13 : 5 + (n.livello === "manager" ? 2.5 : 0) + (n.carico || 0) / 100 * 4) * n.p.f * 1.5 * zoom * (0.55 + 0.45 * layout.k), 3);
+      const r = Math.max((n.centro ? 13 : n.livello === "manager" || n.livello === "referente" ? 8.5 + (n.carico || 0) / 100 * 3 : 3 + (n.carico || 0) / 100 * 2) * n.p.f * 1.5 * zoom * (0.55 + 0.45 * layout.k), n.livello === "manager" || n.livello === "referente" ? 4 : 2);
       const c = colore(n);
       cx.globalAlpha = visibile(n) ? 1 : 0.15;
       cx.shadowColor = c; cx.shadowBlur = n.attivo ? 14 : 0; cx.fillStyle = c;

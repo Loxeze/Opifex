@@ -1,0 +1,262 @@
+"""Riunioni vocali (call) con i manager: Lorenzo crea la riunione, la avvia e parla; i manager rispondono a turno, ciascuno con la sua voce.
+Se nomini qualcuno («Marco, cosa ne pensi?») risponde solo lui, altrimenti rispondono tutti in ordine. A fine call il moderatore scrive il verbale.
+Le riunioni vivono nelle tabelle dei tavoli (tipo 'call'); le voci sono ElevenLabs per agente, con ripiego sulla voce del browser."""
+import re
+import threading
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+
+from . import tavoli, voce_elevenlabs as ve
+from .db import connessione
+from .permessi import solo_titolare
+
+router = APIRouter(prefix="/gestione", tags=["riunioni"])
+SINCRONO = False
+MAX_PARTECIPANTI = 8
+MAX_TOKEN_RISPOSTA = 1500
+NIENTE = "niente da aggiungere"
+
+
+class ErroreCall(Exception):
+    pass
+
+
+def manager_disponibili(conn) -> list[dict]:
+    return conn.execute("""SELECT a.id, a.nome, a.ruolo, a.voce_id, d.nome AS reparto FROM agenti a LEFT JOIN divisioni d ON d.id = a.divisione_id
+                           WHERE a.attivo AND a.livello IN ('manager','referente') AND NOT COALESCE(a.sentinella, FALSE) ORDER BY a.nome""").fetchall()
+
+
+# ---------- voci ----------
+def assegna_voci(conn, ids: list[int] | None = None) -> int:
+    """Dà una voce ElevenLabs diversa a ogni manager che non ne ha una (a rotazione tra quelle disponibili). Restituisce quante ne ha assegnate."""
+    try:
+        elenco = [v["id"] for v in ve.voci(conn)]
+    except Exception:  # noqa: BLE001 - senza ElevenLabs resta la voce del browser
+        return 0
+    if not elenco:
+        return 0
+    mgr = [m for m in manager_disponibili(conn) if ids is None or m["id"] in ids]
+    usate = {m["voce_id"] for m in manager_disponibili(conn) if m["voce_id"]}
+    liberi = [v for v in elenco if v not in usate] or elenco
+    n = 0
+    for m in mgr:
+        if m["voce_id"]:
+            continue
+        v = liberi[n % len(liberi)]
+        conn.execute("UPDATE agenti SET voce_id = %s WHERE id = %s", (v, m["id"]))
+        n += 1
+    return n
+
+
+class Voce(BaseModel):
+    voce_id: str | None = Field(default=None, max_length=60)
+
+
+@router.get("/voci-manager")
+def voci_manager(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        c = ve.configurazione(conn)
+        try:
+            voci = ve.voci(conn) if c["chiave"] else []
+            errore = None
+        except ve.ErroreVoce as e:
+            voci, errore = [], str(e)
+        return {"manager": manager_disponibili(conn), "voci": voci, "elevenlabs": bool(c["chiave"]), "errore": errore}
+
+
+@router.put("/voci-manager/{aid}")
+def imposta_voce(aid: int, d: Voce, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        r = conn.execute("UPDATE agenti SET voce_id = %s WHERE id = %s AND livello IN ('manager','referente') RETURNING id", ((d.voce_id or "").strip() or None, aid)).fetchone()
+        if r is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Manager inesistente")
+    return {"ok": True}
+
+
+@router.post("/voci-manager/auto")
+def voci_auto(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        n = assegna_voci(conn)
+    return {"assegnate": n, "sintesi": f"Assegnate {n} voci." if n else "Nessuna voce da assegnare (o ElevenLabs non collegato)."}
+
+
+# ---------- riunioni ----------
+def crea(conn, utente_id: int, titolo: str, odg: str, partecipanti: list[str], programmata_il=None, moderatore: str | None = None) -> int:
+    titolo = " ".join(str(titolo or "").split())[:200]
+    if len(titolo) < 3:
+        raise ErroreCall("Serve un titolo")
+    ids, visti = [], set()
+    ok = {m["nome"].lower(): m["id"] for m in manager_disponibili(conn)}
+    for nome in partecipanti:
+        i = ok.get(" ".join(str(nome).split()).lower())
+        if i is None:
+            raise ErroreCall(f"{nome} non e' un manager attivo")
+        if i not in visti:
+            visti.add(i); ids.append(i)
+    if not 1 <= len(ids) <= MAX_PARTECIPANTI:
+        raise ErroreCall(f"Scegli da 1 a {MAX_PARTECIPANTI} manager")
+    mod = conn.execute("SELECT id FROM agenti WHERE lower(nome) = lower(%s) AND attivo", (moderatore or "Aurora",)).fetchone()
+    if mod is None:
+        raise ErroreCall("Moderatore sconosciuto o spento")
+    tid = conn.execute("""INSERT INTO tavoli (titolo, ordine_del_giorno, moderatore_id, turni, stato, tipo, programmata_il, creato_da_utente_id)
+                          VALUES (%s,%s,%s,1,'programmata','call',%s,%s) RETURNING id""",
+                       (titolo, (odg or "").strip() or "Discussione libera con Lorenzo.", mod["id"], programmata_il, utente_id)).fetchone()["id"]
+    for k, aid in enumerate(ids):
+        conn.execute("INSERT INTO tavoli_partecipanti (tavolo_id, agente_id, ordine) VALUES (%s,%s,%s)", (tid, aid, k))
+    assegna_voci(conn, ids)
+    return tid
+
+
+def interpellati(testo: str, partecipanti: list[dict]) -> list[dict]:
+    """Chi è nominato nella frase; se nessuno, tutti."""
+    t = testo.lower()
+    nominati = [p for p in partecipanti if re.search(r"(?<!\w)" + re.escape(p["nome"].lower()) + r"(?!\w)", t)]
+    return nominati or partecipanti
+
+
+def _rispondi(tid: int, ids: list[int]):
+    from .esecuzione import esegui_agente
+    try:
+        with connessione() as conn:
+            t = conn.execute("SELECT * FROM tavoli WHERE id = %s", (tid,)).fetchone()
+            part = {p["id"]: p for p in conn.execute("""SELECT a.id, a.nome, a.ruolo FROM tavoli_partecipanti p JOIN agenti a ON a.id = p.agente_id
+                                                        WHERE p.tavolo_id = %s ORDER BY p.ordine""", (tid,)).fetchall()}
+            nomi = ", ".join(p["nome"] for p in part.values())
+        for aid in ids:
+            p = part[aid]
+            with connessione() as conn:
+                storia = tavoli._storia(tavoli._interventi(conn, tid))
+            prompt = (f"RIUNIONE VOCALE «{t['titolo']}» con Lorenzo. Partecipanti: {nomi}. Tu sei {p['nome']} ({p['ruolo']}).\n\nORDINE DEL GIORNO (dato):\n{t['ordine_del_giorno']}\n\n"
+                      f"CONVERSAZIONE FINORA:\n{storia}\n\n"
+                      "Rispondi a voce a Lorenzo: italiano parlato, al massimo 4 frasi, nessun elenco e nessun markdown. Parla solo per la tua competenza, senza ripetere cio' che hanno detto gli altri. "
+                      f"Se non hai nulla di utile da aggiungere rispondi esattamente «{NIENTE.capitalize()}». Non inventare fatti: se non lo sai, dillo.")
+            try:
+                testo = esegui_agente(aid, prompt, "interno", None, max_token=MAX_TOKEN_RISPOSTA)["risposta"].strip()
+            except Exception as e:  # noqa: BLE001
+                testo = "Scusa Lorenzo, adesso non riesco a rispondere (" + str(e)[:80] + ")."
+            if testo.lower().rstrip(".! ").startswith(NIENTE):
+                continue
+            with connessione() as conn:
+                conn.execute("INSERT INTO tavoli_interventi (tavolo_id, turno, agente_id, testo) VALUES (%s,1,%s,%s)", (tid, aid, testo))
+    finally:
+        with connessione() as conn:
+            conn.execute("UPDATE tavoli SET occupato = FALSE WHERE id = %s", (tid,))
+
+
+def turno(conn, tid: int, testo: str) -> int:
+    t = conn.execute("SELECT stato, occupato, tipo FROM tavoli WHERE id = %s AND tipo = 'call'", (tid,)).fetchone()
+    if t is None:
+        raise ErroreCall("Riunione inesistente")
+    if t["stato"] != "in_corso":
+        raise ErroreCall("La riunione non e' in corso: avviala prima" if t["stato"] == "programmata" else "La riunione e' conclusa")
+    if t["occupato"]:
+        raise ErroreCall("Sto ancora ascoltando le risposte: aspetta un momento")
+    testo = str(testo or "").strip()
+    if not testo:
+        raise ErroreCall("Dimmi cosa vuoi chiedere")
+    part = conn.execute("""SELECT a.id, a.nome FROM tavoli_partecipanti p JOIN agenti a ON a.id = p.agente_id WHERE p.tavolo_id = %s ORDER BY p.ordine""", (tid,)).fetchall()
+    ids = [p["id"] for p in interpellati(testo, part)]
+    iid = conn.execute("INSERT INTO tavoli_interventi (tavolo_id, turno, agente_id, testo, da_utente) VALUES (%s,1,NULL,%s,TRUE) RETURNING id", (tid, testo)).fetchone()["id"]
+    conn.execute("UPDATE tavoli SET occupato = TRUE WHERE id = %s", (tid,))
+    conn.commit()
+    if SINCRONO:
+        _rispondi(tid, ids)
+    else:
+        threading.Thread(target=_rispondi, args=(tid, ids), daemon=True).start()
+    return iid
+
+
+def chiudi(tid: int):
+    tavoli.verbale(tid)
+
+
+class NuovaRiunione(BaseModel):
+    titolo: str = Field(min_length=3, max_length=200)
+    ordine_del_giorno: str = Field(default="", max_length=100_000)
+    partecipanti: list[str] = Field(min_length=1, max_length=MAX_PARTECIPANTI)
+    programmata_il: str | None = None
+    moderatore: str | None = None
+
+
+class Frase(BaseModel):
+    testo: str = Field(min_length=1, max_length=20000)
+
+
+@router.get("/riunioni-call/manager")
+def manager(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return {"manager": manager_disponibili(conn)}
+
+
+@router.post("/riunioni-call", status_code=201)
+def nuova(d: NuovaRiunione, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            tid = crea(conn, u["id"], d.titolo, d.ordine_del_giorno, d.partecipanti, d.programmata_il, d.moderatore)
+        except ErroreCall as e:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
+    return {"id": tid}
+
+
+@router.get("/riunioni-call")
+def elenco(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return {"riunioni": conn.execute("""SELECT t.id, t.titolo, t.stato, t.programmata_il, t.creato_il, t.concluso_il,
+                    (SELECT string_agg(a.nome, ', ' ORDER BY p.ordine) FROM tavoli_partecipanti p JOIN agenti a ON a.id = p.agente_id WHERE p.tavolo_id = t.id) AS partecipanti
+                    FROM tavoli t WHERE t.tipo = 'call' ORDER BY (t.stato IN ('programmata','in_corso')) DESC, COALESCE(t.programmata_il, t.creato_il) DESC LIMIT 50""").fetchall()}
+
+
+@router.get("/riunioni-call/{tid}")
+def leggi(tid: int, dopo: int = 0, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        t = conn.execute("SELECT id, titolo, ordine_del_giorno, stato, occupato, verbale, programmata_il FROM tavoli WHERE id = %s AND tipo = 'call'", (tid,)).fetchone()
+        if t is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Riunione inesistente")
+        t["partecipanti"] = conn.execute("""SELECT a.id, a.nome, a.ruolo, a.voce_id FROM tavoli_partecipanti p JOIN agenti a ON a.id = p.agente_id
+                                            WHERE p.tavolo_id = %s ORDER BY p.ordine""", (tid,)).fetchall()
+        t["interventi"] = conn.execute("""SELECT i.id, i.agente_id, i.da_utente, i.testo, i.creato_il FROM tavoli_interventi i WHERE i.tavolo_id = %s AND i.id > %s ORDER BY i.id""", (tid, dopo)).fetchall()
+        return t
+
+
+@router.post("/riunioni-call/{tid}/avvia")
+def avvia(tid: int, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        r = conn.execute("UPDATE tavoli SET stato = 'in_corso' WHERE id = %s AND tipo = 'call' AND stato IN ('programmata','in_corso') RETURNING id", (tid,)).fetchone()
+        if r is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Riunione inesistente o gia' conclusa")
+    return {"ok": True}
+
+
+@router.post("/riunioni-call/{tid}/turno")
+def parla(tid: int, d: Frase, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            iid = turno(conn, tid, d.testo)
+        except ErroreCall as e:
+            raise HTTPException(status.HTTP_409_CONFLICT if "aspetta" in str(e) else status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
+    return {"intervento_id": iid}
+
+
+@router.post("/riunioni-call/{tid}/chiudi")
+def termina(tid: int, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        t = conn.execute("SELECT stato FROM tavoli WHERE id = %s AND tipo = 'call'", (tid,)).fetchone()
+        if t is None or t["stato"] != "in_corso":
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Riunione non in corso")
+        n = conn.execute("SELECT count(*) AS n FROM tavoli_interventi WHERE tavolo_id = %s", (tid,)).fetchone()["n"]
+        if n == 0:
+            conn.execute("UPDATE tavoli SET stato = 'conclusa', concluso_il = NOW(), verbale = 'Riunione conclusa senza interventi.' WHERE id = %s", (tid,))
+            return {"sintesi": "Riunione chiusa senza interventi."}
+        conn.execute("UPDATE tavoli SET occupato = TRUE WHERE id = %s", (tid,))
+    def lavoro():
+        try:
+            chiudi(tid)
+        except Exception as e:  # noqa: BLE001
+            with connessione() as conn:
+                conn.execute("UPDATE tavoli SET stato = 'errore', errore = %s, occupato = FALSE WHERE id = %s", (str(e)[:300], tid))
+    if SINCRONO:
+        lavoro()
+    else:
+        threading.Thread(target=lavoro, daemon=True).start()
+    return {"sintesi": "Riunione chiusa: il verbale e' in preparazione."}

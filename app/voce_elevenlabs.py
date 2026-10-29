@@ -6,7 +6,7 @@ from . import cassaforte
 from .db import connessione
 
 MAX_CARATTERI = 4500
-MAX_ORA = 40
+MAX_ORA = 150
 MODELLO = "eleven_multilingual_v2"
 
 
@@ -59,7 +59,7 @@ def voci(conn) -> list[dict]:
     return [{"id": v["voice_id"], "nome": v.get("name", "?")} for v in r.json().get("voices", [])][:60]
 
 
-def sintetizza(testo: str, fascia: str = "interno", utente_id: int | None = None) -> bytes:
+def sintetizza(testo: str, fascia: str = "interno", utente_id: int | None = None, voce_id: str | None = None) -> bytes:
     testo = (testo or "").strip()
     if not testo:
         raise ErroreVoce("Niente da leggere", 422)
@@ -69,14 +69,15 @@ def sintetizza(testo: str, fascia: str = "interno", utente_id: int | None = None
         c = configurazione(conn)
         if fascia != "pubblico" and not c["garanzie"]:
             raise ErroreVoce("Per far leggere testi interni ad ElevenLabs devi prima dichiarare le garanzie (non conservazione e DPA) in Impostazioni → Voce")
-        if not c["voce_id"]:
+        voce_id = (voce_id or "").strip() or c["voce_id"]
+        if not voce_id:
             raise ErroreVoce("Scegli una voce in Impostazioni → Voce")
         recenti = conn.execute("SELECT count(*) AS n FROM registro_azioni WHERE azione = 'voce_sintetizzata' AND creata_il >= NOW() - interval '1 hour'").fetchone()["n"]
         if recenti >= MAX_ORA:
             raise ErroreVoce("Troppe letture in un'ora: riprova piu' tardi", 429)
         chiave = _chiave(conn)
     try:
-        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{c['voce_id']}", params={"output_format": "mp3_44100_64"},
+        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voce_id}", params={"output_format": "mp3_44100_64"},
                        headers={"xi-api-key": chiave, "content-type": "application/json"}, json={"text": testo, "model_id": MODELLO}, timeout=90)
     except httpx.HTTPError as e:
         raise ErroreVoce(f"ElevenLabs non raggiungibile ({type(e).__name__})", 502) from None

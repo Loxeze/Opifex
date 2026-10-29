@@ -40,7 +40,7 @@ function avviaConteggioChat() {
 
 function vistaChat() {
   const collab = stato.ruolo !== "titolare";
-  const tabs = [["chat", "Conversazioni"]].concat(collab ? [] : [["dialoghi", "Dialoghi tra agenti"], ["richieste", "Richieste" + (stato.richieste ? " (" + stato.richieste + ")" : "")]]);
+  const tabs = [["chat", "Conversazioni"]].concat(collab ? [] : [["riunioni", "Riunioni"], ["dialoghi", "Dialoghi tra agenti"], ["richieste", "Richieste" + (stato.richieste ? " (" + stato.richieste + ")" : "")]]);
   if (!tabs.some(([id]) => id === stato.chatTab)) stato.chatTab = "chat";
   const corpo = h("div", { class: "chat-corpo" });
   const barra = h("div", { class: "azioni", style: "margin:0 0 10px" }, h("h2", { style: "flex:1;margin:0" }, "Chat"),
@@ -63,6 +63,7 @@ function vistaChat() {
     return [barra, riep, lavoro, vistaDialoghi(true)];
   }
   if (stato.chatTab === "richieste") return [barra, pannelloRichieste(() => {})];
+  if (stato.chatTab === "riunioni") return [barra, vistaRiunioniCall()];
   corpo.append(...conversazioniChat());
   return [barra, corpo];
 }

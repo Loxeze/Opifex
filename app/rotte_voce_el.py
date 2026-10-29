@@ -54,12 +54,18 @@ def scollega(u: dict = Depends(solo_titolare)):
 
 class Testo(BaseModel):
     testo: str = Field(min_length=1, max_length=20000)
+    agente_id: int | None = None   # se indicato, legge con la voce assegnata a quell'agente
 
 
 @router.post("/voce/leggi")
 def leggi_testo(d: Testo, u: dict = Depends(solo_titolare)):
     try:
-        audio = ve.sintetizza(d.testo, "interno", u["id"])
+        voce = None
+        if d.agente_id:
+            with connessione() as conn:
+                r = conn.execute("SELECT voce_id FROM agenti WHERE id = %s", (d.agente_id,)).fetchone()
+            voce = r["voce_id"] if r else None
+        audio = ve.sintetizza(d.testo, "interno", u["id"], voce)
     except ve.ErroreVoce as e:
         raise HTTPException(e.codice, str(e)) from None
     except cassaforte.CassaforteNonConfigurata as e:

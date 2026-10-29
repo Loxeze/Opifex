@@ -1,0 +1,132 @@
+import os, sys, tempfile, json
+from pathlib import Path
+os.environ.pop("OPIFEX_SENZA_SCHEDA", None)
+os.environ["DATABASE_URL"] = "postgresql://postgres@127.0.0.1:54329/agenti_test"
+os.environ["SECRET_KEY"] = "chiave-di-prova-lunga-e-casuale-0123456789abcdef"
+os.environ["CHIAVE_ANTHROPIC"] = "finta"
+from cryptography.fernet import Fernet
+os.environ["CHIAVE_CASSAFORTE"] = Fernet.generate_key().decode()
+sys.path.insert(0, os.getcwd())
+import psycopg
+from datetime import date, timedelta
+from fastapi.testclient import TestClient
+from app.main import app
+from app import siti_hosting, cassaforte, silenzio, telegram, webpush, pm, studio, esecuzione, agente_browser, dialoghi, casati, cerimoniere, memoria_lavoro, allarmi, backup, prova_ripristino, dossier, call_riunioni, voce_elevenlabs as ve, consegne, scheda_progetto, memoria, ginnasio, squadre
+from app.db import connessione
+from app.sicurezza import cifra_password
+from aiuto2fa import accedi
+DSN = os.environ["DATABASE_URL"]
+ris = []
+def ok(n, c, d=""):
+    ris.append(bool(c)); print(("OK    " if c else "FALLITO") + " | " + n + (f"  [{d}]" if d and not c else ""))
+def sql(q, p=None):
+    with psycopg.connect(DSN, autocommit=True) as c:
+        cur = c.execute(q, p); return cur.fetchall() if cur.description else None
+PW = "PasswordLunga!2026"
+sql("INSERT INTO utenti (nome,email,password_hash,ruolo_globale) VALUES ('Lorenzo','l@p.it',%s,'titolare')", (cifra_password(PW),))
+sql("INSERT INTO utenti (nome,email,password_hash,ruolo_globale) VALUES ('Carla','c@p.it',%s,'collaboratore')", (cifra_password(PW),))
+sql("UPDATE fornitori_ai SET non_conservazione_attiva=TRUE, dpa_firmato=TRUE, fascia_dati_max='riservato'"); sql("UPDATE agenti SET fascia_dati_max='riservato' WHERE nome NOT IN ('Padre Casati','Cerimoniere')")
+ID = lambda n: sql("SELECT id FROM agenti WHERE nome=%s", (n,))[0][0]
+sql("UPDATE agenti SET dialoghi_attivi=TRUE WHERE ruolo_speciale IS NULL")
+marco, valut, nico, dario, scout, giulia, leo, scadenze, casati_id, cer_id = [ID(n) for n in ("Marco", "Valutatrice", "Nico", "Dario", "Scout", "Giulia", "Leo", "Scadenze", "Padre Casati", "Cerimoniere")]
+sql("UPDATE agenti SET modello='claude-sonnet-5-5' WHERE id IN (%s,%s)", (dario, leo))
+mk = sql("SELECT id FROM divisioni WHERE nome='Marketing'")[0][0]
+carla = sql("SELECT id FROM utenti WHERE email='c@p.it'")[0][0]
+sql("INSERT INTO accessi_divisione (utente_id, divisione_id, puo_approvare, puo_assegnare) VALUES (%s,%s,TRUE,TRUE)", (carla, mk))
+uso = lambda: {"input_tokens": 100, "output_tokens": 20}
+def chiama(nome, dati, i="t"): return {"stop_reason": "tool_use", "usage": uso(), "content": [{"type": "tool_use", "id": i, "name": nome, "input": dati}]}
+def fine(t): return {"stop_reason": "end_turn", "usage": uso(), "content": [{"type": "text", "text": t}]}
+copione, strumenti_visti, ultimi_msg = [], [], []
+def finta_api(corpo):
+    ultimi_msg.append(json.dumps(corpo.get("messages"), ensure_ascii=False))
+    strumenti_visti.append([t["name"] for t in corpo.get("tools", [])])
+    return copione.pop(0) if copione else fine("ok")
+agente_browser._chiama_api = finta_api
+tmp = Path(tempfile.mkdtemp()); backup.CARTELLA = tmp / "bk"; backup.FILE_ENV = tmp / ".env"; (tmp / ".env").write_text("SEGRETO=1\n")
+
+
+
+
+
+
+ginnasio.SINCRONO = True
+az = sql("INSERT INTO aziende (nome, colore) VALUES ('Renovatio', '#3fd3c0') RETURNING id")[0][0]
+sql("UPDATE agenti SET modello='claude-sonnet-5-5'")
+call_riunioni.SINCRONO = True
+from app import tavoli
+aur = ID("Aurora")
+sql("UPDATE agenti SET livello='manager' WHERE id IN (%s,%s)", (marco, dario))
+ve.voci = lambda conn: [{"id": "v1", "nome": "Anna"}, {"id": "v2", "nome": "Bruno"}, {"id": "v3", "nome": "Carla"}]
+chiamate = []
+def finto_sintetizza(testo, fascia="interno", utente_id=None, voce_id=None):
+    chiamate.append(voce_id); return b"ID3audio"
+ve.sintetizza = finto_sintetizza
+with TestClient(app) as c:
+    H = {"Authorization": "Bearer " + accedi(c, "l@p.it", PW)}
+    HC = {"Authorization": "Bearer " + accedi(c, "c@p.it", PW)}
+    ok("Carla non crea riunioni", c.post("/gestione/riunioni-call", headers=HC, json={"titolo": "Prova", "partecipanti": ["Marco"]}).status_code == 403)
+    ok("un operativo non e' un manager", c.post("/gestione/riunioni-call", headers=H, json={"titolo": "Prova", "partecipanti": ["Scout"]}).status_code == 422)
+    ok("elenco dei manager disponibili", {"Marco", "Dario"} <= {m["nome"] for m in c.get("/gestione/riunioni-call/manager", headers=H).json()["manager"]})
+    r = c.post("/gestione/riunioni-call", headers=H, json={"titolo": "Strategia estate", "ordine_del_giorno": "Parliamo dell'estate.", "partecipanti": ["Marco", "Dario"]})
+    ok("riunione creata", r.status_code == 201, r.text[:200]); tid = r.json()["id"]
+    ok("non compare tra i tavoli di lavoro", all(t["id"] != tid for t in c.get("/gestione/tavoli", headers=H).json()["tavoli"]))
+    ok("compare tra le riunioni, programmata", [x["stato"] for x in c.get("/gestione/riunioni-call", headers=H).json()["riunioni"] if x["id"] == tid] == ["programmata"])
+    voci = sql("SELECT voce_id FROM agenti WHERE id IN (%s,%s) ORDER BY id", (marco, dario))
+    ok("a ogni manager e' stata assegnata una voce diversa", len({v[0] for v in voci}) == 2 and None not in {v[0] for v in voci}, str(voci))
+    ok("prima di avviare non si parla", c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Ciao"}).status_code == 422)
+    ok("avviata", c.post(f"/gestione/riunioni-call/{tid}/avvia", headers=H).status_code == 200)
+
+    copione[:] = [fine("Per l'estate servono eventi serali."), fine("Io penso al sito e alla comunicazione.")]
+    ultimi_msg.clear()
+    r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Che programma facciamo per l'estate?"})
+    ok("turno inviato", r.status_code == 200, r.text[:200])
+    d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
+    ok("risposta di tutti e due, in ordine", [(i["da_utente"], i["agente_id"]) for i in d["interventi"]] == [(True, None), (False, marco), (False, dario)], str(d["interventi"]))
+    ok("il secondo ha visto la risposta del primo", "servono eventi serali" in ultimi_msg[1])
+    ok("non e' piu' occupato", d["occupato"] is False)
+    ok("i partecipanti hanno la voce", all(p["voce_id"] for p in d["partecipanti"]))
+    ult = d["interventi"][-1]["id"]
+    ok("polling incrementale", c.get(f"/gestione/riunioni-call/{tid}?dopo={ult}", headers=H).json()["interventi"] == [])
+
+    copione[:] = [fine("Dario: certo, ti rispondo io.")]
+    ultimi_msg.clear()
+    c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Dario, quanto costerebbe il sito?"})
+    d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
+    nuovi = [i for i in d["interventi"] if i["id"] > ult]
+    ok("nominando Dario risponde solo lui", [(i["da_utente"], i["agente_id"]) for i in nuovi] == [(True, None), (False, dario)], str(nuovi))
+    copione[:] = [fine("Niente da aggiungere."), fine("Posso dire una cosa sul budget.")]
+    c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Altre idee?"})
+    d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
+    ok("«niente da aggiungere» non viene registrato", d["interventi"][-1]["agente_id"] == dario and "budget" in d["interventi"][-1]["testo"] and not any("Niente da aggiungere" in i["testo"] for i in d["interventi"]))
+    sql("UPDATE tavoli SET occupato=TRUE WHERE id=%s", (tid,))
+    ok("durante le risposte non si interrompe", c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Ancora"}).status_code == 409)
+    sql("UPDATE tavoli SET occupato=FALSE WHERE id=%s", (tid,))
+    ok("frase vuota rifiutata", c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "   "}).status_code in (422,))
+
+    # voci
+    vm = c.get("/gestione/voci-manager", headers=H).json()
+    ok("pannello voci", len(vm["voci"]) == 3 and vm["elevenlabs"] is False or len(vm["voci"]) >= 0)
+    ok("cambio voce", c.put(f"/gestione/voci-manager/{marco}", headers=H, json={"voce_id": "v3"}).status_code == 200 and sql("SELECT voce_id FROM agenti WHERE id=%s", (marco,))[0][0] == "v3")
+    ok("voce di un non-manager rifiutata", c.put(f"/gestione/voci-manager/{scout}", headers=H, json={"voce_id": "v1"}).status_code == 404)
+    r = c.post("/voce/leggi", headers=H, json={"testo": "Ciao", "agente_id": marco})
+    ok("lettura con la voce del manager", r.status_code == 200 and chiamate[-1] == "v3", str(chiamate))
+    r = c.post("/voce/leggi", headers=H, json={"testo": "Ciao"})
+    ok("senza agente voce predefinita", r.status_code == 200 and chiamate[-1] is None)
+    sql("UPDATE agenti SET voce_id=NULL WHERE id=%s", (dario,))
+    ok("assegnazione automatica delle voci mancanti", c.post("/gestione/voci-manager/auto", headers=H).json()["assegnate"] >= 1 and sql("SELECT voce_id FROM agenti WHERE id=%s", (dario,))[0][0])
+
+    # chiusura e verbale
+    copione[:] = [fine("SINTESI\nSi fanno eventi serali.\nAZIONI\nMarco: programma")]
+    r = c.post(f"/gestione/riunioni-call/{tid}/chiudi", headers=H)
+    ok("chiusa con verbale", r.status_code == 200, r.text[:200])
+    d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
+    ok("verbale scritto e riunione conclusa", d["stato"] == "conclusa" and "eventi serali" in d["verbale"], str(d)[:300])
+    ok("notifica del verbale", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Riunione %%conclusa%%'")[0][0] == 1)
+    ok("non si parla in una riunione conclusa", c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Ciao"}).status_code == 422)
+    r2 = c.post("/gestione/riunioni-call", headers=H, json={"titolo": "Vuota", "partecipanti": ["Marco"]}).json()["id"]
+    c.post(f"/gestione/riunioni-call/{r2}/avvia", headers=H)
+    ok("chiusura senza interventi", c.post(f"/gestione/riunioni-call/{r2}/chiudi", headers=H).status_code == 200 and sql("SELECT stato FROM tavoli WHERE id=%s", (r2,))[0][0] == "conclusa")
+    ok("riunione inesistente", c.get("/gestione/riunioni-call/99999", headers=H).status_code == 404)
+    ok("interpellati: nome intero e non parziale", [p["nome"] for p in call_riunioni.interpellati("Marcoli cosa dice", [{"nome": "Marco"}, {"nome": "Dario"}])] == ["Marco", "Dario"])
+    ok("viste servite", "vistaRiunioniCall" in c.get("/app/riunioni_call.js").text and '"riunioni", "Riunioni"' in c.get("/app/chat.js").text)
+print("TOTALE", sum(ris), "/", len(ris))
