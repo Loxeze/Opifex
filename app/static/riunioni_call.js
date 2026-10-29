@@ -2,7 +2,12 @@
 // Riunioni vocali con i manager (Chat → Riunioni): si creano, si lancia la call, ogni manager risponde con la sua voce.
 
 const CallVoce = {
-  server: false, attiva: true, audio: null,
+  server: false, attiva: true, audio: null, sbloccato: false,
+  sblocca() {   // un solo gesto dell'utente basta a permettere l'audio automatico anche a telefono (iOS/Android) mentre guidi
+    if (this.sbloccato) return; this.sbloccato = true;
+    try { const a = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="); a.play().catch(() => {}); this.audio = null; } catch (e) { /* ignora */ }
+    try { if (window.speechSynthesis) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } } catch (e) { /* ignora */ }
+  },
   voceBrowser(agenteId) {
     const it = (window.speechSynthesis ? speechSynthesis.getVoices() : []).filter(v => v.lang && v.lang.toLowerCase().startsWith("it"));
     return { voce: it.length ? it[agenteId % it.length] : null, tono: 0.75 + (agenteId % 6) * 0.11, ritmo: 0.92 + (agenteId % 4) * 0.05 };
@@ -25,6 +30,8 @@ const CallVoce = {
   },
   ferma() { if (this.audio) { this.audio.pause(); this.audio = null; } if ("speechSynthesis" in window) speechSynthesis.cancel(); },
 };
+
+["pointerdown", "touchstart", "keydown", "click"].forEach(ev => document.addEventListener(ev, () => CallVoce.sblocca(), { once: true, passive: true }));
 
 function pannelloVociManager() {
   const box = h("div"), msg = h("div");
@@ -93,7 +100,7 @@ function vistaRiunioniCall() {
 
 function schermataCall(tid, esci) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let ultimo = 0, coda = [], parlando = false, vivo = true, riunione = null, ascolto = null, continuo = false, occupato = false;
+  let ultimo = 0, coda = [], parlando = false, vivo = true, riunione = null, ascolto = null, continuo = SR ? true : false, occupato = false;
   const tessere = h("div", { class: "riga", style: "flex-wrap:wrap;gap:10px;margin-bottom:10px" });
   const log = h("div", { style: "max-height:46vh;overflow:auto;margin-bottom:10px" });
   const stato = h("div", { class: "sotto" }), msg = h("div");
@@ -123,7 +130,7 @@ function schermataCall(tid, esci) {
     if (!document.body.contains(log)) { vivo = false; CallVoce.ferma(); ferma(); return; }
     try {
       const d = await api("GET", "/gestione/riunioni-call/" + tid + "?dopo=" + ultimo);
-      riunione = riunione || d; occupato = d.occupato;
+      riunione = riunione || d; occupato = d.occupato; bCoda.textContent = "Richieste in coda" + (d.in_coda ? " (" + d.in_coda + ")" : ""); bCoda.disabled = !d.in_coda;
       for (const i of d.interventi) { ultimo = Math.max(ultimo, i.id); if (i.da_utente) { /* gia' mostrato quando l'hai inviato */ } else { riga(nomeDi(i.agente_id), i.testo, false); coda.push(i); } }
       if (coda.length) riproduci(); else if (!parlando) stato.textContent = occupato ? "I manager stanno pensando…" : d.stato === "in_corso" ? "Tocca a te." : "";
       if (d.stato === "conclusa" || d.stato === "errore") { vivo = false; mostraVerbale(d); return; }
@@ -138,8 +145,8 @@ function schermataCall(tid, esci) {
   bInvia.addEventListener("click", invia);
   campo.addEventListener("keydown", (e) => { if (e.key === "Enter") invia(); });
   bMic.addEventListener("click", () => { if (!SR) { msg.replaceChildren(avviso("Questo browser non ha il riconoscimento vocale: scrivi nel campo.", "avv")); return; } if (ascolto) ferma(); else ascolta(); });
-  const cont = h("input", { type: "checkbox" }); cont.addEventListener("change", () => { continuo = cont.checked; if (continuo) ascolta(); else ferma(); });
-  const voceOn = h("input", { type: "checkbox" }); voceOn.checked = true; voceOn.addEventListener("change", () => { CallVoce.attiva = voceOn.checked; if (!voceOn.checked) CallVoce.ferma(); });
+  const cont = h("input", { type: "checkbox" }); cont.checked = continuo; cont.addEventListener("change", () => { continuo = cont.checked; if (continuo) ascolta(); else ferma(); });
+    const bCoda = h("button", { class: "s", type: "button", onclick: () => { campo.value = "Avete richieste in coda?"; invia(); } }, "Richieste in coda");
   const barraIn = h("div", { class: "riga", style: "align-items:center" }, bMic, campo, bInvia);
   const termina = h("button", { class: "r", onclick: async () => { if (!confirm("Chiudere la riunione e generare il verbale?")) return; ferma(); CallVoce.ferma(); coda = [];
     try { const r = await api("POST", "/gestione/riunioni-call/" + tid + "/chiudi"); msg.replaceChildren(avviso(r.sintesi, "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Termina e scrivi il verbale");
@@ -149,12 +156,13 @@ function schermataCall(tid, esci) {
     riempi(tessere, d.partecipanti.map(p => { const t = h("div", { class: "carta", style: "text-align:center;min-width:92px;padding:8px" }, h("div", { class: "chat-sigla", style: "margin:0 auto 4px" }, p.nome.slice(0, 1).toUpperCase()), h("div", { class: "sotto" }, p.nome)); tessera[p.id] = t; return t; }));
     h2.textContent = d.titolo;
     if (d.stato === "conclusa" || d.stato === "errore") { mostraVerbale(d); return; }
-    d.interventi.forEach(i => { ultimo = Math.max(ultimo, i.id); riga(i.da_utente ? "Tu" : nomeDi(i.agente_id), i.testo, i.da_utente); }); stato.textContent = d.occupato ? "I manager stanno pensando…" : "Tocca a te.";
-    if (d.ordine_del_giorno && !d.interventi.length) riga("Argomenti", d.ordine_del_giorno, false);
+    const nuova = !d.interventi.some(i => i.da_utente) && d.interventi.length <= 1;   // apertura appena fatta: la leggo a voce
+    d.interventi.forEach(i => { ultimo = Math.max(ultimo, i.id); riga(i.da_utente ? "Tu" : nomeDi(i.agente_id), i.testo, i.da_utente); if (nuova && !i.da_utente) coda.push(i); }); stato.textContent = d.occupato ? "I manager stanno pensando…" : "Tocca a te.";
+    if (coda.length) riproduci(); else if (continuo) ascolta();
     sondaggio();
   }).catch(e => msg.replaceChildren(avviso(e.message, "no")));
   const h2 = h("h2", {}, "Riunione");
   return h("div", {}, fuori, h2, tessere, log, stato, barraIn,
-    h("div", { class: "riga", style: "margin-top:6px" }, h("label", { class: "interruttore" }, cont, h("span", {}, "Conversazione continua (ascolto automatico)")), h("label", { class: "interruttore" }, voceOn, h("span", {}, "Voci attive"))),
-    h("div", { class: "azioni" }, termina), msg);
+    h("div", { class: "riga", style: "margin-top:6px" }, h("label", { class: "interruttore" }, cont, h("span", {}, "Mani libere: ascolto automatico dopo ogni risposta"))),
+    h("div", { class: "azioni" }, bCoda, termina), msg);
 }

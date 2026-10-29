@@ -81,22 +81,30 @@ with TestClient(app) as c:
     r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Che programma facciamo per l'estate?"})
     ok("turno inviato", r.status_code == 200, r.text[:200])
     d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
-    ok("risposta di tutti e due, in ordine", [(i["da_utente"], i["agente_id"]) for i in d["interventi"]] == [(True, None), (False, marco), (False, dario)], str(d["interventi"]))
+    ok("risposta di tutti e due, in ordine", [(i["da_utente"], i["agente_id"]) for i in d["interventi"]][1:] == [(True, None), (False, marco), (False, dario)] and "Che cosa vuoi sapere" in d["interventi"][0]["testo"] and d["interventi"][0]["agente_id"] == aur, str(d["interventi"]))
     ok("il secondo ha visto la risposta del primo", "servono eventi serali" in ultimi_msg[1])
     ok("non e' piu' occupato", d["occupato"] is False)
     ok("i partecipanti hanno la voce", all(p["voce_id"] for p in d["partecipanti"]))
     ult = d["interventi"][-1]["id"]
     ok("polling incrementale", c.get(f"/gestione/riunioni-call/{tid}?dopo={ult}", headers=H).json()["interventi"] == [])
 
-    copione[:] = [fine("Dario: certo, ti rispondo io.")]
+    copione[:] = [fine("Dario: certo, ti rispondo io.\nCODA: Mi servirebbe una decisione sul budget.")]
     ultimi_msg.clear()
     c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Dario, quanto costerebbe il sito?"})
     d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
     nuovi = [i for i in d["interventi"] if i["id"] > ult]
-    ok("nominando Dario risponde solo lui", [(i["da_utente"], i["agente_id"]) for i in nuovi] == [(True, None), (False, dario)], str(nuovi))
-    copione[:] = [fine("Niente da aggiungere."), fine("Posso dire una cosa sul budget.")]
+    ok("nominando Dario risponde solo lui, senza la riga CODA", [(i["da_utente"], i["agente_id"]) for i in nuovi] == [(True, None), (False, dario)] and "CODA" not in nuovi[-1]["testo"], str(nuovi))
+    ok("la richiesta e' in coda e non e' stata detta", d["in_coda"] == 1 and "budget" not in " ".join(i["testo"] for i in d["interventi"] if i["agente_id"] == dario and "decisione" in i["testo"]))
+    ok("il prompt vieta di proporre temi propri", "SOLO a cio' che ha appena chiesto" in ultimi_msg[0] and "CODA:" in ultimi_msg[0])
+    n0 = len(d["interventi"])
+    r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Avete richieste in coda?"})
+    d2 = c.get(f"/gestione/riunioni-call/{tid}?dopo={nuovi[-1]['id']}", headers=H).json()
+    ok("«avete richieste?» consegna la coda, senza altre risposte", r.status_code == 200 and [(i["da_utente"], i["agente_id"]) for i in d2["interventi"]] == [(True, None), (False, dario)] and "decisione sul budget" in d2["interventi"][-1]["testo"] and d2["in_coda"] == 0, str(d2["interventi"]))
+    ult = d2["interventi"][-1]["id"]
+    copione[:] = [fine("Niente da aggiungere.\nCODA: Chiedo un incontro sul contratto."), fine("Posso dire una cosa sul budget.")]
     c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Altre idee?"})
     d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
+    ok("la coda di chi tace viene comunque salvata", c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()["in_coda"] == 1)
     ok("«niente da aggiungere» non viene registrato", d["interventi"][-1]["agente_id"] == dario and "budget" in d["interventi"][-1]["testo"] and not any("Niente da aggiungere" in i["testo"] for i in d["interventi"]))
     sql("UPDATE tavoli SET occupato=TRUE WHERE id=%s", (tid,))
     ok("durante le risposte non si interrompe", c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Ancora"}).status_code == 409)
@@ -120,6 +128,7 @@ with TestClient(app) as c:
     r = c.post(f"/gestione/riunioni-call/{tid}/chiudi", headers=H)
     ok("chiusa con verbale", r.status_code == 200, r.text[:200])
     d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
+    ok("a fine riunione le richieste mai ascoltate entrano nel verbale come interventi", sql("SELECT count(*) FROM tavoli_interventi WHERE tavolo_id=%s AND coda=1", (tid,))[0][0] == 0 and sql("SELECT count(*) FROM tavoli_interventi WHERE tavolo_id=%s AND testo LIKE 'Chiedo un incontro%%' AND coda=0", (tid,))[0][0] == 1)
     ok("verbale scritto e riunione conclusa", d["stato"] == "conclusa" and "eventi serali" in d["verbale"], str(d)[:300])
     ok("notifica del verbale", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Riunione %%conclusa%%'")[0][0] == 1)
     ok("non si parla in una riunione conclusa", c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Ciao"}).status_code == 422)

@@ -37,6 +37,8 @@ def assegna_voci(conn, ids: list[int] | None = None) -> int:
     if not elenco:
         return 0
     mgr = [m for m in manager_disponibili(conn) if ids is None or m["id"] in ids]
+    if ids:
+        mgr += [m for m in conn.execute("SELECT id, voce_id FROM agenti WHERE id = ANY(%s)", (list(ids),)).fetchall() if m["id"] not in {x["id"] for x in mgr}]
     usate = {m["voce_id"] for m in manager_disponibili(conn) if m["voce_id"]}
     liberi = [v for v in elenco if v not in usate] or elenco
     n = 0
@@ -104,7 +106,7 @@ def crea(conn, utente_id: int, titolo: str, odg: str, partecipanti: list[str], p
                        (titolo, (odg or "").strip() or "Discussione libera con Lorenzo.", mod["id"], programmata_il, utente_id)).fetchone()["id"]
     for k, aid in enumerate(ids):
         conn.execute("INSERT INTO tavoli_partecipanti (tavolo_id, agente_id, ordine) VALUES (%s,%s,%s)", (tid, aid, k))
-    assegna_voci(conn, ids)
+    assegna_voci(conn, ids + [mod["id"]])
     return tid
 
 
@@ -113,6 +115,27 @@ def interpellati(testo: str, partecipanti: list[dict]) -> list[dict]:
     t = testo.lower()
     nominati = [p for p in partecipanti if re.search(r"(?<!\w)" + re.escape(p["nome"].lower()) + r"(?!\w)", t)]
     return nominati or partecipanti
+
+
+def separa_coda(testo: str) -> tuple[str, str]:
+    """Divide la risposta parlata dalla richiesta in coda (righe che iniziano con CODA:)."""
+    parlato, coda = [], []
+    for r in str(testo or "").splitlines():
+        m = re.match(r"\s*\**\s*CODA\s*:\s*\**\s*(.*)", r, re.I)
+        (coda if m else parlato).append(m.group(1) if m else r)
+    return "\n".join(parlato).strip(), " ".join(c.strip() for c in coda if c.strip())
+
+
+RICHIESTE = re.compile(r"\b(richieste|in coda|cosa avete per me|avete (qualcosa|altro)|cosa volete (dirmi|chiedermi)|che cosa volete)\b", re.I)
+
+
+def consegna_coda(conn, tid: int) -> int:
+    """Le richieste in coda diventano interventi parlati (uno per ogni richiesta, nell'ordine in cui sono nate)."""
+    righe = conn.execute("SELECT id, agente_id, testo FROM tavoli_interventi WHERE tavolo_id = %s AND coda = 1 ORDER BY id", (tid,)).fetchall()
+    for r in righe:
+        conn.execute("INSERT INTO tavoli_interventi (tavolo_id, turno, agente_id, testo) VALUES (%s,1,%s,%s)", (tid, r["agente_id"], r["testo"]))
+        conn.execute("UPDATE tavoli_interventi SET coda = 2 WHERE id = %s", (r["id"],))
+    return len(righe)
 
 
 def _rispondi(tid: int, ids: list[int]):
@@ -129,16 +152,21 @@ def _rispondi(tid: int, ids: list[int]):
                 storia = tavoli._storia(tavoli._interventi(conn, tid))
             prompt = (f"RIUNIONE VOCALE «{t['titolo']}» con Lorenzo. Partecipanti: {nomi}. Tu sei {p['nome']} ({p['ruolo']}).\n\nORDINE DEL GIORNO (dato):\n{t['ordine_del_giorno']}\n\n"
                       f"CONVERSAZIONE FINORA:\n{storia}\n\n"
-                      "Rispondi a voce a Lorenzo: italiano parlato, al massimo 4 frasi, nessun elenco e nessun markdown. Parla solo per la tua competenza, senza ripetere cio' che hanno detto gli altri. "
-                      f"Se non hai nulla di utile da aggiungere rispondi esattamente «{NIENTE.capitalize()}». Non inventare fatti: se non lo sai, dillo.")
+                      "Lorenzo guida la riunione e decide la linea: rispondi SOLO a cio' che ha appena chiesto, senza anticipare altri temi, senza proporre argomenti tuoi e senza porgli domande. "
+                      "Rispondi a voce: italiano parlato, al massimo 4 frasi, nessun elenco e nessun markdown, per la tua competenza e senza ripetere cio' che hanno detto gli altri. "
+                      f"Se non hai nulla di utile da aggiungere rispondi esattamente «{NIENTE.capitalize()}». Non inventare fatti: se non lo sai, dillo.\n"
+                      "Se hai una richiesta, una segnalazione, una decisione che ti serve o un tema tuo da portargli, NON dirlo ora: scrivilo in una riga finale che inizia con «CODA:» (al massimo due frasi). "
+                      "Lorenzo la sentira' dopo, quando chiedera' le richieste in coda.")
             try:
                 testo = esegui_agente(aid, prompt, "interno", None, max_token=MAX_TOKEN_RISPOSTA)["risposta"].strip()
             except Exception as e:  # noqa: BLE001
                 testo = "Scusa Lorenzo, adesso non riesco a rispondere (" + str(e)[:80] + ")."
-            if testo.lower().rstrip(".! ").startswith(NIENTE):
-                continue
+            parlato, coda = separa_coda(testo)
             with connessione() as conn:
-                conn.execute("INSERT INTO tavoli_interventi (tavolo_id, turno, agente_id, testo) VALUES (%s,1,%s,%s)", (tid, aid, testo))
+                if coda:
+                    conn.execute("INSERT INTO tavoli_interventi (tavolo_id, turno, agente_id, testo, coda) VALUES (%s,1,%s,%s,1)", (tid, aid, coda))
+                if parlato and not parlato.lower().rstrip(".! ").startswith(NIENTE):
+                    conn.execute("INSERT INTO tavoli_interventi (tavolo_id, turno, agente_id, testo) VALUES (%s,1,%s,%s)", (tid, aid, parlato))
     finally:
         with connessione() as conn:
             conn.execute("UPDATE tavoli SET occupato = FALSE WHERE id = %s", (tid,))
@@ -156,8 +184,12 @@ def turno(conn, tid: int, testo: str) -> int:
     if not testo:
         raise ErroreCall("Dimmi cosa vuoi chiedere")
     part = conn.execute("""SELECT a.id, a.nome FROM tavoli_partecipanti p JOIN agenti a ON a.id = p.agente_id WHERE p.tavolo_id = %s ORDER BY p.ordine""", (tid,)).fetchall()
-    ids = [p["id"] for p in interpellati(testo, part)]
     iid = conn.execute("INSERT INTO tavoli_interventi (tavolo_id, turno, agente_id, testo, da_utente) VALUES (%s,1,NULL,%s,TRUE) RETURNING id", (tid, testo)).fetchone()["id"]
+    if RICHIESTE.search(testo) and conn.execute("SELECT 1 FROM tavoli_interventi WHERE tavolo_id = %s AND coda = 1", (tid,)).fetchone():
+        consegna_coda(conn, tid)    # «avete richieste?»: parlano le richieste messe in coda, senza altre risposte
+        conn.commit()
+        return iid
+    ids = [p["id"] for p in interpellati(testo, part)]
     conn.execute("UPDATE tavoli SET occupato = TRUE WHERE id = %s", (tid,))
     conn.commit()
     if SINCRONO:
@@ -168,6 +200,8 @@ def turno(conn, tid: int, testo: str) -> int:
 
 
 def chiudi(tid: int):
+    with connessione() as conn:
+        consegna_coda(conn, tid)    # nulla va perso: le richieste mai ascoltate finiscono nel verbale
     tavoli.verbale(tid)
 
 
@@ -215,16 +249,26 @@ def leggi(tid: int, dopo: int = 0, _: dict = Depends(solo_titolare)):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Riunione inesistente")
         t["partecipanti"] = conn.execute("""SELECT a.id, a.nome, a.ruolo, a.voce_id FROM tavoli_partecipanti p JOIN agenti a ON a.id = p.agente_id
                                             WHERE p.tavolo_id = %s ORDER BY p.ordine""", (tid,)).fetchall()
-        t["interventi"] = conn.execute("""SELECT i.id, i.agente_id, i.da_utente, i.testo, i.creato_il FROM tavoli_interventi i WHERE i.tavolo_id = %s AND i.id > %s ORDER BY i.id""", (tid, dopo)).fetchall()
+        t["interventi"] = conn.execute("""SELECT i.id, i.agente_id, i.da_utente, i.testo, i.creato_il FROM tavoli_interventi i WHERE i.tavolo_id = %s AND i.id > %s AND i.coda = 0 ORDER BY i.id""", (tid, dopo)).fetchall()
+        t["in_coda"] = conn.execute("SELECT count(*) AS n FROM tavoli_interventi WHERE tavolo_id = %s AND coda = 1", (tid,)).fetchone()["n"]
+        mod = conn.execute("SELECT a.id, a.nome, a.ruolo, a.voce_id FROM tavoli tv JOIN agenti a ON a.id = tv.moderatore_id WHERE tv.id = %s", (tid,)).fetchone()
+        if mod and mod["id"] not in {p["id"] for p in t["partecipanti"]}:
+            t["partecipanti"].append({**mod, "moderatore": True})
         return t
 
 
 @router.post("/riunioni-call/{tid}/avvia")
 def avvia(tid: int, _: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        r = conn.execute("UPDATE tavoli SET stato = 'in_corso' WHERE id = %s AND tipo = 'call' AND stato IN ('programmata','in_corso') RETURNING id", (tid,)).fetchone()
+        r = conn.execute("UPDATE tavoli SET stato = 'in_corso' WHERE id = %s AND tipo = 'call' AND stato IN ('programmata','in_corso') RETURNING id, moderatore_id", (tid,)).fetchone()
         if r is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Riunione inesistente o gia' conclusa")
+        if conn.execute("SELECT 1 FROM tavoli_interventi WHERE tavolo_id = %s", (tid,)).fetchone() is None:
+            # apre la riunione il moderatore: chiede a Lorenzo che cosa vuole sapere (la linea la da' lui)
+            nomi = [p["nome"] for p in conn.execute("SELECT a.nome FROM tavoli_partecipanti p JOIN agenti a ON a.id = p.agente_id WHERE p.tavolo_id = %s ORDER BY p.ordine", (tid,)).fetchall()]
+            elenco = nomi[0] if len(nomi) == 1 else ", ".join(nomi[:-1]) + " e " + nomi[-1]
+            conn.execute("INSERT INTO tavoli_interventi (tavolo_id, turno, agente_id, testo) VALUES (%s,1,%s,%s)",
+                         (tid, r["moderatore_id"], f"Buongiorno Lorenzo. Ci sono {elenco}. Che cosa vuoi sapere? Parliamo solo di quello che chiedi tu; le nostre richieste le teniamo in coda e te le diciamo quando ce lo chiedi."))
     return {"ok": True}
 
 
@@ -244,7 +288,7 @@ def termina(tid: int, _: dict = Depends(solo_titolare)):
         t = conn.execute("SELECT stato FROM tavoli WHERE id = %s AND tipo = 'call'", (tid,)).fetchone()
         if t is None or t["stato"] != "in_corso":
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Riunione non in corso")
-        n = conn.execute("SELECT count(*) AS n FROM tavoli_interventi WHERE tavolo_id = %s", (tid,)).fetchone()["n"]
+        n = conn.execute("SELECT count(*) AS n FROM tavoli_interventi WHERE tavolo_id = %s AND da_utente", (tid,)).fetchone()["n"]
         if n == 0:
             conn.execute("UPDATE tavoli SET stato = 'conclusa', concluso_il = NOW(), verbale = 'Riunione conclusa senza interventi.' WHERE id = %s", (tid,))
             return {"sintesi": "Riunione chiusa senza interventi."}

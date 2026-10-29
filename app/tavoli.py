@@ -53,7 +53,7 @@ def _storia(interventi: list[dict]) -> str:
 
 def _interventi(conn, tid: int) -> list[dict]:
     return conn.execute("""SELECT i.turno, COALESCE(a.nome, '?') AS nome, i.testo FROM tavoli_interventi i LEFT JOIN agenti a ON a.id = i.agente_id
-                           WHERE i.tavolo_id = %s ORDER BY i.id""", (tid,)).fetchall()
+                           WHERE i.tavolo_id = %s AND i.coda = 0 ORDER BY i.id""", (tid,)).fetchall()
 
 
 def verbale(tid: int):
