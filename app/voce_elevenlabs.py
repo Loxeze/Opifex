@@ -77,8 +77,8 @@ def sintetizza(testo: str, fascia: str = "interno", utente_id: int | None = None
             raise ErroreVoce("Troppe letture in un'ora: riprova piu' tardi", 429)
         chiave = _chiave(conn)
     try:
-        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voce_id}", params={"output_format": "mp3_44100_64"},
-                       headers={"xi-api-key": chiave, "content-type": "application/json"}, json={"text": testo, "model_id": MODELLO}, timeout=90)
+        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voce_id}", params={"output_format": "mp3_44100_128"},
+                       headers={"xi-api-key": chiave, "content-type": "application/json"}, json={"text": testo, "model_id": MODELLO, "voice_settings": {"stability": 0.42, "similarity_boost": 0.8, "style": 0.25, "use_speaker_boost": True}}, timeout=90)
     except httpx.HTTPError as e:
         raise ErroreVoce(f"ElevenLabs non raggiungibile ({type(e).__name__})", 502) from None
     if r.status_code != 200:

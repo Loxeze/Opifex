@@ -17,6 +17,20 @@ MAX_PARTECIPANTI = 8
 MAX_TOKEN_RISPOSTA = 1500
 NIENTE = "niente da aggiungere"
 
+# REGOLA SCRITTA DELLE RIUNIONI: vale per ogni manager in ogni riunione vocale
+REGOLE_RIUNIONE = (
+    "1. Lorenzo guida: i manager rispondono solo a cio' che chiede e non propongono argomenti propri; le loro richieste restano in coda.\n"
+    "2. Quando Lorenzo da' un'indicazione, una decisione o un'informazione (non una domanda), nessuno la ripete, la riassume o la conferma a parole: viene solo registrata e compare «Registrato». Niente risposte in fila, per non perdere tempo e token.\n"
+    "3. Si risponde a voce: poche frasi, senza elenchi, senza ripetere cio' che hanno gia' detto gli altri.\n"
+    "4. Chi non ha nulla da aggiungere tace.")
+
+DOMANDA = re.compile(r"\?|\b(cosa|che cosa|come|perch[eé]|quando|quanto|quanti|quante|chi|dove|quale|quali|puoi|potete|potresti|dimmi|dimmelo|dicci|spiega\w*|raccontami|aggiorna\w*|riepilog\w*|riassum\w*|fammi|fatemi|dammi|datemi|mostra\w*|elenca\w*|voglio sapere|vorrei sapere|cosa ne pensi|che ne pensi|parere|opinione|richieste|in coda|stato|punto della situazione)\b", re.I)
+
+
+def e_indicazione(testo: str) -> bool:
+    """Un'indicazione, decisione o informazione (non una domanda ne' una richiesta): va solo registrata."""
+    return not DOMANDA.search(testo or "")
+
 
 class ErroreCall(Exception):
     pass
@@ -152,7 +166,7 @@ def _rispondi(tid: int, ids: list[int]):
                 storia = tavoli._storia(tavoli._interventi(conn, tid))
             prompt = (f"RIUNIONE VOCALE «{t['titolo']}» con Lorenzo. Partecipanti: {nomi}. Tu sei {p['nome']} ({p['ruolo']}).\n\nORDINE DEL GIORNO (dato):\n{t['ordine_del_giorno']}\n\n"
                       f"CONVERSAZIONE FINORA:\n{storia}\n\n"
-                      "Lorenzo guida la riunione e decide la linea: rispondi SOLO a cio' che ha appena chiesto, senza anticipare altri temi, senza proporre argomenti tuoi e senza porgli domande. "
+                      "REGOLE DELLA RIUNIONE:\n" + REGOLE_RIUNIONE + "\n\nLorenzo guida la riunione e decide la linea: rispondi SOLO a cio' che ha appena chiesto, senza anticipare altri temi, senza proporre argomenti tuoi e senza porgli domande. Non ripetere mai le sue parole. "
                       "Rispondi a voce: italiano parlato, al massimo 4 frasi, nessun elenco e nessun markdown, per la tua competenza e senza ripetere cio' che hanno detto gli altri. "
                       f"Se non hai nulla di utile da aggiungere rispondi esattamente «{NIENTE.capitalize()}». Non inventare fatti: se non lo sai, dillo.\n"
                       "Se hai una richiesta, una segnalazione, una decisione che ti serve o un tema tuo da portargli, NON dirlo ora: scrivilo in una riga finale che inizia con «CODA:» (al massimo due frasi). "
@@ -188,6 +202,9 @@ def turno(conn, tid: int, testo: str) -> int:
     if RICHIESTE.search(testo) and conn.execute("SELECT 1 FROM tavoli_interventi WHERE tavolo_id = %s AND coda = 1", (tid,)).fetchone():
         consegna_coda(conn, tid)    # «avete richieste?»: parlano le richieste messe in coda, senza altre risposte
         conn.commit()
+        return iid
+    if e_indicazione(testo):
+        conn.commit()      # solo registrata: nessun manager viene interpellato (nessuna risposta, nessun token)
         return iid
     ids = [p["id"] for p in interpellati(testo, part)]
     conn.execute("UPDATE tavoli SET occupato = TRUE WHERE id = %s", (tid,))
@@ -250,6 +267,7 @@ def leggi(tid: int, dopo: int = 0, _: dict = Depends(solo_titolare)):
         t["partecipanti"] = conn.execute("""SELECT a.id, a.nome, a.ruolo, a.voce_id FROM tavoli_partecipanti p JOIN agenti a ON a.id = p.agente_id
                                             WHERE p.tavolo_id = %s ORDER BY p.ordine""", (tid,)).fetchall()
         t["interventi"] = conn.execute("""SELECT i.id, i.agente_id, i.da_utente, i.testo, i.creato_il FROM tavoli_interventi i WHERE i.tavolo_id = %s AND i.id > %s AND i.coda = 0 ORDER BY i.id""", (tid, dopo)).fetchall()
+        t["regole"] = REGOLE_RIUNIONE
         t["in_coda"] = conn.execute("SELECT count(*) AS n FROM tavoli_interventi WHERE tavolo_id = %s AND coda = 1", (tid,)).fetchone()["n"]
         mod = conn.execute("SELECT a.id, a.nome, a.ruolo, a.voce_id FROM tavoli tv JOIN agenti a ON a.id = tv.moderatore_id WHERE tv.id = %s", (tid,)).fetchone()
         if mod and mod["id"] not in {p["id"] for p in t["partecipanti"]}:
@@ -277,9 +295,10 @@ def parla(tid: int, d: Frase, _: dict = Depends(solo_titolare)):
     with connessione() as conn:
         try:
             iid = turno(conn, tid, d.testo)
+            registrata = e_indicazione(d.testo) and not RICHIESTE.search(d.testo)
         except ErroreCall as e:
             raise HTTPException(status.HTTP_409_CONFLICT if "aspetta" in str(e) else status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
-    return {"intervento_id": iid}
+    return {"intervento_id": iid, "registrata": registrata}
 
 
 @router.post("/riunioni-call/{tid}/chiudi")

@@ -111,6 +111,18 @@ with TestClient(app) as c:
     sql("UPDATE tavoli SET occupato=FALSE WHERE id=%s", (tid,))
     ok("frase vuota rifiutata", c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "   "}).status_code in (422,))
 
+    # regola: le indicazioni si registrano e basta
+    sql("UPDATE tavoli SET occupato=FALSE WHERE id=%s", (tid,))
+    copione[:] = [fine("NON DOVREBBE ESSERE CHIAMATO")]; ultimi_msg.clear()
+    n_prima = len(c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()["interventi"])
+    r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Il budget massimo per l'estate e' di cinquemila euro, Marco segui il sito."})
+    d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
+    ok("un'indicazione viene solo registrata: nessun manager risponde, nessun token", r.json().get("registrata") is True and ultimi_msg == [] and len(d["interventi"]) == n_prima + 1 and d["interventi"][-1]["da_utente"] and d["occupato"] is False, str(r.json()))
+    r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Marco, quanto costa il sito?"})
+    ok("una domanda invece riceve risposta", r.json().get("registrata") is False)
+    sql("UPDATE tavoli SET occupato=FALSE WHERE id=%s", (tid,))
+    ok("la regola scritta e' esposta e nel prompt", "nessuno la ripete" in c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()["regole"] and "Non ripetere mai le sue parole" in ultimi_msg[-1] and "REGOLE DELLA RIUNIONE" in ultimi_msg[-1])
+    ok("nel verbale Lorenzo ha il suo nome", "Lorenzo:" in __import__("app.tavoli", fromlist=["x"])._storia(__import__("app.tavoli", fromlist=["x"])._interventi(__import__("app.db", fromlist=["x"]).connessione().__enter__(), tid)))
     # ascolto continuo
     from app import trascrizione
     risposte = ["Dario, e il sito?", "Sottotitoli e revisione a cura di QTSS", "ERR"]
@@ -124,6 +136,7 @@ with TestClient(app) as c:
     ok("le frasi inventate sul rumore sono scartate", c.post(f"/gestione/riunioni-call/{tid}/audio", headers=H, files=f).json() == {"testo": ""})
     ok("errore di trascrizione riportato al browser (per passare al riconoscimento del browser)", c.post(f"/gestione/riunioni-call/{tid}/audio", headers=H, files=f).status_code == 409)
     ok("limite orario dedicato alle call", "limite_ora=MAX_ASCOLTI_ORA" in open("app/call_riunioni.py").read() and call_riunioni.MAX_ASCOLTI_ORA >= 600)
+    ok("ElevenLabs: niente voce robotica di ripiego e precarico", all(k in c.get("/app/riunioni_call.js").text for k in ("precarica", "mancata")))
     ok("scrittura/ascolto: il client ha il motore continuo", all(k in c.get("/app/riunioni_call.js").text for k in ("echoCancellation", "ora - ultimaVoce > 1300", "bloccato", "/audio", "SpeechRecognition")))
 
     # voci
