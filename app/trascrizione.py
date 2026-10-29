@@ -16,7 +16,7 @@ class ErroreTrascrizione(Exception):
         self.codice = codice
 
 
-def trascrivi(dati: bytes, estensione: str, fascia_dati: str, utente_id: int | None, tipo_contenuto: str = "application/octet-stream") -> str:
+def trascrivi(dati: bytes, estensione: str, fascia_dati: str, utente_id: int | None, tipo_contenuto: str = "application/octet-stream", limite_ora: int = MAX_ORA) -> str:
     estensione = estensione.lower()
     if estensione not in FORMATI:
         raise ErroreTrascrizione("Formato audio non supportato", 422)
@@ -33,7 +33,7 @@ def trascrivi(dati: bytes, estensione: str, fascia_dati: str, utente_id: int | N
                                      ". Dichiara le garanzie di OpenAI in Sicurezza e garanzie" + (" (o usa la dettatura del browser)." if utente_id else "."), 409)
         recenti = conn.execute("SELECT count(*) AS n FROM registro_azioni WHERE azione='voce_trascritta' AND utente_id IS NOT DISTINCT FROM %s AND creata_il >= NOW() - interval '1 hour'",
                                (utente_id,)).fetchone()["n"]
-        if recenti >= MAX_ORA:
+        if recenti >= limite_ora:
             raise ErroreTrascrizione("Troppe trascrizioni in un'ora: riprova piu' tardi", 429)
     chiave = fornitori.chiave("openai")
     if not chiave:

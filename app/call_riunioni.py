@@ -4,10 +4,10 @@ Le riunioni vivono nelle tabelle dei tavoli (tipo 'call'); le voci sono ElevenLa
 import re
 import threading
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
-from . import tavoli, voce_elevenlabs as ve
+from . import tavoli, trascrizione, voce_elevenlabs as ve
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -304,3 +304,26 @@ def termina(tid: int, _: dict = Depends(solo_titolare)):
     else:
         threading.Thread(target=lavoro, daemon=True).start()
     return {"sintesi": "Riunione chiusa: il verbale e' in preparazione."}
+
+
+ALLUCINAZIONI = re.compile(r"sottotitoli|amara\.org|grazie per (la visione|aver guardato|l'attenzione)|iscriviti al canale|alla prossima", re.I)
+MAX_ASCOLTI_ORA = 900
+
+
+@router.post("/riunioni-call/{tid}/audio")
+def ascolta(tid: int, audio: UploadFile = File(...), u: dict = Depends(solo_titolare)):
+    """Un pezzo di parlato di Lorenzo (finisce quando fa una pausa): lo trascrive. Il testo torna al browser, che lo invia come intervento."""
+    with connessione() as conn:
+        t = conn.execute("SELECT stato FROM tavoli WHERE id = %s AND tipo = 'call'", (tid,)).fetchone()
+    if t is None or t["stato"] != "in_corso":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Riunione non in corso")
+    nome = audio.filename or "voce.webm"
+    try:
+        testo = trascrizione.trascrivi(audio.file.read(trascrizione.MAX_BYTE + 1), nome.rsplit(".", 1)[-1], "interno", u["id"], audio.content_type or "application/octet-stream", limite_ora=MAX_ASCOLTI_ORA)
+    except trascrizione.ErroreTrascrizione as e:
+        if e.codice == 422:
+            return {"testo": ""}    # silenzio o rumore: niente da dire
+        raise HTTPException(e.codice, str(e)) from None
+    if ALLUCINAZIONI.search(testo) and len(testo) < 80:
+        return {"testo": ""}       # frasi inventate da Whisper sul rumore di fondo
+    return {"testo": testo}

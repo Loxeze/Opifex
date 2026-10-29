@@ -111,6 +111,21 @@ with TestClient(app) as c:
     sql("UPDATE tavoli SET occupato=FALSE WHERE id=%s", (tid,))
     ok("frase vuota rifiutata", c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "   "}).status_code in (422,))
 
+    # ascolto continuo
+    from app import trascrizione
+    risposte = ["Dario, e il sito?", "Sottotitoli e revisione a cura di QTSS", "ERR"]
+    def finta_trascrivi(dati, est, fascia, uid, ct="", limite_ora=60):
+        t = risposte.pop(0)
+        if t == "ERR": raise trascrizione.ErroreTrascrizione("Chiave OpenAI non configurata", 409)
+        return t
+    trascrizione.trascrivi = finta_trascrivi
+    f = {"audio": ("voce.webm", b"x" * 2000, "audio/webm")}
+    ok("l'audio viene trascritto", c.post(f"/gestione/riunioni-call/{tid}/audio", headers=H, files=f).json() == {"testo": "Dario, e il sito?"})
+    ok("le frasi inventate sul rumore sono scartate", c.post(f"/gestione/riunioni-call/{tid}/audio", headers=H, files=f).json() == {"testo": ""})
+    ok("errore di trascrizione riportato al browser (per passare al riconoscimento del browser)", c.post(f"/gestione/riunioni-call/{tid}/audio", headers=H, files=f).status_code == 409)
+    ok("limite orario dedicato alle call", "limite_ora=MAX_ASCOLTI_ORA" in open("app/call_riunioni.py").read() and call_riunioni.MAX_ASCOLTI_ORA >= 600)
+    ok("scrittura/ascolto: il client ha il motore continuo", all(k in c.get("/app/riunioni_call.js").text for k in ("echoCancellation", "ora - ultimaVoce > 1300", "/audio", "SpeechRecognition")))
+
     # voci
     vm = c.get("/gestione/voci-manager", headers=H).json()
     ok("pannello voci", len(vm["voci"]) == 3 and vm["elevenlabs"] is False or len(vm["voci"]) >= 0)

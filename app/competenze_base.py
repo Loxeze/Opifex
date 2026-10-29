@@ -2,7 +2,7 @@
 Le regole comuni a tutti (non inventare, autonomia, concisione, precedenza di Aurora) sono in richieste.REGOLA e qui non si ripetono.
 Si applicano una sola volta per versione; il testo precedente di ogni agente resta in agenti_istruzioni_storico e si puo' ripristinare."""
 
-VERSIONE = "1.68.0"
+VERSIONE = "1.69.0"
 
 # nome agente -> istruzioni. Dove l'agente non esiste (o non c'e' in questa installazione) la voce e' ignorata.
 COMPETENZE: dict[str, str] = {}
