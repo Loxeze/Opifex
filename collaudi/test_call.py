@@ -83,6 +83,8 @@ with TestClient(app) as c:
     d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
     ok("risposta di tutti e due, in ordine", [(i["da_utente"], i["agente_id"]) for i in d["interventi"]][1:] == [(True, None), (False, marco), (False, dario)] and "Che cosa vuoi sapere" in d["interventi"][0]["testo"] and d["interventi"][0]["agente_id"] == aur, str(d["interventi"]))
     ok("il secondo ha visto la risposta del primo", "servono eventi serali" in ultimi_msg[1])
+    ok("il prompt vieta le conferme tipo «ho preso nota»", "VIETATO dire o far capire di aver registrato" in ultimi_msg[1] and "ascolta, capisci, agisci" in ultimi_msg[1])
+    ok("un'indicazione che nomina un manager lo interpella", call_riunioni.nominati_espliciti("Marco segui il sito", [{"nome": "Marco"}]) and not call_riunioni.nominati_espliciti("Il budget e' alto", [{"nome": "Marco"}]))
     ok("non e' piu' occupato", d["occupato"] is False)
     ok("i partecipanti hanno la voce", all(p["voce_id"] for p in d["partecipanti"]))
     ult = d["interventi"][-1]["id"]
@@ -115,7 +117,7 @@ with TestClient(app) as c:
     sql("UPDATE tavoli SET occupato=FALSE WHERE id=%s", (tid,))
     copione[:] = [fine("NON DOVREBBE ESSERE CHIAMATO")]; ultimi_msg.clear()
     n_prima = len(c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()["interventi"])
-    r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Il budget massimo per l'estate e' di cinquemila euro, Marco segui il sito."})
+    r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Il budget massimo per l'estate e' di cinquemila euro."})
     d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
     ok("un'indicazione viene solo registrata: nessun manager risponde, nessun token", r.json().get("registrata") is True and ultimi_msg == [] and len(d["interventi"]) == n_prima + 1 and d["interventi"][-1]["da_utente"] and d["occupato"] is False, str(r.json()))
     r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Marco, quanto costa il sito?"})
@@ -130,7 +132,7 @@ with TestClient(app) as c:
     r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Marco e Dario, preparatemi un documento con il piano per l'estate"})
     d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
     ok("un incarico parte davvero: task create, preso in carico e consegna a voce", r.json().get("registrata") is False and sql("SELECT count(*) FROM task WHERE titolo LIKE 'Dalla riunione%%'")[0][0] == 2
-       and any("Preso in carico" in i["testo"] for i in d["interventi"]) and any("Ho scritto il piano estate" in i["testo"] for i in d["interventi"]), str([i["testo"][:50] for i in d["interventi"][-6:]]))
+       and any(i["testo"] == "Ci lavoro." for i in d["interventi"]) and not any("Preso in carico" in i["testo"] for i in d["interventi"]) and any("Ho scritto il piano estate" in i["testo"] for i in d["interventi"]), str([i["testo"][:50] for i in d["interventi"][-6:]]))
     ok("il documento intero e' nella task, la sintesi parlata no", sql("SELECT count(*) FROM task_commenti WHERE testo LIKE 'Ecco il documento completo%%'")[0][0] == 1 and "PAROLE" not in " ".join(i["testo"] for i in d["interventi"]))
     ok("task completate e notifica", sql("SELECT count(*) FROM task WHERE titolo LIKE 'Dalla riunione%%' AND stato='completata'")[0][0] == 2 and sql("SELECT count(*) FROM notifiche WHERE testo LIKE '%%incarico della riunione%%'")[0][0] == 2)
     ok("una domanda che contiene «documento» resta una domanda", not call_riunioni.e_lavoro("Quanto costa fare il documento?") and call_riunioni.e_lavoro("Scrivi la relazione") and not call_riunioni.e_indicazione("Scrivi la relazione"))

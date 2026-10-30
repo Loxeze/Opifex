@@ -16,13 +16,20 @@ SINCRONO = False
 MAX_PARTECIPANTI = 8
 MAX_TOKEN_RISPOSTA = 1500
 NIENTE = "niente da aggiungere"
+REGOLE_STILE_BREVE = "diretto, tra colleghi; mai dire di aver registrato, annotato o preso nota."
+
+STILE = ("si parla come in una conversazione vocale tra colleghi che si capiscono al volo: dritti al punto, sulla sostanza, nel tono di chi sa gia' cosa fare. "
+         "VIETATO dire o far capire di aver registrato, annotato, preso nota, preso riferimenti, salvato in memoria, aggiornato schede o usato strumenti: sono cose che fai tu, non notizie per Lorenzo. "
+         "Vietati «ricevuto», «perfetto», «ottima domanda», «certo», i riassunti di cio' che ha appena detto e le promesse generiche. Se c'e' qualcosa da fare, la fai (hai gli strumenti) e dici solo l'esito che gli serve. "
+         "Se la frase di Lorenzo non richiede nulla da te, rispondi «Niente da aggiungere».")
 
 # REGOLA SCRITTA DELLE RIUNIONI: vale per ogni manager in ogni riunione vocale
 REGOLE_RIUNIONE = (
     "1. Lorenzo guida: i manager rispondono solo a cio' che chiede e non propongono argomenti propri; le loro richieste restano in coda.\n"
-    "2. Quando Lorenzo da' un'indicazione, una decisione o un'informazione (non una domanda), nessuno la ripete, la riassume o la conferma a parole: viene solo registrata e compare «Registrato». Niente risposte in fila, per non perdere tempo e token.\n"
+    "2. Quando Lorenzo da' un'indicazione, una decisione o un'informazione, nessuno la ripete, la riassume o la conferma a parole. Se riguarda il lavoro di qualcuno, quel qualcuno agisce e dice solo il risultato che serve.\n"
     "3. Si risponde a voce: poche frasi, senza elenchi, senza ripetere cio' che hanno gia' detto gli altri.\n"
-    "4. Chi non ha nulla da aggiungere tace.")
+    "4. Chi non ha nulla da aggiungere tace.\n"
+    "5. Stile: " + STILE)
 
 DOMANDA = re.compile(r"\?|\b(cosa|che cosa|come|perch[eé]|quando|quanto|quanti|quante|chi|dove|quale|quali|puoi|potete|potresti|dimmi|dimmelo|dicci|spiega\w*|raccontami|aggiorna\w*|riepilog\w*|riassum\w*|fammi|fatemi|dammi|datemi|mostra\w*|elenca\w*|voglio sapere|vorrei sapere|cosa ne pensi|che ne pensi|parere|opinione|richieste|in coda|stato|punto della situazione)\b", re.I)
 
@@ -155,6 +162,11 @@ def interpellati(testo: str, partecipanti: list[dict]) -> list[dict]:
     return nominati or partecipanti
 
 
+def nominati_espliciti(testo: str, partecipanti: list[dict]) -> bool:
+    t = testo.lower()
+    return any(re.search(r"(?<!\w)" + re.escape(p["nome"].lower()) + r"(?!\w)", t) for p in partecipanti)
+
+
 def separa_coda(testo: str) -> tuple[str, str]:
     """Divide la risposta parlata dalla richiesta in coda (righe che iniziano con CODA:)."""
     parlato, coda = [], []
@@ -191,7 +203,7 @@ def _rispondi(tid: int, ids: list[int]):
             prompt = (f"RIUNIONE VOCALE «{t['titolo']}» con Lorenzo. Partecipanti: {nomi}. Tu sei {p['nome']} ({p['ruolo']}).\n\nORDINE DEL GIORNO (dato):\n{t['ordine_del_giorno']}\n\n"
                       f"CONVERSAZIONE FINORA:\n{storia}\n\n"
                       "REGOLE DELLA RIUNIONE:\n" + REGOLE_RIUNIONE + "\n\nLorenzo guida la riunione e decide la linea: rispondi SOLO a cio' che ha appena chiesto, senza anticipare altri temi, senza proporre argomenti tuoi e senza porgli domande. Non ripetere mai le sue parole. "
-                      "Rispondi a voce: italiano parlato, al massimo 4 frasi, nessun elenco e nessun markdown, per la tua competenza e senza ripetere cio' che hanno detto gli altri. "
+                      "Rispondi a voce: italiano parlato, al massimo 4 frasi (spesso ne basta una), nessun elenco e nessun markdown, per la tua competenza e senza ripetere cio' che hanno detto gli altri. Lorenzo ti sta parlando come parlerebbe a un collaboratore di fiducia: ascolta, capisci, agisci. "
                       f"Se non hai nulla di utile da aggiungere rispondi esattamente «{NIENTE.capitalize()}». Non inventare fatti: se non lo sai, dillo.\n"
                       "Se hai una richiesta, una segnalazione, una decisione che ti serve o un tema tuo da portargli, NON dirlo ora: scrivilo in una riga finale che inizia con «CODA:» (al massimo due frasi). "
                       "Lorenzo la sentira' dopo, quando chiedera' le richieste in coda.")
@@ -221,7 +233,7 @@ def _lavora(tid: int, aid: int, task_id: int, testo: str):
         prompt = (f"INCARICO DA RIUNIONE «{t['titolo']}». Lorenzo ti ha chiesto: «{testo}»\n\nContesto della riunione (dato):\n{storia}\n\n"
                   "Esegui il lavoro completo adesso, non solo una risposta a voce. Se hai gli strumenti Google, crea o aggiorna il documento nella cartella Opifex con un nome chiaro; "
                   "altrimenti scrivi qui il documento intero. Non dichiarare di aver creato un file se lo strumento ha dato errore.\n"
-                  "Chiudi con una riga che inizia con «PAROLE:» e dice a voce, in al massimo due frasi, cosa hai consegnato e dove si trova.")
+                  "Chiudi con una riga che inizia con «PAROLE:» e dice a voce, in una o due frasi, cosa hai consegnato e dove si trova (niente premesse, niente «ho finito il lavoro»: solo il risultato). Stile: " + REGOLE_STILE_BREVE)
         r = esegui_agente(aid, prompt, "interno", None, max_token=16000)["risposta"].strip()
         stato = "ok"
     except Exception as e:  # noqa: BLE001
@@ -245,7 +257,7 @@ def assegna_incarico(conn, tid: int, ids: list[int], testo: str):
         task_id = conn.execute("""INSERT INTO task (titolo, descrizione, stato, priorita, assegnato_agente_id) VALUES (%s,%s,'in_corso','alta',%s) RETURNING id""",
                                (titolo, f"Richiesta di Lorenzo in riunione:\n{testo}", aid)).fetchone()["id"]
         conn.execute("INSERT INTO tavoli_interventi (tavolo_id, turno, agente_id, testo) VALUES (%s,1,%s,%s)",
-                     (tid, aid, f"Preso in carico. Ci lavoro adesso e ti avviso appena e' pronto; lo trovi anche nella task {task_id}."))
+                     (tid, aid, "Ci lavoro."))
         lavori.append((aid, task_id))
     conn.commit()
     for aid, task_id in lavori:
@@ -276,8 +288,8 @@ def turno(conn, tid: int, testo: str) -> int:
     if e_lavoro(testo):
         assegna_incarico(conn, tid, ids, testo)    # un incarico: parte il lavoro vero, la conversazione resta libera
         return iid
-    if e_indicazione(testo):
-        conn.commit()      # solo registrata: nessun manager viene interpellato (nessuna risposta, nessun token)
+    if e_indicazione(testo) and not nominati_espliciti(testo, part):
+        conn.commit()      # indicazione generica: nessun manager viene interpellato (nessuna risposta, nessun token)
         return iid
     conn.execute("UPDATE tavoli SET occupato = TRUE WHERE id = %s", (tid,))
     conn.commit()
@@ -367,7 +379,8 @@ def parla(tid: int, d: Frase, _: dict = Depends(solo_titolare)):
     with connessione() as conn:
         try:
             iid = turno(conn, tid, d.testo)
-            registrata = e_indicazione(d.testo) and not RICHIESTE.search(d.testo)
+            part = conn.execute("SELECT a.nome FROM tavoli_partecipanti p JOIN agenti a ON a.id = p.agente_id WHERE p.tavolo_id = %s", (tid,)).fetchall()
+            registrata = e_indicazione(d.testo) and not RICHIESTE.search(d.testo) and not nominati_espliciti(d.testo, part)
         except ErroreCall as e:
             raise HTTPException(status.HTTP_409_CONFLICT if "aspetta" in str(e) else status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
     return {"intervento_id": iid, "registrata": registrata}
