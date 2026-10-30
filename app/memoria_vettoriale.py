@@ -150,8 +150,53 @@ def unisci(per_parole: list[dict], per_significato: list[dict], limite: int) -> 
 
 # ---------- relazioni tra documenti ----------
 SOGLIA_TEMA = 0.6
+SOGLIA_PAROLE = 0.3
 VICINI = 5
 MAX_DOC_RELAZIONI = 4000
+
+
+def relaziona_parole(conn) -> int:
+    """Senza vettori (nessuna chiave OpenAI o documenti riservati): collega i documenti per le parole che hanno in comune (TF-IDF). Meno fine, ma funziona sempre."""
+    import numpy as np
+    from collections import Counter
+    f = "p:" + "{}:{}".format(*conn.execute("SELECT count(*), COALESCE(sum(caratteri),0) FROM documenti").fetchone().values())
+    r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'relazioni_firma'").fetchone()
+    if r and r["valore"] == f:
+        return 0
+    docs = [d["id"] for d in conn.execute("SELECT id FROM documenti WHERE fascia_dati <> 'riservato' ORDER BY id LIMIT %s", (MAX_DOC_RELAZIONI,)).fetchall()]
+    conteggi = []
+    for d in docs:
+        testo = " ".join(p["testo"] for p in conn.execute("SELECT testo FROM pezzi_documenti WHERE documento_id = %s ORDER BY id LIMIT 60", (d,)).fetchall())
+        conteggi.append(Counter(re.findall(r"[^\W\d_]{5,}", testo.lower())))
+    n = len(docs)
+    if n < 2:
+        return 0
+    df = Counter(w for c in conteggi for w in c)
+    vocab = [w for w, k in df.most_common() if k >= 2 and k <= max(2, n // 2)][:6000]
+    if not vocab:
+        return 0
+    indice = {w: i for i, w in enumerate(vocab)}
+    M = np.zeros((n, len(vocab)), dtype=np.float32)
+    for i, c in enumerate(conteggi):
+        for w, k in c.items():
+            j = indice.get(w)
+            if j is not None:
+                M[i, j] = (1 + np.log(k)) * np.log(n / df[w])
+    M /= np.linalg.norm(M, axis=1, keepdims=True) + 1e-9
+    S = M @ M.T
+    np.fill_diagonal(S, -1)
+    coppie = {}
+    for i in range(n):
+        for j in np.argsort(-S[i])[:VICINI]:
+            if S[i, j] >= SOGLIA_PAROLE:
+                a, b = sorted((docs[i], docs[int(j)]))
+                coppie[(a, b)] = float(S[i, j])
+    conn.execute("DELETE FROM documenti_relazioni")
+    for (a, b), v in coppie.items():
+        conn.execute("INSERT INTO documenti_relazioni (documento_a, documento_b, somiglianza) VALUES (%s,%s,%s)", (a, b, v))
+    conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('relazioni_firma', %s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (f,))
+    conn.commit()
+    return len(coppie)
 
 
 def relaziona(conn) -> int:
@@ -164,7 +209,7 @@ def relaziona(conn) -> int:
         return 0
     c = _matrice(conn)
     if len(c["pezzi"]) == 0:
-        return 0
+        return relaziona_parole(conn)
     ids = np.unique(c["docs"])[:MAX_DOC_RELAZIONI]
     D = np.zeros((len(ids), DIM), dtype=np.float32)
     for i, d in enumerate(ids):
