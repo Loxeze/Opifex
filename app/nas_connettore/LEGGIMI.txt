@@ -12,14 +12,15 @@ qualche miniatura. Gli originali restano sul NAS. Escono dal NAS soltanto:
 
 Installazione (UGREEN UGOS Pro)
 -------------------------------
-1. Estrai questa cartella "opifex-nas" in una cartella condivisa del NAS (per esempio "docker/opifex-nas").
-2. Apri docker-compose.yml con un editor di testo e controlla la sezione "volumes": a sinistra il percorso REALE delle tue cartelle sul NAS
-   (di solito /volume1/NomeCartella; lo vedi in File Manager > proprieta' della cartella), a destra /dati/NomeCartella.
-   Lascia sempre ":ro" in fondo (sola lettura).
-3. In UGOS apri l'app Docker > Progetto > Crea, scegli la cartella opifex-nas e il file docker-compose.yml, poi Avvia.
-   (In alternativa, da SSH:  cd opifex-nas && docker compose up -d --build)
-4. In Opifex, sezione Archivio NAS: il connettore compare "online" entro un minuto. Aggiungi le cartelle da catalogare:
-   come "percorso" scrivi il percorso sotto /dati (per esempio "Video/Montarrenti"), oppure lascia vuoto per tutto /dati.
+Serve SOLO il file docker-compose.yml: gli altri file dello zip non servono (restano per chi preferisce costruire il contenitore a mano).
+1. Apri docker-compose.yml con un editor di testo e modifica la sezione "volumes": a sinistra il percorso REALE della cartella sul NAS
+   (di solito /volume1/NomeCartella), a destra /dati/<nome>. Lascia sempre ":ro" (sola lettura). Una riga per cartella condivisa.
+2. In UGOS apri l'app Docker > Progetto > Crea, incolla il contenuto di docker-compose.yml (o scegli il file) e Avvia.
+   Al primo avvio il contenitore scarica da solo quello che gli serve (ffmpeg e le librerie): ci vuole qualche minuto.
+   Da SSH, in alternativa:  docker compose -f docker-compose.yml up -d
+3. In Opifex, sezione Archivio NAS: il connettore compare "online" entro un paio di minuti. Aggiungi le cartelle da catalogare:
+   come "percorso" scrivi il nome sotto /dati (per esempio "Progetti" o "Progetti/Montarrenti"), oppure lascia vuoto per tutto /dati.
+   A ogni avvio il contenitore scarica da Opifex l'ultima versione del programma: per aggiornarlo basta riavviarlo.
 
 Sicurezza
 ---------

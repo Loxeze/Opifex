@@ -1,13 +1,22 @@
-# Opifex - connettore per il NAS. Modifica solo la parte "volumes": una riga per ogni cartella condivisa del NAS
-# che vuoi far conoscere a Opifex (sempre in sola lettura, ":ro"). A sinistra il percorso sul NAS, a destra /dati/<nome>.
+# Opifex - connettore per il NAS. Basta questo file: non serve nient'altro (niente build).
+# Modifica solo la parte "volumes": una riga per ogni cartella condivisa del NAS che vuoi far conoscere a Opifex (sempre in sola lettura, ":ro").
+# A sinistra il percorso sul NAS, a destra /dati/<nome>. In Opifex, "percorso" della cartella = <nome> (o <nome>/sottocartella).
 services:
   opifex-nas:
-    build: .
+    image: python:3.12-slim
     container_name: opifex-@@NOME@@
     restart: unless-stopped
     environment:
       OPIFEX_URL: "@@URL@@"
       OPIFEX_TOKEN: "@@TOKEN@@"
     volumes:
-      - /volume1/Video:/dati/Video:ro
-      - /volume1/Foto:/dati/Foto:ro
+      - /volume1/Progetti:/dati/Progetti:ro
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        command -v ffmpeg >/dev/null || (apt-get update && apt-get install -y --no-install-recommends ffmpeg)
+        python -c "import requests, PIL" 2>/dev/null || pip install --no-cache-dir requests==2.32.3 Pillow==11.0.0 pillow-heif==0.20.0
+        python -c "import os,urllib.request as u;r=u.Request(os.environ['OPIFEX_URL']+'/archivio-nas/connettore/programma',headers={'Authorization':'Bearer '+os.environ['OPIFEX_TOKEN']});open('/tmp/opifex_nas.py','wb').write(u.urlopen(r,timeout=60).read())"
+        exec python -u /tmp/opifex_nas.py

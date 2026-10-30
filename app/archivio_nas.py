@@ -145,6 +145,12 @@ def _nuova_richiesta(conn, file_id: int, tipo: str, lato: int | None = None, age
     return conn.execute("INSERT INTO archivio_richieste (file_id, tipo, lato_max, agente_id) VALUES (%s,%s,%s,%s) RETURNING id", (file_id, tipo, lato, agente_id)).fetchone()["id"]
 
 
+@router_nas.get("/programma")
+def programma(c: dict = Depends(connettore_corrente)):
+    """Il contenitore scarica da qui l'ultima versione del programma a ogni avvio: sul NAS basta il solo file docker-compose.yml, senza build."""
+    return Response((CARTELLA_CONNETTORE / "opifex_nas.py").read_bytes(), media_type="text/x-python", headers={"Cache-Control": "no-store"})
+
+
 @router_nas.get("/config")
 def config(c: dict = Depends(connettore_corrente)):
     with connessione() as conn:

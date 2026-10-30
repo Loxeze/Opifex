@@ -59,6 +59,9 @@ with TestClient(app) as c:
     k = c.post("/gestione/archivio/cartelle", headers=H, json={"connettore_id": cid, "nome": "Foto", "percorso": "Foto", "prefisso_pc": "\\\\UGREEN\\Foto", "trascrivi": True})
     ok("cartella creata", k.status_code == 201, k.text); kid = k.json()["id"]
     ok("percorso con .. rifiutato", c.post("/gestione/archivio/cartelle", headers=H, json={"connettore_id": cid, "nome": "x", "percorso": "../etc"}).status_code == 422)
+    pg = c.get("/archivio-nas/connettore/programma", headers=N)
+    ok("il contenitore scarica il programma con la chiave", pg.status_code == 200 and b"def main" in pg.content and c.get("/archivio-nas/connettore/programma").status_code == 401)
+    ok("il compose non richiede build e scarica il programma", "build:" not in comp and "/archivio-nas/connettore/programma" in comp and "image: python:3.12-slim" in comp)
     cfg = c.get("/archivio-nas/connettore/config", headers={**N, "X-Versione": "1.0"}).json()
     ok("config: cartelle e intervallo", cfg["cartelle"][0]["id"] == kid and cfg["intervallo"] == 900 and cfg["richieste"] == [])
     ok("connettore online", c.get("/gestione/archivio", headers=H).json()["connettori"][0]["online"] is True)
