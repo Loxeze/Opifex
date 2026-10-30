@@ -163,5 +163,6 @@ except FileNotFoundError:
     bloccato = True
 ok("richiesta fuori da /dati rifiutata", bloccato)
 ok("nessun segreto nel programma del connettore", "ar_" not in open("app/nas_connettore/opifex_nas.py").read().replace('startswith("ar_")', ""))
+ok("il connettore scansiona subito le cartelle nuove (non aspetta l'intervallo)", 'c["id"] not in ultima' in open("app/nas_connettore/opifex_nas.py").read() and "ultima: dict[int, float]" in open("app/nas_connettore/opifex_nas.py").read())
 ok("sezione presente nell'interfaccia", "vistaArchivio" in open("app/static/dashboard.js").read() and "archivio_nas.js" in open("app/static/index.html").read() and "archivioAttivo" in open("app/static/app.js").read())
 print("TOTALE", sum(ris), "/", len(ris))

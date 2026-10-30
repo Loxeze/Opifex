@@ -24,7 +24,7 @@ try:
 except Exception:  # noqa: BLE001
     pass
 
-VERSIONE = "1.0"
+VERSIONE = "1.1"
 URL = os.environ.get("OPIFEX_URL", "").rstrip("/")
 TOKEN = os.environ.get("OPIFEX_TOKEN", "")
 DATI = Path(os.environ.get("OPIFEX_DATI", "/dati"))
@@ -285,20 +285,30 @@ def main() -> None:
     if not URL or not TOKEN:
         raise SystemExit("Mancano OPIFEX_URL e OPIFEX_TOKEN: usa il docker-compose.yml scaricato da Opifex.")
     log.info("Connettore Opifex %s avviato verso %s", VERSIONE, URL)
-    ultima = 0.0
+    ultima: dict[int, float] = {}   # ultima scansione di ogni cartella: una cartella nuova parte subito, le altre ogni "intervallo"
     while True:
         try:
             cfg = chiama("GET", "/config")
             evadi_richieste()
-            if time.time() - ultima >= max(60, int(cfg.get("intervallo") or 900)):
-                for c in cfg.get("cartelle", []):
-                    scansiona(c)
-                ultima = time.time()
+            intervallo = max(60, int(cfg.get("intervallo") or 900))
+            if not cfg.get("cartelle"):
+                log.info("Nessuna cartella da catalogare: aggiungila in Opifex (Archivio NAS)")
+            for c in cfg.get("cartelle", []):
+                if time.time() - ultima.get(c["id"], 0.0) >= intervallo or c["id"] not in ultima:
+                    log.info("Scansione della cartella %s", c["percorso"] or "/")
+                    try:
+                        scansiona(c)
+                    except requests.RequestException:
+                        raise
+                    except Exception as e:  # noqa: BLE001 - il problema si vede in Opifex, accanto alla cartella
+                        log.exception("Scansione non riuscita")
+                        chiama("POST", "/fine-scansione", json={"cartella_id": c["id"], "scan": 0, "errore": f"{type(e).__name__}: {e}"[:290]})
+                    ultima[c["id"]] = time.time()
         except requests.RequestException as e:
             log.warning("Opifex non raggiungibile (%s): riprovo tra poco", type(e).__name__)
         except Exception:  # noqa: BLE001
             log.exception("Errore imprevisto, riprovo")
-        time.sleep(60)
+        time.sleep(30)
 
 
 if __name__ == "__main__":
