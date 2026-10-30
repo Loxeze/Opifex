@@ -49,7 +49,13 @@ def _embed(testi: list[str]) -> list[list[float]]:
 
 
 def _bytes(v: list[float]) -> bytes:
-    import numpy as np
+    try:
+        import numpy as np
+    except ImportError:   # senza numpy: stesso risultato (float16 normalizzato) con la sola libreria standard
+        import math
+        import struct
+        n = math.sqrt(sum(x * x for x in v)) or 1.0
+        return struct.pack("<%de" % len(v), *[x / n for x in v])
     a = np.asarray(v, dtype=np.float32)
     n = float(np.linalg.norm(a)) or 1.0
     return (a / n).astype(np.float16).tobytes()
@@ -91,14 +97,31 @@ def indicizza(conn, massimo: int = MAX_PER_GIRO) -> int:
     return fatti
 
 
-def _matrice(conn):
-    import numpy as np
+def _matrice_py(conn):
+    import struct
     firma = conn.execute("SELECT count(*) AS n, COALESCE(max(pezzo_id), 0) AS m FROM pezzi_vettori").fetchone()
     f = (firma["n"], firma["m"])
     with _blocco:
-        if _cache["firma"] == f and _cache["M"] is not None:
+        if _cache["firma"] == f and _cache["M"] is not None and _cache.get("py"):
             return _cache
         righe = conn.execute("SELECT pezzo_id, documento_id, vettore FROM pezzi_vettori ORDER BY pezzo_id").fetchall()
+        M = [struct.unpack("<%de" % (len(bytes(r["vettore"])) // 2), bytes(r["vettore"])) for r in righe]
+        _cache.update(firma=f, pezzi=[r["pezzo_id"] for r in righe], docs=[r["documento_id"] for r in righe], M=M, py=True)
+        return _cache
+
+
+def _matrice(conn):
+    try:
+        import numpy as np
+    except ImportError:
+        return _matrice_py(conn)
+    firma = conn.execute("SELECT count(*) AS n, COALESCE(max(pezzo_id), 0) AS m FROM pezzi_vettori").fetchone()
+    f = (firma["n"], firma["m"])
+    with _blocco:
+        if _cache["firma"] == f and _cache["M"] is not None and not _cache.get("py"):
+            return _cache
+        righe = conn.execute("SELECT pezzo_id, documento_id, vettore FROM pezzi_vettori ORDER BY pezzo_id").fetchall()
+        _cache["py"] = False
         if not righe:
             _cache.update(firma=f, pezzi=np.zeros(0, dtype=np.int64), docs=np.zeros(0, dtype=np.int64), M=np.zeros((0, DIM), dtype=np.float32))
         else:
@@ -109,10 +132,13 @@ def _matrice(conn):
 
 def cerca(conn, agente_id: int, messaggio: str, limite: int = 6) -> list[dict]:
     """Pezzi piu' vicini per significato al messaggio, solo tra i documenti che questo agente puo' vedere."""
-    import numpy as np
     from . import memoria
     if not (messaggio or "").strip():
         return []
+    try:
+        import numpy as np
+    except ImportError:
+        return _cerca_py(conn, agente_id, messaggio, limite)
     c = _matrice(conn)
     if len(c["pezzi"]) == 0:
         return []
@@ -128,6 +154,31 @@ def cerca(conn, agente_id: int, messaggio: str, limite: int = 6) -> list[dict]:
     punteggi = np.where(maschera, punteggi, -2.0)
     idx = np.argsort(-punteggi)[:limite]
     scelti = [(int(c["pezzi"][i]), float(punteggi[i])) for i in idx if punteggi[i] > 0.2]
+    if not scelti:
+        return []
+    righe = conn.execute("""SELECT p.id, d.id AS documento_id, d.nome, d.fascia_dati, p.testo FROM pezzi_documenti p JOIN documenti d ON d.id = p.documento_id WHERE p.id = ANY(%s)""",
+                         ([s[0] for s in scelti],)).fetchall()
+    per_id = {r["id"]: r for r in righe}
+    return [{**per_id[i], "punteggio": s} for i, s in scelti if i in per_id]
+
+
+def _cerca_py(conn, agente_id: int, messaggio: str, limite: int) -> list[dict]:
+    import math
+    from . import memoria
+    c = _matrice_py(conn)
+    if not c["pezzi"]:
+        return []
+    visibili = {d["id"] for d in memoria.documenti_visibili(conn, agente_id)}
+    if not visibili:
+        return []
+    q = _embed([messaggio[:2000]])[0]
+    n = math.sqrt(sum(x * x for x in q)) or 1.0
+    q = [x / n for x in q]
+    punt = []
+    for pid, did, vec in zip(c["pezzi"], c["docs"], c["M"]):
+        if did in visibili:
+            punt.append((sum(a * b for a, b in zip(vec, q)), pid))
+    scelti = [(pid, float(sc)) for sc, pid in sorted(punt, reverse=True)[:limite] if sc > 0.2]
     if not scelti:
         return []
     righe = conn.execute("""SELECT p.id, d.id AS documento_id, d.nome, d.fascia_dati, p.testo FROM pezzi_documenti p JOIN documenti d ON d.id = p.documento_id WHERE p.id = ANY(%s)""",
@@ -157,7 +208,6 @@ MAX_DOC_RELAZIONI = 4000
 
 def relaziona_parole(conn) -> int:
     """Senza vettori (nessuna chiave OpenAI o documenti riservati): collega i documenti per le parole che hanno in comune (TF-IDF). Meno fine, ma funziona sempre."""
-    import numpy as np
     from collections import Counter
     f = "p:" + "{}:{}".format(*conn.execute("SELECT count(*), COALESCE(sum(caratteri),0) FROM documenti").fetchone().values())
     r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'relazioni_firma'").fetchone()
@@ -175,22 +225,29 @@ def relaziona_parole(conn) -> int:
     vocab = [w for w, k in df.most_common() if k >= 2 and k <= max(2, n // 2)][:6000]
     if not vocab:
         return 0
-    indice = {w: i for i, w in enumerate(vocab)}
-    M = np.zeros((n, len(vocab)), dtype=np.float32)
-    for i, c in enumerate(conteggi):
-        for w, k in c.items():
-            j = indice.get(w)
-            if j is not None:
-                M[i, j] = (1 + np.log(k)) * np.log(n / df[w])
-    M /= np.linalg.norm(M, axis=1, keepdims=True) + 1e-9
-    S = M @ M.T
-    np.fill_diagonal(S, -1)
+    # TF-IDF e similarita' del coseno con la sola libreria standard (indice invertito: veloce anche con migliaia di documenti)
+    import math
+    voc = set(vocab)
+    vett = []
+    for c in conteggi:
+        v = {w: (1 + math.log(k)) * math.log(n / df[w]) for w, k in c.items() if w in voc}
+        nrm = math.sqrt(sum(x * x for x in v.values())) + 1e-9
+        vett.append({w: x / nrm for w, x in v.items()})
+    inv = {}
+    for i, v in enumerate(vett):
+        for w, x in v.items():
+            inv.setdefault(w, []).append((i, x))
     coppie = {}
-    for i in range(n):
-        for j in np.argsort(-S[i])[:VICINI]:
-            if S[i, j] >= SOGLIA_PAROLE:
-                a, b = sorted((docs[i], docs[int(j)]))
-                coppie[(a, b)] = float(S[i, j])
+    for i, v in enumerate(vett):
+        acc = {}
+        for w, x in v.items():
+            for j, y in inv[w]:
+                if j != i:
+                    acc[j] = acc.get(j, 0.0) + x * y
+        for j, sc in sorted(acc.items(), key=lambda t: -t[1])[:VICINI]:
+            if sc >= SOGLIA_PAROLE:
+                a, b = sorted((docs[i], docs[j]))
+                coppie[(a, b)] = float(sc)
     conn.execute("DELETE FROM documenti_relazioni")
     for (a, b), v in coppie.items():
         conn.execute("INSERT INTO documenti_relazioni (documento_a, documento_b, somiglianza) VALUES (%s,%s,%s)", (a, b, v))
@@ -201,7 +258,10 @@ def relaziona_parole(conn) -> int:
 
 def relaziona(conn) -> int:
     """Cerca i documenti che trattano lo stesso tema (vettore medio di ogni documento) e ne salva le coppie piu' vicine. Si rifa solo se la memoria e' cambiata."""
-    import numpy as np
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
     firma = conn.execute("SELECT count(*) AS n, COALESCE(max(pezzo_id),0) AS m, count(DISTINCT documento_id) AS d FROM pezzi_vettori").fetchone()
     f = f"{firma['n']}:{firma['m']}:{firma['d']}"
     r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'relazioni_firma'").fetchone()
@@ -209,6 +269,8 @@ def relaziona(conn) -> int:
         return 0
     c = _matrice(conn)
     if len(c["pezzi"]) == 0:
+        return relaziona_parole(conn)
+    if np is None:   # senza numpy: i collegamenti si calcolano sulle parole in comune (stesso risultato di quando mancano i vettori)
         return relaziona_parole(conn)
     ids = np.unique(c["docs"])[:MAX_DOC_RELAZIONI]
     D = np.zeros((len(ids), DIM), dtype=np.float32)
