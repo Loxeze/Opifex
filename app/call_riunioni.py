@@ -206,6 +206,15 @@ def _applica_qualita():
     fornitori.SFORZO_FORZATO.set(q["sforzo"] or None)
 
 
+def _modello_per(aid: int) -> None:
+    """Prima di far parlare un agente: il suo modello da riunione, se ne ha uno, altrimenti quello scelto per tutte le riunioni."""
+    from . import fornitori
+    with connessione() as conn:
+        r = conn.execute("SELECT modello_riunione FROM agenti WHERE id = %s", (aid,)).fetchone()
+        g = qualita(conn)["modello"]
+    fornitori.MODELLO_FORZATO.set((r["modello_riunione"] if r and r["modello_riunione"] else g) or None)
+
+
 class Qualita(BaseModel):
     modello: str | None = Field(default=None, max_length=80)
     sforzo: str | None = Field(default=None, max_length=10)
@@ -241,6 +250,7 @@ def _rispondi(tid: int, ids: list[int]):
             nomi = ", ".join(p["nome"] for p in part.values())
         for aid in ids:
             p = part[aid]
+            _modello_per(aid)
             with connessione() as conn:
                 storia = tavoli._storia(tavoli._interventi(conn, tid))
             prompt = (f"RIUNIONE VOCALE «{t['titolo']}» con Lorenzo. Partecipanti: {nomi}. Tu sei {p['nome']} ({p['ruolo']}).\n\nORDINE DEL GIORNO (dato):\n{t['ordine_del_giorno']}\n\n"
@@ -248,9 +258,9 @@ def _rispondi(tid: int, ids: list[int]):
                       "REGOLE DELLA RIUNIONE:\n" + REGOLE_RIUNIONE + "\n\n"
                       "Lorenzo e' il titolare e ti parla a voce come a un collaboratore senior di cui si fida: si aspetta intelligenza e giudizio, non burocrazia.\n"
                       "COME RISPONDI:\n"
-                      "- Entra nel merito: ragiona sul problema, prendi posizione e dai la tua raccomandazione con il perche' in una frase. Se vedi un rischio, un'alternativa migliore o un errore nel ragionamento di Lorenzo, diglielo con franchezza e rispetto.\n"
+                      "- Il ragionamento lo fai dentro di te: a voce porti solo la conclusione, precisa e puntuale, con al massimo il perche' in una frase. Mai raccontare i passaggi, i dubbi o cio' che stai valutando. Prendi posizione e dai la tua raccomandazione. Se vedi un rischio, un'alternativa migliore o un errore nel ragionamento di Lorenzo, diglielo con franchezza e rispetto.\n"
                       "- Usa quello che sai: documenti, progetti e fatti dell'organizzazione, e i tuoi strumenti (cerca davvero prima di dire che non sai). Cifre, nomi e date concreti; mai inventare: se manca un dato, di' quale e dove lo prenderesti.\n"
-                      "- Se la richiesta e' ambigua o ti manca un'informazione decisiva, fai UNA domanda mirata invece di indovinare.\n"
+                      "- Capisci il contesto prima di rispondere: cosa sta cercando di ottenere Lorenzo, a che punto e' il progetto, cosa e' gia' stato deciso. Se ti manca qualcosa di decisivo, fai UNA domanda giusta e specifica (quella che sblocca la decisione, mai una domanda generica o ovvia) invece di indovinare.\n"
                       "- Lunghezza naturale: una o due frasi per le cose semplici, fino a una decina di frasi parlate per quelle complesse. Italiano parlato e scorrevole, senza elenchi e senza markdown.\n"
                       "- Non ripetere cio' che hanno gia' detto gli altri: se concordi aggiungi solo cio' che manca. Dai un parere dalla tua competenza, non dalla loro.\n"
                       f"- Se davvero non hai nulla di utile da aggiungere rispondi esattamente «{NIENTE.capitalize()}».\n"
@@ -274,6 +284,7 @@ def _lavora(tid: int, aid: int, task_id: int, testo: str):
     """Esegue l'incarico in autonomia (con tutti gli strumenti dell'agente, anche Drive) e lo riferisce nella riunione."""
     from .esecuzione import esegui_agente
     _applica_qualita()
+    _modello_per(aid)
     try:
         with connessione() as conn:
             t = conn.execute("SELECT titolo, ordine_del_giorno FROM tavoli WHERE id = %s", (tid,)).fetchone()

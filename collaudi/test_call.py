@@ -84,7 +84,7 @@ with TestClient(app) as c:
     ok("risposta di tutti e due, in ordine", [(i["da_utente"], i["agente_id"]) for i in d["interventi"]][1:] == [(True, None), (False, marco), (False, dario)] and "Che cosa vuoi sapere" in d["interventi"][0]["testo"] and d["interventi"][0]["agente_id"] == aur, str(d["interventi"]))
     ok("il secondo ha visto la risposta del primo", "servono eventi serali" in ultimi_msg[1])
     ok("in riunione i manager usano il modello scelto per le riunioni, non quello dell'agente", modelli_visti and set(modelli_visti) == {"claude-opus-5-5"}, str(set(modelli_visti)))
-    ok("il prompt vieta le conferme tipo «ho preso nota»", "VIETATO dire o far capire di aver registrato" in ultimi_msg[1] and "COME RISPONDI" in ultimi_msg[1] and "UNA domanda mirata" in ultimi_msg[1])
+    ok("il prompt vieta le conferme tipo «ho preso nota»", "VIETATO dire o far capire di aver registrato" in ultimi_msg[1] and "COME RISPONDI" in ultimi_msg[1] and "UNA domanda giusta" in ultimi_msg[1] and "Il ragionamento lo fai dentro di te" in ultimi_msg[1])
     q = c.get("/gestione/riunioni-call/qualita", headers=H).json()
     ok("qualita' riunioni: di default il modello migliore col ragionamento alto", q["modello"] == "claude-opus-5-5" and q["sforzo"] == "high" and "claude-opus-5-5" in q["modelli"], str(q))
     ok("qualita' riunioni: modifica e controlli", c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-sonnet-5-5", "sforzo": "medium"}).status_code == 200
@@ -93,10 +93,16 @@ with TestClient(app) as c:
        and c.put("/gestione/riunioni-call/qualita", headers=H, json={"sforzo": "enorme"}).status_code == 422
        and c.get("/gestione/riunioni-call/qualita", headers=HC).status_code == 403)
     c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-opus-5-5", "sforzo": "high"})
+    sql("UPDATE agenti SET modello_riunione='claude-haiku-5-5' WHERE id=%s", (dario,))
+    copione[:] = [fine("Uno."), fine("Due.")]; modelli_visti.clear()
+    c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Che programma facciamo per l'estate?"})
+    ok("un agente con modello_riunione proprio lo usa, gli altri il globale", modelli_visti[:2] == ["claude-opus-5-5", "claude-haiku-5-5"], str(modelli_visti))
+    sql("UPDATE agenti SET modello_riunione=NULL WHERE id=%s", (dario,))
+    ok("sql/103 Aurora/Elena su Sonnet", all(r[0] == "claude-sonnet-5-5" for r in sql("SELECT modello FROM agenti WHERE lower(nome) IN ('aurora','elena')")))
     ok("un'indicazione che nomina un manager lo interpella", call_riunioni.nominati_espliciti("Marco segui il sito", [{"nome": "Marco"}]) and not call_riunioni.nominati_espliciti("Il budget e' alto", [{"nome": "Marco"}]))
     ok("non e' piu' occupato", d["occupato"] is False)
     ok("i partecipanti hanno la voce", all(p["voce_id"] for p in d["partecipanti"]))
-    ult = d["interventi"][-1]["id"]
+    ult = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()["interventi"][-1]["id"]
     ok("polling incrementale", c.get(f"/gestione/riunioni-call/{tid}?dopo={ult}", headers=H).json()["interventi"] == [])
 
     copione[:] = [fine("Dario: certo, ti rispondo io.\nCODA: Mi servirebbe una decisione sul budget.")]
@@ -106,7 +112,7 @@ with TestClient(app) as c:
     nuovi = [i for i in d["interventi"] if i["id"] > ult]
     ok("nominando Dario risponde solo lui, senza la riga CODA", [(i["da_utente"], i["agente_id"]) for i in nuovi] == [(True, None), (False, dario)] and "CODA" not in nuovi[-1]["testo"], str(nuovi))
     ok("la richiesta e' in coda e non e' stata detta", d["in_coda"] == 1 and "budget" not in " ".join(i["testo"] for i in d["interventi"] if i["agente_id"] == dario and "decisione" in i["testo"]))
-    ok("il prompt chiede di entrare nel merito e rimanda i temi propri alla coda", "Entra nel merito" in ultimi_msg[0] and "non propongono argomenti propri" in ultimi_msg[0] and "CODA:" in ultimi_msg[0])
+    ok("il prompt chiede di entrare nel merito e rimanda i temi propri alla coda", "Il ragionamento lo fai dentro di te" in ultimi_msg[0] and "non propongono argomenti propri" in ultimi_msg[0] and "CODA:" in ultimi_msg[0])
     n0 = len(d["interventi"])
     r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Avete richieste in coda?"})
     d2 = c.get(f"/gestione/riunioni-call/{tid}?dopo={nuovi[-1]['id']}", headers=H).json()
