@@ -1,5 +1,5 @@
 "use strict";
-// Stile di vetro: sfondo fotografico (tre scene disegnate al volo), densita' del vetro, interruttore per tornare allo stile classico.
+// Stile di vetro: l'unico aspetto dell'app. Sfondo fotografico (scene disegnate al volo od opere d'arte) e densita' del vetro.
 // Le preferenze stanno sul server, una per utente.
 const Vetro = (() => {
   const SCENE = { alba: "Alba sui monti", notte: "Città di notte", oceano: "Oceano", arte: "Opere d'arte" };
@@ -104,7 +104,7 @@ const Vetro = (() => {
   function applica() {
     let box = document.getElementById("vetro-sfondo");
     if (!box) { box = document.createElement("div"); box.id = "vetro-sfondo"; box.setAttribute("aria-hidden", "true"); document.body.prepend(box); }
-    const attivo = pref.stile === "vetro";
+    const attivo = true;   // il vetro e' l'unico stile: nessun ritorno al classico
     document.body.classList.toggle("vetro", attivo);
     document.documentElement.style.setProperty("--g", String(pref.vetro));
     if (attivo && attuale !== pref.sfondo) { box.innerHTML = costruisci[pref.sfondo]() + GRANA + '<div class="vignetta"></div>'; attuale = pref.sfondo; arte.slot = null; arte.url = null; arte.fronte = "a"; fermaArte(); }
@@ -113,7 +113,6 @@ const Vetro = (() => {
   async function carica() {
     try {
       const p = await api("GET", "/account/preferenze");
-      if (p.stile === "vetro" || p.stile === "classico") pref.stile = p.stile;
       if (SCENE[p.sfondo]) pref.sfondo = p.sfondo;
       if (typeof p.vetro === "number") pref.vetro = Math.min(0.75, Math.max(0.3, p.vetro));
       return p;
@@ -126,14 +125,13 @@ const Vetro = (() => {
   }
   const chip = (testo, premuto, onclick) => h("button", { class: "pl-chip", type: "button", "aria-pressed": premuto ? "true" : "false", onclick }, testo);
 
-  // controlli riutilizzabili (Plancia e Il mio account)
+  // controlli riutilizzabili (Il mio account)
   function controlli(dopo) {
     const corpo = h("div", { class: "pl-gruppo" });
     const slider = h("input", { id: "vt-vetro", type: "range", min: "0.3", max: "0.75", step: "0.01", value: String(pref.vetro), "aria-label": "Densità del vetro" });
     slider.addEventListener("input", () => { imposta("vetro", parseFloat(slider.value)); });
     const disegna = () => {
-      riempi(corpo, [h("span", {}, "Stile"), chip("Vetro", pref.stile === "vetro", () => { imposta("stile", "vetro"); disegna(); if (dopo) dopo(); }), chip("Classico", pref.stile === "classico", () => { imposta("stile", "classico"); disegna(); if (dopo) dopo(); }),
-        h("span", {}, "Sfondo"), Object.keys(SCENE).map((k) => chip(SCENE[k], pref.sfondo === k, () => { imposta("stile", "vetro"); imposta("sfondo", k); disegna(); })),
+      riempi(corpo, [h("span", {}, "Sfondo"), Object.keys(SCENE).map((k) => chip(SCENE[k], pref.sfondo === k, () => { imposta("sfondo", k); disegna(); if (dopo) dopo(); })),
         h("label", { for: "vt-vetro" }, "Densità del vetro"), slider]);
     };
     disegna();
@@ -144,3 +142,4 @@ const Vetro = (() => {
   }
   return { carica, applica, imposta, controlli, sezioneAccount, pref, SCENE };
 })();
+Vetro.applica();   // anche la schermata di accesso ha il suo sfondo

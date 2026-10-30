@@ -1,4 +1,4 @@
-"""Preferenze personali di ogni utente (aspetto e disposizione dei pannelli). Valori controllati: nulla di libero finisce nel database."""
+"""Preferenze personali di ogni utente (aspetto: sfondo e densita' del vetro). Valori controllati: nulla di libero finisce nel database."""
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
@@ -7,8 +7,7 @@ from .permessi import utente_corrente
 
 router = APIRouter(prefix="/account/preferenze", tags=["preferenze"])
 
-PANNELLI = {"aurora", "decisioni", "costi", "task", "squadra", "briefing"}
-STILI, SFONDI, PERIODI, DISPOSIZIONI = {"vetro", "classico"}, {"alba", "notte", "oceano", "arte"}, {"7", "14", "30"}, {"operativo", "focus", "panorama", "personale"}
+STILI, SFONDI = {"vetro", "classico"}, {"alba", "notte", "oceano", "arte"}
 
 
 def _numero(v, minimo, massimo):
@@ -25,20 +24,7 @@ def _scelta(insieme):
     return f
 
 
-def _layout(v):
-    """{pannello: [x, y, larghezza, altezza, aperto, ancorato]} per al massimo sei pannelli noti."""
-    if not isinstance(v, dict) or not v or len(v) > len(PANNELLI):
-        raise ValueError
-    out = {}
-    for k, a in v.items():
-        if k not in PANNELLI or not isinstance(a, list) or len(a) != 6:
-            raise ValueError
-        out[k] = [_numero(a[0], 0, 6000), _numero(a[1], 0, 6000), _numero(a[2], 200, 3000), _numero(a[3], 100, 3000), int(bool(a[4])), int(bool(a[5]))]
-    return out
-
-
-CHIAVI = {"stile": _scelta(STILI), "sfondo": _scelta(SFONDI), "vetro": lambda v: _numero(v, 0.3, 0.75),
-          "plancia_periodo": _scelta(PERIODI), "plancia_disposizione": _scelta(DISPOSIZIONI), "plancia_layout": _layout}
+CHIAVI = {"stile": _scelta(STILI), "sfondo": _scelta(SFONDI), "vetro": lambda v: _numero(v, 0.3, 0.75)}
 
 
 class Valore(BaseModel):

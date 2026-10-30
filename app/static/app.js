@@ -73,7 +73,7 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["plancia", "Plancia"], ["dashboard", "Dashboard"], ["chat", "Chat"], ["task", "Task"], ["progetti", "Progetti"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["crm", "CRM"], ["documenti", "Documenti"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE = [["dashboard", "Dashboard"], ["chat", "Chat"], ["task", "Task"], ["progetti", "Progetti"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["crm", "CRM"], ["documenti", "Documenti"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
 const GRUPPI_IMP = [["Io e account", ["profilo", "voce", "app"]], ["Organizzazione", ["struttura", "utenti", "reparti", "tavoli", "cerimoniere", "quando", "smistamento"]],
   ["Collegamenti", ["collegamenti", "connessioni", "siti", "canali", "social", "monitorsocial", "percorsi"]], ["Conoscenza e formazione", ["biblioteca", "studi", "memoria", "imprese", "noteaurora", "miglioramenti", "dossier"]],
   ["Controllo e sicurezza", ["sicurezza", "registro", "sentinelle", "salute", "sandbox"]], ["Sistema", ["aggiornamenti", "misure", "spesareparti", "dipendenze", "diagnostica", "esempio", "memoriavett", "giro", "contenuti", "sistema"]]];
@@ -91,7 +91,7 @@ function cornice(contenuto) {
           nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : ""),
           id === "chat" ? h("span", { id: "badge-chat", class: "badge-chat", style: stato.chatNonLetti ? "" : "display:none" }, stato.chatNonLetti ? String(stato.chatNonLetti) : "") : null))),
       h("button", { class: "s", onclick: esci }, "Esci")),
-    h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "plancia" ? "largo" : "" }, contenuto));
+    h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" ? "largo" : "" }, contenuto));
 }
 
 async function avvia() {
@@ -131,7 +131,7 @@ function disegna() {
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
   if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, plancia: vistaPlancia, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
 
