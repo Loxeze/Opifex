@@ -3,10 +3,50 @@
 
 const CallVoce = {
   server: false, attiva: true, audio: null, sbloccato: false, mancata: false, risolvi: null, errore: "", bloccato: false,
-  sblocca() {   // un solo gesto dell'utente basta a permettere l'audio automatico anche a telefono (iOS/Android) mentre guidi
-    if (this.sbloccato) return; this.sbloccato = true;
-    try { const a = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="); a.play().catch(() => {}); this.audio = null; } catch (e) { /* ignora */ }
-    try { if (window.speechSynthesis) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } } catch (e) { /* ignora */ }
+  el: null, ctxA: null, elOk: false, ctxOk: false,
+  SILENZIO: "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=",
+  elemento() {   // UN solo elemento audio, tenuto nella pagina: una volta sbloccato da un tocco, il telefono lo lascia suonare anche piu' tardi
+    if (!this.el) { const a = document.createElement("audio"); a.setAttribute("playsinline", ""); a.setAttribute("webkit-playsinline", ""); a.preload = "auto"; a.style.display = "none"; document.body.appendChild(a); this.el = a; }
+    return this.el;
+  },
+  sblocca(forza) {   // da chiamare dentro un tocco: sblocca sia l'elemento audio sia il WebAudio (iOS e Android lo chiedono)
+    if (this.elOk && this.ctxOk && !forza) return;
+    try { const a = this.elemento(); a.src = this.SILENZIO; const p = a.play(); if (p && p.then) p.then(() => { this.elOk = true; }).catch(() => {}); } catch (e) { /* ignora */ }
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) { if (!this.ctxA) this.ctxA = new AC(); const r = this.ctxA.resume(); const ok = () => { if (this.ctxA.state === "running") this.ctxOk = true; }; if (r && r.then) r.then(ok).catch(() => {}); ok();
+        const b = this.ctxA.createBuffer(1, 1, 22050), src = this.ctxA.createBufferSource(); src.buffer = b; src.connect(this.ctxA.destination); src.start(0); }
+    } catch (e) { /* ignora */ }
+    try { if (window.speechSynthesis && !this.sbloccato) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } } catch (e) { /* ignora */ }
+    this.sbloccato = true;
+  },
+  async suona(blob) {   // 1) elemento audio gia' sbloccato (suona anche col tasto silenzioso dell'iPhone) 2) WebAudio. Restituisce "ok" | "errore" | "bloccato"
+    const url = URL.createObjectURL(blob);
+    const via_elemento = () => new Promise((ok) => {
+      const a = this.elemento(); this.audio = a;
+      const fine = (e) => { a.onended = a.onerror = null; this.audio = null; this.risolvi = null; ok(e); };
+      this.risolvi = () => fine("ok"); a.onended = () => fine("ok"); a.onerror = () => fine("errore");
+      a.src = url; a.volume = 1; a.muted = false;
+      const p = a.play(); if (p && p.catch) p.catch((e) => fine(e && e.name === "NotAllowedError" ? "bloccato" : "errore"));
+    });
+    let esito = await via_elemento();
+    if (esito !== "ok" && this.ctxA) {   // piano B: WebAudio
+      try {
+        await this.ctxA.resume();
+        if (this.ctxA.state === "running") {
+          const dati = await this.ctxA.decodeAudioData(await blob.arrayBuffer());
+          esito = await new Promise((ok) => { const src = this.ctxA.createBufferSource(); src.buffer = dati; src.connect(this.ctxA.destination); this.fonte = src; this.risolvi = () => { try { src.stop(); } catch (e) { /* ok */ } ok("ok"); }; src.onended = () => { this.risolvi = null; ok("ok"); }; src.start(0); });
+        }
+      } catch (e) { /* resta l'esito di prima */ }
+    }
+    URL.revokeObjectURL(url);
+    return esito;
+  },
+  prova() {   // suono generato qui, senza server: dice se l'audio del telefono funziona
+    const n = 8000 * 0.5, v = new DataView(new ArrayBuffer(44 + n * 2)), sc = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+    sc(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); sc(8, "WAVEfmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 16000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); sc(36, "data"); v.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.sin(2 * Math.PI * 523 * i / 8000) * 12000 * Math.min(1, (n - i) / 800), true);
+    return this.suona(new Blob([v.buffer], { type: "audio/wav" }));
   },
   voceBrowser(agenteId) {
     const it = (window.speechSynthesis ? speechSynthesis.getVoices() : []).filter(v => v.lang && v.lang.toLowerCase().startsWith("it"));
@@ -32,8 +72,7 @@ const CallVoce = {
       try {
         const blob = await this.scarica(agenteId, testo);
         this.cache.delete(agenteId + "|" + testo);
-        const url = URL.createObjectURL(blob);
-        const esito = await new Promise((ok) => { const a = new Audio(url); this.audio = a; const fine = (e) => { URL.revokeObjectURL(url); this.audio = null; this.risolvi = null; ok(e); }; this.risolvi = () => fine("ok"); a.onended = () => fine("ok"); a.onerror = () => fine("errore"); a.play().catch(() => fine("bloccato")); });
+        const esito = await this.suona(blob);
         if (esito === "bloccato") { this.bloccato = true; return; }
         if (esito === "ok") return;
         this.errore = "audio non riproducibile";
@@ -52,10 +91,10 @@ const CallVoce = {
       setTimeout(() => { if (!partita && !speechSynthesis.speaking) { speechSynthesis.cancel(); this.bloccato = true; this.risolvi = null; ok(); } }, 3000);   // il telefono non lo lascia partire senza un tocco
     });
   },
-  ferma() { if (this.audio) { this.audio.pause(); this.audio = null; } if (this.risolvi) { const f = this.risolvi; this.risolvi = null; f(); } if ("speechSynthesis" in window) speechSynthesis.cancel(); },
+  ferma() { if (this.audio) { try { this.audio.pause(); } catch (e) { /* ok */ } this.audio = null; } if (this.risolvi) { const f = this.risolvi; this.risolvi = null; f(); } if ("speechSynthesis" in window) speechSynthesis.cancel(); },
 };
 
-["pointerdown", "touchstart", "keydown", "click"].forEach(ev => document.addEventListener(ev, () => CallVoce.sblocca(), { once: true, passive: true }));
+["pointerdown", "touchstart", "touchend", "keydown", "click"].forEach(ev => document.addEventListener(ev, () => CallVoce.sblocca(), { passive: true }));
 
 function pannelloVociManager() {
   const box = h("div"), msg = h("div");
@@ -101,7 +140,7 @@ function vistaRiunioniCall() {
         const d = await api("GET", "/gestione/riunioni-call");
         riempi(lista, d.riunioni.length ? d.riunioni.map(r => h("div", { class: "carta", style: "margin-bottom:8px" }, h("div", { class: "nome" }, r.titolo),
           h("div", { class: "sotto" }, [{ programmata: "Programmata", in_corso: "In corso", conclusa: "Conclusa", errore: "Errore" }[r.stato], r.programmata_il ? new Date(r.programmata_il).toLocaleString("it-IT") : "", r.partecipanti].filter(Boolean).join(" · ")),
-          h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { if (r.stato === "programmata") await api("POST", "/gestione/riunioni-call/" + r.id + "/avvia"); apri(r.id); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } },
+          h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { CallVoce.sblocca(true); try { if (r.stato === "programmata") await api("POST", "/gestione/riunioni-call/" + r.id + "/avvia"); apri(r.id); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } },
             r.stato === "conclusa" || r.stato === "errore" ? "Apri verbale" : r.stato === "in_corso" ? "Rientra nella call" : "Avvia la call")))) : h("p", { class: "sotto" }, "Nessuna riunione ancora."));
       } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
     };
@@ -112,6 +151,7 @@ function vistaRiunioniCall() {
           try { const r = await api("POST", "/gestione/riunioni-call", { titolo: titolo.value.trim(), ordine_del_giorno: odg.value.trim(), partecipanti: part, programmata_il: quando.value ? new Date(quando.value).toISOString() : null });
             titolo.value = odg.value = ""; msg.replaceChildren(avviso("Riunione creata.", "ok")); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Crea la riunione"),
         h("button", { class: "s", onclick: async () => {
+          CallVoce.sblocca(true);
           const part = caselle.filter(x => x[1].checked).map(x => x[0].nome);
           try { const r = await api("POST", "/gestione/riunioni-call", { titolo: titolo.value.trim() || "Riunione del " + new Date().toLocaleDateString("it-IT"), ordine_del_giorno: odg.value.trim(), partecipanti: part });
             await api("POST", "/gestione/riunioni-call/" + r.id + "/avvia"); apri(r.id); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Crea e lancia subito la call")),
@@ -267,6 +307,13 @@ function schermataCall(tid, esci) {
   campo.addEventListener("keydown", (e) => { if (e.key === "Enter") { const t = campo.value; campo.value = ""; invia(t); } });
   bMuto.addEventListener("click", () => { muto = !muto; bMuto.textContent = muto ? "🔇 Microfono spento" : "🎙 Microfono attivo"; aggiornaStato(); });
   const bStop = h("button", { class: "s", type: "button", onclick: () => { CallVoce.ferma(); coda = []; } }, "✋ Interrompi");
+  const bProva = h("button", { class: "s", type: "button" }, "🔊 Prova audio");
+  bProva.addEventListener("click", async () => {
+    CallVoce.sblocca(true); msg.replaceChildren(avviso("Ascolta: dovresti sentire un breve suono…", "avv"));
+    const e = await CallVoce.prova();
+    msg.replaceChildren(e === "ok" ? avviso("Il suono è partito. Se non l'hai sentito: alza il volume del telefono; su iPhone controlla la levetta del silenzioso e che non sia attiva la modalità «Non disturbare»; su Android il volume «contenuti multimediali». Se l'hai sentito, anche le voci dei manager si sentiranno.", "ok")
+      : avviso("Il telefono ha bloccato l'audio (" + e + "). Tocca di nuovo «Prova audio»; se resta così dimmi che telefono e che browser usi.", "no"));
+  });
   const bCoda = h("button", { class: "s", type: "button", onclick: () => invia("Avete richieste in coda?") }, "Richieste in coda");
   const termina = h("button", { class: "r", onclick: async () => { if (!confirm("Chiudere la riunione e generare il verbale?")) return; CallVoce.ferma(); coda = []; muto = true; aggiornaStato();
     try { const r = await api("POST", "/gestione/riunioni-call/" + tid + "/chiudi"); msg.replaceChildren(avviso(r.sintesi, "ok")); } catch (e) { muto = false; msg.replaceChildren(avviso(e.message, "no")); } } }, "Termina e scrivi il verbale");
@@ -288,5 +335,5 @@ function schermataCall(tid, esci) {
     h("div", { class: "riga", style: "align-items:center" }, bMuto, campo, bInvia),
     d_regole,
     h("p", { class: "aiuto" }, "Parla normalmente, come in una videochiamata: quando fai una pausa rispondono. Per fermare chi sta parlando tocca «Interrompi»."),
-    h("div", { class: "azioni" }, bStop, bCoda, termina), msg);
+    h("div", { class: "azioni" }, bStop, bProva, bCoda, termina), msg);
 }
