@@ -79,10 +79,27 @@ def controlla_ora(_: dict = Depends(solo_titolare)):
         return controlla(conn)
 
 
+def requisiti(percorso: Path | None = None) -> list[tuple[str, str]]:
+    """Come librerie(), ma include anche le righe con versione minima (>=): quelle senza versione fissa hanno versione vuota."""
+    p = percorso or Path(__file__).resolve().parent.parent / "requirements.txt"
+    out = []
+    try:
+        for riga in p.read_text(encoding="utf-8").splitlines():
+            riga = riga.split("#")[0].strip()
+            if "==" in riga:
+                n, v = riga.split("==", 1)
+                out.append((n.split("[")[0].strip(), v.strip()))
+            elif ">=" in riga:
+                out.append((riga.split(">=", 1)[0].split("[")[0].strip(), ""))
+    except OSError:
+        pass
+    return out
+
+
 def mancanti(percorso: Path | None = None) -> list[tuple[str, str]]:
     """Librerie di requirements.txt non installate in questo ambiente (puo' succedere se l'aggiornamento non ha potuto installarle)."""
     out = []
-    for n, v in librerie(percorso):
+    for n, v in requisiti(percorso):
         try:
             importlib.metadata.version(n)
         except importlib.metadata.PackageNotFoundError:
@@ -96,13 +113,16 @@ def assicura_librerie(percorso: Path | None = None, installa=None) -> dict:
     m = mancanti(percorso)
     if not m:
         return {"mancanti": [], "esito": "ok"}
-    elenco = [f"{n}=={v}" for n, v in m]
-    try:
+    def prova(elenco):
         if installa is not None:
-            esito = installa(elenco)
-        else:
-            r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check", *elenco], capture_output=True, text=True, timeout=900)
-            esito = "ok" if r.returncode == 0 else (r.stderr or r.stdout or "errore")[-200:]
+            return installa(elenco)
+        r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check", *elenco], capture_output=True, text=True, timeout=900)
+        return "ok" if r.returncode == 0 else (r.stderr or r.stdout or "errore")[-250:]
+    try:
+        esito = prova([f"{n}=={v}" if v else n for n, v in m])
+        if esito != "ok":   # la versione indicata puo' non esistere per il Python di questo server: si riprova con la piu' recente compatibile
+            esito2 = prova([n for n, _ in m])
+            esito = "ok" if esito2 == "ok" else esito2
     except Exception as e:  # noqa: BLE001
         esito = f"{type(e).__name__}: {e}"[:200]
     try:

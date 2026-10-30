@@ -38,6 +38,15 @@ ok("avvisa Lorenzo", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Ho in
 r = dipendenze.assicura_librerie(rq, installa=lambda el: "errore di rete")
 ok("se non riesce lo dice", r["esito"] == "errore di rete" and sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Mancano delle librerie%'")[0][0] == 1)
 rq.write_text("httpx==0.28.1\n")
+rq2 = Path(tempfile.mkdtemp()) / "r.txt"; rq2.write_text("libreria-fantasma-abc>=1.0\n")
+tent = []
+def inst2(el):
+    tent.append(el); return "ok" if el == ["libreria-fantasma-abc"] else "No matching distribution"
+r = dipendenze.assicura_librerie(rq2, installa=inst2)
+ok("versione minima: riconosciuta e installata senza versione fissa", dipendenze.mancanti(rq2) == [("libreria-fantasma-abc", "")] and tent == [["libreria-fantasma-abc"]] and r["esito"] == "ok", str(tent))
+rq3 = Path(tempfile.mkdtemp()) / "r.txt"; rq3.write_text("libreria-fantasma-abc==9.9.9\n"); tent.clear()
+r = dipendenze.assicura_librerie(rq3, installa=inst2)
+ok("se la versione fissa non esiste per questo Python, riprova con la piu' recente", tent == [["libreria-fantasma-abc==9.9.9"], ["libreria-fantasma-abc"]] and r["esito"] == "ok", str(tent))
 ok("niente da fare: nessuna installazione", dipendenze.assicura_librerie(rq, installa=lambda el: 1 / 0) == {"mancanti": [], "esito": "ok"})
 ok("il requirements reale e' completo nell'ambiente di prova", dipendenze.mancanti() == [], str(dipendenze.mancanti()))
 src = open("app/static/controlli.js").read()
