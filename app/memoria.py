@@ -171,7 +171,7 @@ def contesto_documenti(conn, a: dict, testo: str) -> tuple[str, list[str], list[
             if p:
                 blocchi.append(f"[{d['nome']} - inizio del documento]\n{p['testo']}")
                 usati.append(d["nome"])
-    elenco = ", ".join(f"«{d['nome']}»" for d in docs)
+    elenco = ", ".join(f"«{d['nome']}»" for d in docs[:40]) + (f" e altri {len(docs) - 40} (cercali per argomento: ti arrivano i brani pertinenti)" if len(docs) > 40 else "")
     out = nota + f"Documenti a tua disposizione: {elenco}. "
     if blocchi:
         out += ("Brani utili (usali se pertinenti e cita il documento):\n\n" + "\n\n---\n\n".join(blocchi))

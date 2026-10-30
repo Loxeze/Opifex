@@ -280,8 +280,8 @@ def query_ricerca(messaggio: str) -> str | None:
 def pezzi_pertinenti(conn, agente_id: int, messaggio: str, limite: int = 4) -> list[dict]:
     q = query_ricerca(messaggio)
     if q is None:
-        return []
-    return conn.execute(
+        return _con_significato(conn, agente_id, messaggio, [], limite)
+    righe = conn.execute(
         """WITH RECURSIVE sotto(id) AS (
                -- l'agente stesso e tutti quelli sotto di lui nella gerarchia (UNION evita cicli infiniti):
                -- un documento assegnato a un agente e' consultabile anche da tutti i suoi superiori
@@ -303,6 +303,17 @@ def pezzi_pertinenti(conn, agente_id: int, messaggio: str, limite: int = 4) -> l
            ORDER BY punteggio DESC LIMIT %(l)s""",
         {"q": q, "a": agente_id, "l": limite},
     ).fetchall()
+    return _con_significato(conn, agente_id, messaggio, righe, limite)
+
+
+def _con_significato(conn, agente_id: int, messaggio: str, per_parole: list[dict], limite: int) -> list[dict]:
+    """Aggiunge la ricerca per significato (vettori) a quella per parole; se non e' disponibile resta quella per parole."""
+    try:
+        from . import memoria_vettoriale as mv
+        sig = mv.cerca(conn, agente_id, messaggio, limite + 2)
+        return mv.unisci(per_parole, sig, limite) if sig else per_parole
+    except Exception:  # noqa: BLE001 - la memoria vettoriale non deve mai bloccare un agente
+        return per_parole
 
 
 def lettore_visivo(fascia: str = "interno"):

@@ -90,3 +90,45 @@ function vistaEsempio() {
     h("label", {}, "Agente", agente), h("label", {}, "Competenza", comp), h("label", {}, "Obiettivo", obiettivo), h("label", {}, "Conversazione", testo),
     h("div", { class: "azioni" }, invia), msg, h("h3", {}, "I tuoi esempi"), lista);
 }
+
+function vistaMemoriaVett() {
+  const stato = h("div"), msg = h("div"), elenco = h("div");
+  const file = h("input", { type: "file", accept: ".zip,.json" });
+  const tutti = h("input", { type: "checkbox", checked: true });
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/memoria-vettoriale");
+      const pc = d.pezzi ? Math.round(100 * d.indicizzati / d.pezzi) : 100;
+      riempi(stato, h("div", { class: "carta" },
+        h("b", {}, d.indicizzati + " brani su " + d.pezzi + " ricercabili per significato (" + pc + "%)"),
+        h("div", { class: "sotto" }, d.chiave ? "Da indicizzare: " + d.da_indicizzare + " · esclusi per riservatezza: " + d.esclusi_per_riservatezza + " · fasce consentite: " + (d.fasce_consentite.join(", ") || "nessuna") : "Manca la chiave OpenAI (Impostazioni): senza, resta la sola ricerca per parole."),
+        d.fasce_consentite.length ? "" : h("div", { class: "sotto" }, "Per indicizzare i documenti dichiara le garanzie di OpenAI in Sicurezza e garanzie.")));
+      riempi(elenco, d.importazioni.length ? d.importazioni.map(i => h("div", { class: "carta", style: "margin-bottom:6px" },
+        h("b", {}, i.origine + " — " + i.nome_file), h("div", { class: "sotto" }, ({ in_corso: "In corso…", conclusa: "Conclusa", errore: "Errore: " + (i.errore || "") })[i.stato] + " · " + i.importate + " importate, " + i.saltate + " saltate (brevi o già presenti) su " + i.conversazioni))) : h("p", { class: "sotto" }, "Nessuna importazione ancora."));
+    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+  };
+  const indicizza = h("button", { class: "s", type: "button" }, "Indicizza ora");
+  indicizza.addEventListener("click", async () => {
+    indicizza.disabled = true;
+    try { const r = await api("POST", "/gestione/memoria-vettoriale/indicizza"); msg.replaceChildren(avviso(r.fatti + " brani indicizzati.", "ok")); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+    indicizza.disabled = false;
+  });
+  const importa = h("button", { class: "p", type: "button" }, "Importa le conversazioni");
+  importa.addEventListener("click", async () => {
+    if (!file.files[0]) { msg.replaceChildren(avviso("Scegli prima il file.", "no")); return; }
+    importa.disabled = true;
+    try {
+      const fd = new FormData(); fd.append("file", file.files[0]); fd.append("per_tutti", tutti.checked ? "true" : "false");
+      await api("POST", "/gestione/memoria-vettoriale/importa", fd);
+      msg.replaceChildren(avviso("Importazione avviata: puoi continuare a lavorare, i brani saranno indicizzati nei prossimi minuti.", "ok")); file.value = ""; carica();
+    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+    importa.disabled = false;
+  });
+  carica();
+  const t = setInterval(() => { if (!document.body.contains(stato)) clearInterval(t); else carica(); }, 10000);
+  return h("div", {}, h("h2", {}, "Memoria condivisa (per significato)"),
+    h("p", { class: "aiuto" }, "Tutti i documenti caricati sono ricercabili anche per significato, non solo per parole: un agente che lavora a un progetto trova i brani pertinenti anche se usano termini diversi. Ognuno vede solo i documenti che già poteva vedere. Qui puoi anche importare le tue conversazioni di ChatGPT (Impostazioni → Controlli dati → Esporta) e di Claude (Impostazioni → Privacy → Esporta dati): carica lo zip o il file conversations.json."),
+    stato, h("div", { class: "azioni" }, indicizza), h("h3", {}, "Importa conversazioni"), h("label", {}, "File di esportazione (.zip o .json)", file),
+    h("label", {}, tutti, " Disponibili a tutti gli agenti (altrimenti li assegni tu uno a uno dai Documenti)"),
+    h("div", { class: "azioni" }, importa), msg, h("h3", {}, "Importazioni"), elenco);
+}

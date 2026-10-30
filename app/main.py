@@ -20,6 +20,7 @@ from .rotte_progetti import router as router_progetti
 from .rotte_scheda import router as router_scheda
 from .rotte_ginnasio import router as router_ginnasio
 from .impara_esempio import router as router_esempio
+from .memoria_vettoriale import router as router_memvett
 from .rotte_squadre import router as router_squadre
 from .rotte_avatar import router as router_avatar
 from .rotte_custode import router as router_custode
@@ -150,6 +151,7 @@ async def _manutenzione():
         _passo("prova ripristino", lambda c: prova_ripristino.prova(c) if prova_ripristino.da_fare(c) else None)
         _passo("studi", lambda c: studio.rileva_e_segna(c) if studio.da_fare(c) else None)
         _passo("ginnasio", ginnasio.giro)
+        _passo("memoria vettoriale", lambda c: __import__("app.memoria_vettoriale", fromlist=["x"]).indicizza(c))
         _passo("miglioramento degli agenti (Padre Casati)", miglioramento.giro)
         _passo("controllo dipendenze", lambda c: dipendenze.controlla(c) if dipendenze.da_fare(c) else None)
         _passo("eventi", lambda c: eventi.pulisci(c))
@@ -251,6 +253,7 @@ app.include_router(router_progetti)
 app.include_router(router_scheda)
 app.include_router(router_ginnasio)
 app.include_router(router_esempio)
+app.include_router(router_memvett)
 app.include_router(router_squadre)
 app.include_router(router_avatar)
 app.include_router(router_custode)
