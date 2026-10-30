@@ -210,6 +210,13 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         at_ctx = memoria.attivita_agenti(conn, a_f)
         if at_ctx:
             prefisso.append(at_ctx); dim["attivita_agenti"] = len(at_ctx)
+        try:
+            from . import giro_domande
+            ft_ctx = giro_domande.fatti_per_agente(conn, messaggio) if memoria._ok(a_f, "interno") else ""
+        except Exception:  # noqa: BLE001
+            ft_ctx = ""
+        if ft_ctx:
+            prefisso.append(ft_ctx); dim["fatti_condivisi"] = len(ft_ctx)
         sp_ctx = scheda_progetto.contesto(conn, a_f)
         if sp_ctx:
             prefisso.append(sp_ctx); dim["scheda_progetto"] = len(sp_ctx)

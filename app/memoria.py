@@ -175,6 +175,13 @@ def contesto_documenti(conn, a: dict, testo: str) -> tuple[str, list[str], list[
     out = nota + f"Documenti a tua disposizione: {elenco}. "
     if blocchi:
         out += ("Brani utili (usali se pertinenti e cita il documento):\n\n" + "\n\n---\n\n".join(blocchi))
+    try:   # altri documenti sullo stesso tema: l'agente sa che esistono piu' fonti e punti di vista da confrontare
+        from . import memoria_vettoriale
+        corr = memoria_vettoriale.correlati(conn, a["id"], [d["id"] for d in docs if d["nome"] in usati])
+        if corr:
+            out += ("\n\nSullo stesso tema esistono anche: " + ", ".join(f"«{n}»" for n in corr) + ". Se la domanda lo richiede, leggili (strumento leggi_documento) e confronta i punti di vista, segnalando dove concordano o si contraddicono.")
+    except Exception:  # noqa: BLE001
+        pass
     return out, usati, esclusi
 
 

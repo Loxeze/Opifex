@@ -103,10 +103,32 @@ function vistaMemoriaVett() {
         h("b", {}, d.indicizzati + " brani su " + d.pezzi + " ricercabili per significato (" + pc + "%)"),
         h("div", { class: "sotto" }, d.chiave ? "Da indicizzare: " + d.da_indicizzare + " · esclusi per riservatezza: " + d.esclusi_per_riservatezza + " · fasce consentite: " + (d.fasce_consentite.join(", ") || "nessuna") : "Manca la chiave OpenAI (Impostazioni): senza, resta la sola ricerca per parole."),
         d.fasce_consentite.length ? "" : h("div", { class: "sotto" }, "Per indicizzare i documenti dichiara le garanzie di OpenAI in Sicurezza e garanzie.")));
+      riempi(temiBox, d.temi && d.temi.length ? [h("h3", {}, "Argomenti con più fonti (" + d.relazioni + " collegamenti)"), d.temi.map(t => h("div", { class: "carta", style: "margin-bottom:6px" }, h("b", {}, t.quanti + " documenti sullo stesso tema"), h("div", { class: "sotto" }, t.documenti.join(" · "))))] : h("p", { class: "sotto" }, "Collegamenti tra documenti: " + d.relazioni + ". Gli agenti ricevono l'indicazione quando esistono più fonti sullo stesso tema."));
+      caricaBlocco();
       riempi(elenco, d.importazioni.length ? d.importazioni.map(i => h("div", { class: "carta", style: "margin-bottom:6px" },
         h("b", {}, i.origine + " — " + i.nome_file), h("div", { class: "sotto" }, ({ in_corso: "In corso…", conclusa: "Conclusa", errore: "Errore: " + (i.errore || "") })[i.stato] + " · " + i.importate + " importate, " + i.saltate + " saltate (brevi o già presenti) su " + i.conversazioni))) : h("p", { class: "sotto" }, "Nessuna importazione ancora."));
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
+  const temiBox = h("div"), bloccoMsg = h("div");
+  const files = h("input", { type: "file", multiple: true, accept: ".zip,.pdf,.docx,.txt,.md,.csv,.xlsx,.pptx,.html,.json,.rtf,.odt,.png,.jpg,.jpeg" });
+  const fasciaB = h("select", {}, ["interno", "pubblico", "riservato"].map(f => h("option", { value: f }, f)));
+  const tuttiB = h("input", { type: "checkbox", checked: true });
+  const vaiB = h("button", { class: "p", type: "button" }, "Carica tutto");
+  vaiB.addEventListener("click", async () => {
+    if (!files.files.length) { bloccoMsg.replaceChildren(avviso("Scegli i file (o uno zip con una cartella).", "no")); return; }
+    vaiB.disabled = true;
+    try {
+      const fd = new FormData(); for (const f of files.files) fd.append("file", f); fd.append("fascia_dati", fasciaB.value); fd.append("per_tutti", tuttiB.checked ? "true" : "false");
+      await api("POST", "/gestione/documenti-blocco", fd); files.value = "";
+      bloccoMsg.replaceChildren(avviso("Caricamento avviato: lavora in sottofondo, qui sotto vedi l'avanzamento.", "ok")); caricaBlocco();
+    } catch (e) { bloccoMsg.replaceChildren(avviso(e.message, "no")); }
+    vaiB.disabled = false;
+  });
+  const bloccoLista = h("div");
+  const caricaBlocco = async () => { try { const l = await api("GET", "/gestione/documenti-blocco"); riempi(bloccoLista, l.map(b => h("div", { class: "sotto" }, "#" + b.id + " · " + ({ in_corso: "in corso…", concluso: "concluso", errore: "errore" })[b.stato] + " · " + b.caricati + " caricati, " + b.saltati + " saltati su " + b.totale + (b.problemi.length ? " · problemi: " + b.problemi.slice(0, 5).map(p => p.file + " (" + p.motivo + ")").join("; ") : "")))); } catch (e) { /* ignora */ } };
+  caricaBlocco();
+  const bloccoForm = h("div", {}, h("label", {}, "File (anche molti insieme) o uno zip con una cartella", files), h("label", {}, "Riservatezza", fasciaB),
+    h("label", {}, tuttiB, " Disponibili a tutti gli agenti (altrimenti li assegni tu dai Documenti)"), h("div", { class: "azioni" }, vaiB), bloccoMsg, bloccoLista);
   const indicizza = h("button", { class: "s", type: "button" }, "Indicizza ora");
   indicizza.addEventListener("click", async () => {
     indicizza.disabled = true;
@@ -128,7 +150,42 @@ function vistaMemoriaVett() {
   const t = setInterval(() => { if (!document.body.contains(stato)) clearInterval(t); else carica(); }, 10000);
   return h("div", {}, h("h2", {}, "Memoria condivisa (per significato)"),
     h("p", { class: "aiuto" }, "Tutti i documenti caricati sono ricercabili anche per significato, non solo per parole: un agente che lavora a un progetto trova i brani pertinenti anche se usano termini diversi. Ognuno vede solo i documenti che già poteva vedere. Qui puoi anche importare le tue conversazioni di ChatGPT (Impostazioni → Controlli dati → Esporta) e di Claude (Impostazioni → Privacy → Esporta dati): carica lo zip o il file conversations.json."),
-    stato, h("div", { class: "azioni" }, indicizza), h("h3", {}, "Importa conversazioni"), h("label", {}, "File di esportazione (.zip o .json)", file),
+    stato, h("div", { class: "azioni" }, indicizza), temiBox, h("h3", {}, "Carica documenti in blocco"), bloccoForm, h("h3", {}, "Importa conversazioni"), h("label", {}, "File di esportazione (.zip o .json)", file),
     h("label", {}, tutti, " Disponibili a tutti gli agenti (altrimenti li assegni tu uno a uno dai Documenti)"),
     h("div", { class: "azioni" }, importa), msg, h("h3", {}, "Importazioni"), elenco);
+}
+
+function vistaGiro() {
+  const corpo = h("div"), msg = h("div"), fatti = h("div"), nuovo = h("input", { maxlength: 500, placeholder: "Aggiungi tu un fatto (es. Renovatio collabora con X dal 2024)" });
+  const giorni = h("input", { type: "number", min: 0, max: 90, style: "width:70px" });
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/giro");
+      if (document.activeElement !== giorni) giorni.value = d.giorni;
+      riempi(corpo, d.aperto ? d.domande.map(q => {
+        if (q.stato !== "attesa") return h("div", { class: "sotto", style: "margin-bottom:6px" }, (q.stato === "risposta" ? "✓ " : "— ") + q.agente + ": " + q.domanda);
+        const r = h("input", { maxlength: 600, placeholder: "Risposta breve", style: "flex:1" });
+        const ok = h("button", { class: "p", type: "button" }, "Rispondi"), no = h("button", { class: "s", type: "button" }, "Salta");
+        const manda = async (url, body) => { try { await api("POST", url, body); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } };
+        ok.addEventListener("click", () => r.value.trim() && manda("/gestione/giro/domande/" + q.id + "/risposta", { risposta: r.value }));
+        r.addEventListener("keydown", e => { if (e.key === "Enter") ok.click(); });
+        no.addEventListener("click", () => manda("/gestione/giro/domande/" + q.id + "/salta"));
+        return h("div", { class: "carta", style: "margin-bottom:8px" }, h("b", {}, q.agente + " chiede: " + q.domanda), h("div", { style: "display:flex;gap:6px;margin-top:6px" }, r, ok, no));
+      }) : h("p", { class: "sotto" }, "Nessun giro aperto."));
+      riempi(fatti, d.fatti.length ? d.fatti.map(f => h("div", { class: "sotto", style: "margin-bottom:4px" }, f.testo + " ",
+        h("a", { href: "#", onclick: async ev => { ev.preventDefault(); try { await api("DELETE", "/gestione/giro/fatti/" + f.id); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "togli"))) : h("p", { class: "sotto" }, "Ancora nessun fatto."));
+    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+  };
+  const avvia = h("button", { class: "p", type: "button" }, "Avvia un giro ora");
+  avvia.addEventListener("click", async () => { avvia.disabled = true; try { await api("POST", "/gestione/giro/avvia"); msg.replaceChildren(); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } avvia.disabled = false; });
+  const salva = h("button", { class: "s", type: "button" }, "Salva frequenza");
+  salva.addEventListener("click", async () => { try { await api("PUT", "/gestione/giro/impostazioni", { giorni: Number(giorni.value) }); msg.replaceChildren(avviso("Salvato.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } });
+  const aggiungi = h("button", { class: "s", type: "button" }, "Aggiungi");
+  aggiungi.addEventListener("click", async () => { if (nuovo.value.trim().length < 5) return; try { await api("POST", "/gestione/giro/fatti", { testo: nuovo.value }); nuovo.value = ""; carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } });
+  carica();
+  const t = setInterval(() => { if (!document.body.contains(corpo)) clearInterval(t); else if (document.activeElement.tagName !== "INPUT") carica(); }, 15000);
+  return h("div", {}, h("h2", {}, "Giro di aggiornamento"),
+    h("p", { class: "aiuto" }, "Ogni tanto Aurora e i manager ti fanno poche domande brevissime sulle strutture e sui progetti (relazioni con un ente, a che punto è un progetto). Le tue risposte diventano fatti che tutti gli agenti ricevono. Puoi rispondere a voce con la dettatura del telefono."),
+    h("label", {}, "Ogni quanti giorni (0 = mai in automatico)", giorni), h("div", { class: "azioni" }, salva, avvia), msg,
+    h("h3", {}, "Domande"), corpo, h("h3", {}, "Cosa sanno ora tutti gli agenti"), h("div", { style: "display:flex;gap:6px" }, nuovo, aggiungi), fatti);
 }

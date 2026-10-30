@@ -147,6 +147,75 @@ def unisci(per_parole: list[dict], per_significato: list[dict], limite: int) -> 
     return [rif[k] for k, _ in sorted(punti.items(), key=lambda x: -x[1])][:limite]
 
 
+
+# ---------- relazioni tra documenti ----------
+SOGLIA_TEMA = 0.6
+VICINI = 5
+MAX_DOC_RELAZIONI = 4000
+
+
+def relaziona(conn) -> int:
+    """Cerca i documenti che trattano lo stesso tema (vettore medio di ogni documento) e ne salva le coppie piu' vicine. Si rifa solo se la memoria e' cambiata."""
+    import numpy as np
+    firma = conn.execute("SELECT count(*) AS n, COALESCE(max(pezzo_id),0) AS m, count(DISTINCT documento_id) AS d FROM pezzi_vettori").fetchone()
+    f = f"{firma['n']}:{firma['m']}:{firma['d']}"
+    r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'relazioni_firma'").fetchone()
+    if r and r["valore"] == f:
+        return 0
+    c = _matrice(conn)
+    if len(c["pezzi"]) == 0:
+        return 0
+    ids = np.unique(c["docs"])[:MAX_DOC_RELAZIONI]
+    D = np.zeros((len(ids), DIM), dtype=np.float32)
+    for i, d in enumerate(ids):
+        v = c["M"][c["docs"] == d].mean(axis=0)
+        D[i] = v / (np.linalg.norm(v) or 1.0)
+    S = D @ D.T
+    np.fill_diagonal(S, -1)
+    coppie = {}
+    for i in range(len(ids)):
+        for j in np.argsort(-S[i])[:VICINI]:
+            if S[i, j] >= SOGLIA_TEMA:
+                a, b = sorted((int(ids[i]), int(ids[j])))
+                coppie[(a, b)] = float(S[i, j])
+    conn.execute("DELETE FROM documenti_relazioni")
+    for (a, b), v in coppie.items():
+        conn.execute("INSERT INTO documenti_relazioni (documento_a, documento_b, somiglianza) VALUES (%s,%s,%s)", (a, b, v))
+    conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('relazioni_firma', %s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (f,))
+    conn.commit()
+    return len(coppie)
+
+
+def correlati(conn, agente_id: int, doc_ids: list[int], limite: int = 5) -> list[str]:
+    """Nomi dei documenti sullo stesso tema di quelli dati, tra quelli che l'agente puo' vedere (e che non sta gia' usando)."""
+    if not doc_ids:
+        return []
+    from . import memoria
+    visibili = {d["id"]: d["nome"] for d in memoria.documenti_visibili(conn, agente_id)}
+    righe = conn.execute("""SELECT CASE WHEN documento_a = ANY(%(d)s) THEN documento_b ELSE documento_a END AS altro, somiglianza FROM documenti_relazioni
+                            WHERE documento_a = ANY(%(d)s) OR documento_b = ANY(%(d)s) ORDER BY somiglianza DESC""", {"d": doc_ids}).fetchall()
+    out = []
+    for r in righe:
+        if r["altro"] in visibili and r["altro"] not in doc_ids and visibili[r["altro"]] not in out:
+            out.append(visibili[r["altro"]])
+    return out[:limite]
+
+
+def temi(conn, massimo: int = 12) -> list[dict]:
+    """Gruppi di documenti collegati tra loro (almeno 3), per mostrare a Lorenzo su quali argomenti ci sono piu' fonti."""
+    padre = {}
+    def trova(x):
+        while padre.setdefault(x, x) != x:
+            padre[x] = padre[padre[x]]; x = padre[x]
+        return x
+    for r in conn.execute("SELECT documento_a, documento_b FROM documenti_relazioni").fetchall():
+        padre[trova(r["documento_a"])] = trova(r["documento_b"])
+    gruppi = {}
+    for x in list(padre):
+        gruppi.setdefault(trova(x), []).append(x)
+    nomi = {d["id"]: d["nome"] for d in conn.execute("SELECT id, nome FROM documenti").fetchall()}
+    return [{"documenti": [nomi.get(i, "?") for i in sorted(g)][:12], "quanti": len(g)} for g in sorted(gruppi.values(), key=len, reverse=True) if len(g) >= 3][:massimo]
+
 # ---------- importazione delle chat ----------
 def _testo_chatgpt(conv: dict) -> str:
     m = conv.get("mapping") or {}
@@ -270,7 +339,7 @@ def _importa(iid: int, origine: str, conv: list[dict], per_tutti: bool, utente_i
 @router.get("")
 def vista(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        return {**stato(conn), "importazioni": conn.execute("SELECT id, origine, nome_file, stato, conversazioni, importate, saltate, errore, creato_il FROM importazioni_chat ORDER BY id DESC LIMIT 10").fetchall()}
+        return {**stato(conn), "temi": temi(conn), "relazioni": conn.execute("SELECT count(*) AS n FROM documenti_relazioni").fetchone()["n"], "importazioni": conn.execute("SELECT id, origine, nome_file, stato, conversazioni, importate, saltate, errore, creato_il FROM importazioni_chat ORDER BY id DESC LIMIT 10").fetchall()}
 
 
 @router.post("/indicizza")
