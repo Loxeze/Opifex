@@ -91,12 +91,26 @@ def voci_manager(_: dict = Depends(solo_titolare)):
         return {"manager": manager_disponibili(conn), "voci": voci, "elevenlabs": bool(c["chiave"]), "errore": errore}
 
 
+@router.get("/voci-agenti")
+def voci_agenti(_: dict = Depends(solo_titolare)):
+    """Voci ElevenLabs disponibili e voce assegnata a ciascun agente (per il riquadro nella pagina Agenti)."""
+    with connessione() as conn:
+        c = ve.configurazione(conn)
+        try:
+            voci = ve.voci(conn) if c["chiave"] else []
+            errore = None
+        except ve.ErroreVoce as e:
+            voci, errore = [], str(e)
+        ag = {str(r["id"]): r["voce_id"] for r in conn.execute("SELECT id, voce_id FROM agenti WHERE voce_id IS NOT NULL AND voce_id <> ''").fetchall()}
+        return {"elevenlabs": bool(c["chiave"]), "voci": voci, "agenti": ag, "errore": errore}
+
+
 @router.put("/voci-manager/{aid}")
 def imposta_voce(aid: int, d: Voce, _: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        r = conn.execute("UPDATE agenti SET voce_id = %s WHERE id = %s AND livello IN ('manager','referente') RETURNING id", ((d.voce_id or "").strip() or None, aid)).fetchone()
+        r = conn.execute("UPDATE agenti SET voce_id = %s WHERE id = %s RETURNING id", ((d.voce_id or "").strip() or None, aid)).fetchone()
         if r is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Manager inesistente")
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Agente inesistente")
     return {"ok": True}
 
 

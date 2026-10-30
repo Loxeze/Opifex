@@ -159,7 +159,7 @@ function vistaAgenti() {
         h("button", { class: "p", onclick: () => modulo(null) }, "+ Nuovo agente"))),
     garanzie.length ? avviso("I dati interni e riservati restano bloccati verso: " +
       garanzie.map(f => f.nome).join(", ") + " (mancano le garanzie di non conservazione/DPA). Gli agenti lavorano solo su dati pubblici.", "avv") : null,
-    (() => { const blocco = h("div", {}, [...gruppi].map(([nome, lista]) => [h("h3", {}, nome), h("div", { class: "griglia" }, lista.map(carta))])); riempiExtraAgenti(blocco); return blocco; })(),
+    (() => { const blocco = h("div", {}, [...gruppi].map(([nome, lista]) => [h("h3", {}, nome), h("div", { class: "griglia" }, lista.map(carta))])); riempiExtraAgenti(blocco); riempiVociAgenti(blocco); return blocco; })(),
   ];
 }
 
@@ -182,6 +182,7 @@ function carta(a) {
       a.accesso_web ? null : h("span", { class: "etichetta avv" }, "Senza web"),
       a.connessioni.length ? h("span", { class: "etichetta" }, a.connessioni.length + " conn.") : null),
     h("div", { class: "sotto" }, "Questo mese: " + a.token_mese.toLocaleString("it-IT") + " token"),
+    h("div", { class: "agente-voce-posto", "data-id": String(a.id), onclick: (e) => e.stopPropagation(), onkeydown: (e) => e.stopPropagation() }),
     h("div", { class: "agente-extra-posto", "data-id": String(a.id) }));
 }
 

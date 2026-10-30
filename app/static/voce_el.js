@@ -29,7 +29,7 @@ function vistaVoce() {
 }
 
 // Pulsante che legge ad alta voce un testo (scaricato dal server come audio e riprodotto qui)
-function pulsanteAscolta(daiTesto, etichetta) {
+function pulsanteAscolta(daiTesto, etichetta, agenteId) {
   const b = h("button", { class: "s", type: "button" }, etichetta || "▶ Ascolta");
   const msg = h("span", { class: "sotto" });
   let audio = null;
@@ -37,7 +37,7 @@ function pulsanteAscolta(daiTesto, etichetta) {
     if (audio) { audio.pause(); audio = null; b.textContent = etichetta || "▶ Ascolta"; return; }
     msg.textContent = ""; b.disabled = true; b.textContent = "Preparo la voce…";
     try {
-      const r = await fetch("/voce/leggi", { method: "POST", headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) }, body: JSON.stringify({ testo: daiTesto() }) });
+      const r = await fetch("/voce/leggi", { method: "POST", headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) }, body: JSON.stringify({ testo: daiTesto(), agente_id: typeof agenteId === "function" ? agenteId() : (agenteId || null) }) });
       if (!r.ok) { let d = null; try { d = await r.json(); } catch (e) { /* ignora */ } throw new Error(messaggioErrore(d)); }
       const url = URL.createObjectURL(await r.blob());
       audio = new Audio(url);

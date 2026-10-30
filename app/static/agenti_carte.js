@@ -62,3 +62,27 @@ async function riempiExtraAgenti(radice) {
     });
   } catch (e) { radice.querySelectorAll(".agente-extra-posto").forEach(el => el.remove()); }
 }
+
+// Voce ElevenLabs di ogni agente: scelta dal riquadro, usata nelle riunioni e nella lettura delle chat
+async function riempiVociAgenti(radice) {
+  const posti = radice.querySelectorAll(".agente-voce-posto");
+  if (!posti.length) return;
+  try {
+    const d = await api("GET", "/gestione/voci-agenti");
+    posti.forEach(el => {
+      const id = el.dataset.id;
+      if (!d.elevenlabs) { el.remove(); return; }
+      const sel = h("select", { "aria-label": "Voce ElevenLabs dell'agente", style: "max-width:100%" }, h("option", { value: "" }, "— voce predefinita —"), d.voci.map(v => h("option", { value: v.id }, v.nome)));
+      const attuale = d.agenti[id] || "";
+      if (attuale && !d.voci.some(v => v.id === attuale)) sel.append(h("option", { value: attuale }, attuale));
+      sel.value = attuale;
+      const msg = h("span", { class: "sotto" });
+      sel.addEventListener("change", async () => {
+        try { await api("PUT", "/gestione/voci-manager/" + id, { voce_id: sel.value || null }); msg.textContent = "Salvata."; }
+        catch (e) { msg.textContent = e.message; }
+      });
+      const prova = typeof pulsanteAscolta === "function" ? pulsanteAscolta(() => "Ciao, questa è la mia voce nelle riunioni.", "▶ Prova", () => Number(id)) : null;
+      el.replaceChildren(h("div", { class: "extra-titolo" }, "Voce"), h("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, sel, prova, msg));
+    });
+  } catch (e) { posti.forEach(el => el.remove()); }
+}

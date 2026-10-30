@@ -163,7 +163,7 @@ with TestClient(app) as c:
     vm = c.get("/gestione/voci-manager", headers=H).json()
     ok("pannello voci", len(vm["voci"]) == 3 and vm["elevenlabs"] is False or len(vm["voci"]) >= 0)
     ok("cambio voce", c.put(f"/gestione/voci-manager/{marco}", headers=H, json={"voce_id": "v3"}).status_code == 200 and sql("SELECT voce_id FROM agenti WHERE id=%s", (marco,))[0][0] == "v3")
-    ok("voce di un non-manager rifiutata", c.put(f"/gestione/voci-manager/{scout}", headers=H, json={"voce_id": "v1"}).status_code == 404)
+    ok("voce assegnabile anche a un non-manager", c.put(f"/gestione/voci-manager/{scout}", headers=H, json={"voce_id": "v1"}).status_code == 200)
     r = c.post("/voce/leggi", headers=H, json={"testo": "Ciao", "agente_id": marco})
     ok("lettura con la voce del manager", r.status_code == 200 and chiamate[-1] == "v3", str(chiamate))
     r = c.post("/voce/leggi", headers=H, json={"testo": "Ciao"})
