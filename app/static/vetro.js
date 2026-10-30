@@ -2,7 +2,7 @@
 // Stile di vetro: sfondo fotografico (tre scene disegnate al volo), densita' del vetro, interruttore per tornare allo stile classico.
 // Le preferenze stanno sul server, una per utente.
 const Vetro = (() => {
-  const SCENE = { alba: "Alba sui monti", notte: "Città di notte", oceano: "Oceano" };
+  const SCENE = { alba: "Alba sui monti", notte: "Città di notte", oceano: "Oceano", arte: "Opere d'arte" };
   const pref = { stile: "vetro", sfondo: "alba", vetro: 0.46 };
   let attuale = null, timer = {};
 
@@ -65,6 +65,40 @@ const Vetro = (() => {
         <path d="${riflessi(23, .7)}" fill="none" stroke="#BFE3FF" stroke-width="1.6" stroke-linecap="round" opacity=".3"/>`);
     },
   };
+  // Opere d'arte da Wikimedia Commons: una nuova ogni 10 minuti, scelta dal server; sotto restano le scene disegnate come ripiego
+  costruisci.arte = () => costruisci.alba() + '<div class="arte-l arte-a"></div><div class="arte-l arte-b"></div>';
+  const arte = { slot: null, timer: null, fronte: "a", url: null };
+  function fermaArte() { clearTimeout(arte.timer); arte.timer = null; const d = document.getElementById("vetro-didascalia"); if (d) d.hidden = true; }
+  async function aggiornaArte() {
+    clearTimeout(arte.timer);
+    if (arte.volo) return;
+    arte.volo = true;
+    let attesa = 60;
+    try {
+      const r = await api("GET", "/sfondo-arte/corrente");
+      if (r.disponibile) {
+        if (r.slot !== arte.slot) {
+          const resp = await fetch("/sfondo-arte/immagine/" + r.slot, { headers: typeof token !== "undefined" && token ? { Authorization: "Bearer " + token } : {} });
+          if (resp.ok) {
+            const url = URL.createObjectURL(await resp.blob());
+            const dietro = arte.fronte === "a" ? "b" : "a", el = document.querySelector("#vetro-sfondo .arte-" + dietro), davanti = document.querySelector("#vetro-sfondo .arte-" + arte.fronte);
+            if (el) {
+              el.style.backgroundImage = "url(" + url + ")"; el.classList.add("on"); if (davanti) davanti.classList.remove("on");
+              arte.fronte = dietro; const vecchio = arte.url; arte.url = url; arte.slot = r.slot;
+              if (vecchio) setTimeout(() => URL.revokeObjectURL(vecchio), 4000);
+            }
+          }
+        }
+        let d = document.getElementById("vetro-didascalia");
+        if (!d) { d = document.createElement("div"); d.id = "vetro-didascalia"; document.body.append(d); }
+        d.hidden = false;
+        riempi(d, [r.titolo, r.autore ? " — " + r.autore : "", r.licenza ? " · " + r.licenza : "", " · ", r.pagina ? h("a", { href: r.pagina, target: "_blank", rel: "noopener noreferrer" }, "Wikimedia Commons") : "Wikimedia Commons"]);
+        attesa = Math.max(15, Math.min(600, (r.cambia_tra || 60) + 2));
+      } else attesa = r.riprova_tra || 30;
+    } catch (e) { attesa = 60; }
+    arte.volo = false;
+    arte.timer = setTimeout(aggiornaArte, attesa * 1000);
+  }
   const GRANA = `<svg aria-hidden="true" style="mix-blend-mode:overlay;opacity:.5"><filter id="grana" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".8" numOctaves="2" seed="7"/><feColorMatrix type="matrix" values="0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 .9 -.25"/></filter><rect width="100%" height="100%" filter="url(#grana)"/></svg>`;
 
   function applica() {
@@ -73,7 +107,8 @@ const Vetro = (() => {
     const attivo = pref.stile === "vetro";
     document.body.classList.toggle("vetro", attivo);
     document.documentElement.style.setProperty("--g", String(pref.vetro));
-    if (attivo && attuale !== pref.sfondo) { box.innerHTML = costruisci[pref.sfondo]() + GRANA + '<div class="vignetta"></div>'; attuale = pref.sfondo; }
+    if (attivo && attuale !== pref.sfondo) { box.innerHTML = costruisci[pref.sfondo]() + GRANA + '<div class="vignetta"></div>'; attuale = pref.sfondo; arte.slot = null; arte.url = null; arte.fronte = "a"; fermaArte(); }
+    if (attivo && pref.sfondo === "arte") { if (!arte.timer) aggiornaArte(); } else fermaArte();
   }
   async function carica() {
     try {

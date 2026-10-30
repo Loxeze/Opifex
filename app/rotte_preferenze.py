@@ -8,7 +8,7 @@ from .permessi import utente_corrente
 router = APIRouter(prefix="/account/preferenze", tags=["preferenze"])
 
 PANNELLI = {"aurora", "decisioni", "costi", "task", "squadra", "briefing"}
-STILI, SFONDI, PERIODI, DISPOSIZIONI = {"vetro", "classico"}, {"alba", "notte", "oceano"}, {"7", "14", "30"}, {"operativo", "focus", "panorama", "personale"}
+STILI, SFONDI, PERIODI, DISPOSIZIONI = {"vetro", "classico"}, {"alba", "notte", "oceano", "arte"}, {"7", "14", "30"}, {"operativo", "focus", "panorama", "personale"}
 
 
 def _numero(v, minimo, massimo):

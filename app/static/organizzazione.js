@@ -135,7 +135,45 @@ function calcolaLayout(dati) {   // piani per azienda
   supervisori.forEach(sposta);
   const estensione = Math.max(rMax, ...nodi.filter(n => n.esterno).map(n => n.r)) + 0.6;
   // se la struttura cresce, la scena si rimpicciolisce per restare tutta nel riquadro
-  return { nodi, per, piani, rMax, estensione, k: Math.min(1, 5.0 / estensione), raggi: Object.values(R) };
+  // ---- modelli alternativi: reparti (gruppi), costellazioni, anelli
+  const chiaveG = (n) => n.esterno || sottoSent.has(n) ? "S" : (n.divisione_id ?? "N");
+  const mappaG = new Map();
+  for (const n of nodi) if (!n.centro) { const k = chiaveG(n); if (!mappaG.has(k)) mappaG.set(k, []); mappaG.get(k).push(n); }
+  const gr = [...mappaG.entries()].map(([k, m]) => ({ chiave: k, membri: m,
+    nome: k === "S" ? "Sentinelle" : k === "N" ? "Senza reparto" : ((dati.divisioni || []).find(d => d.id === k) || {}).nome || "Reparto " + k }))
+    .sort((a, b) => (a.chiave === "S") - (b.chiave === "S") || (a.chiave === "N") - (b.chiave === "N") || b.membri.length - a.membri.length);
+  const nCol = gr.filter(g => g.chiave !== "S").length || 1;
+  gr.forEach((g, i) => { g.hue = g.chiave === "S" ? 275 : g.chiave === "N" ? 210 : Math.round((20 + i * 360 / nCol) % 360); g.membri.forEach(n => { n.gruppo = i; }); });
+  const fib = (i, N) => { const y = N === 1 ? 0 : 1 - 2 * (i + 0.5) / N, r = Math.sqrt(Math.max(0, 1 - y * y)), t = i * 2.399963; return [Math.cos(t) * r, y, Math.sin(t) * r]; };
+  nodi.forEach(n => { n.pos = { sfera: { x: n.x || 0, y: n.y || 0, z: n.z || 0 }, cost: { x: 0, y: 0, z: 0 }, anelli: { x: 0, y: 0, z: 0 } }; });
+  // costellazioni: ogni reparto e' una piccola sfera di soggetti, i reparti sono sparsi attorno a Lorenzo
+  const G = gr.length, Rc = 2.2 + G * 0.2;
+  let extC = 3;
+  gr.forEach((g, gi) => {
+    const [fx, fy, fz] = fib(gi, G), m = g.membri.length;
+    g.c = { x: fx * Rc, y: fy * Rc * 0.9, z: fz * Rc }; g.ro = 0.32 + Math.sqrt(m) * 0.2;
+    const ord = g.membri.slice().sort((a, b) => (b.livello === "manager") - (a.livello === "manager") || String(a.nome).localeCompare(String(b.nome)));
+    ord.forEach((n, j) => { const [ox, oy, oz] = m === 1 ? [0, 0, 0] : fib(j, m); const rr = g.ro * (n.livello === "manager" ? 0.45 : 1);
+      n.pos.cost = { x: g.c.x + ox * rr, y: g.c.y + oy * rr, z: g.c.z + oz * rr }; });
+    extC = Math.max(extC, Math.hypot(g.c.x, g.c.y, g.c.z) + g.ro + 0.6);
+  });
+  // anelli: i capi sull'anello interno, tutti gli altri sull'esterno, ogni reparto ha il suo spicchio
+  const tot = nodi.length - 1 || 1;
+  const capi = (n) => n.livello === "manager" || n.livello === "referente";
+  const nIn = nodi.filter(n => !n.centro && capi(n) && !n.esterno).length;
+  const nOut = tot - nIn;
+  const r1 = Math.max(2.0, nIn * 0.75 / (Math.PI * 2)), r2 = Math.max(r1 + 1.5, nOut * 0.42 / (Math.PI * 2) / 1.6 + r1 * 0.3, 3.6);
+  let a0 = 0; let k2 = 0;
+  gr.forEach((g) => {
+    const w = Math.PI * 2 * g.membri.length / tot; g.a0 = a0; g.a1 = a0 + w; g.am = a0 + w / 2; a0 += w;
+    const dentro = g.membri.filter(n => capi(n) && !n.esterno).sort((a, b) => String(a.nome).localeCompare(String(b.nome)));
+    const fuori = g.membri.filter(n => !(capi(n) && !n.esterno)).sort((a, b) => String(a.nome).localeCompare(String(b.nome)));
+    dentro.forEach((n, j) => { const an = g.a0 + w * (j + 0.5) / dentro.length; n.pos.anelli = { x: r1 * Math.cos(an), y: Math.sin(an * 3) * 0.12, z: r1 * Math.sin(an) }; });
+    fuori.forEach((n, j) => { const an = g.a0 + w * (j + 0.5) / fuori.length, ra = r2 + ((j % 2) ? 0.32 : -0.32) * (fuori.length > 14 ? 1 : 0); k2++;
+      n.pos.anelli = { x: ra * Math.cos(an), y: Math.sin(an * 4 + j) * 0.2, z: ra * Math.sin(an) }; });
+  });
+  return { nodi, per, piani, rMax, estensione, k: Math.min(1, 5.0 / estensione), raggi: Object.values(R), gruppi: gr, anelli: { r1, r2 },
+    ext: { sfera: estensione, cost: extC, anelli: r2 + 1.2 } };
 }
 
 function vistaOrganigramma(incorniciata) {
@@ -149,20 +187,28 @@ function vistaOrganigramma(incorniciata) {
   let dati = null, layout = null, azienda = "", progetto = "", scelto = null;
   let impulsi = [], dopo = null, giro = 0;
   let rotY = 0.4, rotX = 0.62, zoom = 1, auto = true, trascina = false, ultimo = null, mossa = 0, pinch = 0;
-  let W = 360, H = 640, DPR = 1;
+  let W = 360, H = 640, DPR = 1, kk = 1;
   const cx = cv.getContext("2d");
   const stelle = Array.from({ length: 120 }, () => ({ x: (Math.random() * 2 - 1) * 9, y: (Math.random() * 2 - 1) * 9, z: (Math.random() * 2 - 1) * 9 }));
 
-  const colore = (n) => n.centro ? "#f3b54a" : !n.attivo ? "#4b5563" : n.esterno ? "#9a7bd8" : COL_STATO[n.stato] || "#3fd3c0";
+  const MODELLI = [["anelli", "Anelli"], ["cost", "Costellazioni"], ["sfera", "Sfera"], ["schede", "Schede"]];
+  let modello = "anelli", repFiltro = null, cercaT = "";
+  try { const m = localStorage.getItem("org_modello"); if (MODELLI.some(x => x[0] === m)) modello = m; } catch (e) { /* ok */ }
+  const SOLE = "#ffd23a";
+  const tinta = (n) => n.gruppo != null && layout && layout.gruppi[n.gruppo] ? "hsl(" + layout.gruppi[n.gruppo].hue + ",68%,60%)" : "#9aa7b4";
+  const colore = (n) => n.centro ? SOLE : !n.attivo ? "#4b5563" : n.esterno ? "#9a7bd8" : COL_STATO[n.stato] || "#3fd3c0";
+  const riempimento = (n) => n.centro ? SOLE : (modello !== "sfera" && n.attivo) ? tinta(n) : colore(n);
   const aziendaNome = (id) => dati.aziende.find(z => z.id === id);
-  const visibile = (n) => (!azienda || n.centro || !n.aziende.length || n.aziende.includes(Number(azienda))) && (!progetto || n.centro || (n.progetti || []).includes(Number(progetto)));
+  const visibile = (n) => (!azienda || n.centro || !n.aziende.length || n.aziende.includes(Number(azienda))) && (!progetto || n.centro || (n.progetti || []).includes(Number(progetto)))
+    && (repFiltro == null || n.centro || n.gruppo === repFiltro)
+    && (!cercaT || n.centro || String(n.nome).toLowerCase().includes(cercaT) || String(n.ruolo || "").toLowerCase().includes(cercaT));
 
   const proietta = (x, y, z) => {
     const cy = Math.cos(rotY), sy = Math.sin(rotY), cxr = Math.cos(rotX), sxr = Math.sin(rotX);
     const x1 = x * cy - z * sy, z1 = x * sy + z * cy;
     const y2 = y * cxr - z1 * sxr, z2 = y * sxr + z1 * cxr;
     const f = 5.5 / (5.5 + z2 + 3.2);
-    const s = Math.min(W, H) * 0.125 * zoom * (layout ? layout.k : 1);
+    const s = Math.min(W, H) * 0.125 * zoom * kk;
     return { px: W / 2 + x1 * s * f, py: H / 2 + y2 * s * f, f, z: z2 };
   };
 
@@ -183,9 +229,13 @@ function vistaOrganigramma(incorniciata) {
     if (!layout) {
       cx.fillStyle = "#7d8a99"; cx.font = "13px Inter, system-ui, sans-serif"; cx.textAlign = "center"; cx.fillText("Caricamento…", W / 2, H / 2); return;
     }
-    // la sfera: involucro, gusci dei livelli, meridiani, fasce di latitudine delle aziende e asse polare di Lorenzo
     const rM = layout.rMax, p0 = proietta(0, 0, 0), pe = proietta(rM * Math.cos(rotY), 0, -rM * Math.sin(rotY));
     const pr = Math.hypot(pe.px - p0.px, pe.py - p0.py), unita = rM ? pr / rM : 1;
+    if (modello === "anelli") {
+      cx.lineWidth = 1; cx.strokeStyle = "rgba(255,210,58,0.16)";
+      for (const R of [layout.anelli.r1, layout.anelli.r2]) { cx.beginPath(); for (let t = 0; t <= 96; t++) { const an = t / 96 * Math.PI * 2, q = proietta(R * Math.cos(an), 0, R * Math.sin(an)); t ? cx.lineTo(q.px, q.py) : cx.moveTo(q.px, q.py); } cx.stroke(); }
+    }
+    if (modello === "sfera") {
     const gl = cx.createRadialGradient(p0.px - pr * 0.3, p0.py - pr * 0.35, pr * 0.1, p0.px, p0.py, pr);
     gl.addColorStop(0, "rgba(243,181,74,0.10)"); gl.addColorStop(0.7, "rgba(80,120,200,0.05)"); gl.addColorStop(1, "rgba(120,160,255,0.16)");
     cx.fillStyle = gl; cx.beginPath(); cx.arc(p0.px, p0.py, pr, 0, Math.PI * 2); cx.fill();
@@ -217,12 +267,24 @@ function vistaOrganigramma(incorniciata) {
       const re = layout.nodi.find(n => n.esterno && !n.superiore_id).r;
       cx.setLineDash([5, 6]); cx.strokeStyle = "rgba(154,123,216,0.45)"; cx.lineWidth = 1; cx.beginPath(); cx.arc(p0.px, p0.py, re * unita, 0, Math.PI * 2); cx.stroke(); cx.setLineDash([]);
     }
+    }
     for (const n of layout.nodi) n.p = proietta(n.x, n.y, n.z);
+    if (modello === "cost") {
+      for (const g of layout.gruppi) {
+        if (repFiltro != null && layout.gruppi[repFiltro] !== g) continue;
+        const q = proietta(g.c.x, g.c.y, g.c.z), rr = g.ro * q.f * Math.min(W, H) * 0.125 * zoom * kk * 1.15;
+        const gl = cx.createRadialGradient(q.px, q.py, 0, q.px, q.py, rr);
+        gl.addColorStop(0, "hsla(" + g.hue + ",70%,60%,0.16)"); gl.addColorStop(1, "hsla(" + g.hue + ",70%,60%,0.02)");
+        cx.fillStyle = gl; cx.beginPath(); cx.arc(q.px, q.py, rr, 0, Math.PI * 2); cx.fill();
+        cx.strokeStyle = "hsla(" + g.hue + ",70%,60%,0.28)"; cx.lineWidth = 1; cx.beginPath(); cx.arc(q.px, q.py, rr, 0, Math.PI * 2); cx.stroke();
+      }
+    }
     for (const n of layout.nodi) {
       if (n.centro) continue;
       const s = layout.per.get(n.superiore_id ?? 0) || layout.nodi[0];
       cx.globalAlpha = visibile(n) ? 1 : 0.15;
-      cx.strokeStyle = n.esterno && !n.superiore_id ? "rgba(154,123,216,0.35)" : n.attivo ? "rgba(243,181,74,0.35)" : "rgba(75,85,99,0.35)";
+      cx.strokeStyle = modello !== "sfera" ? (n.attivo ? "rgba(255,210,58,0.13)" : "rgba(75,85,99,0.2)")
+        : n.esterno && !n.superiore_id ? "rgba(154,123,216,0.35)" : n.attivo ? "rgba(243,181,74,0.35)" : "rgba(75,85,99,0.35)";
       cx.beginPath(); cx.moveTo(s.p.px, s.p.py); cx.lineTo(n.p.px, n.p.py); cx.stroke();
     }
     cx.globalAlpha = 1;
@@ -230,13 +292,21 @@ function vistaOrganigramma(incorniciata) {
     const ord = layout.nodi.slice().sort((a, b) => b.p.z - a.p.z);
     const daEtichettare = [];
     for (const n of ord) {
-      const r = Math.max((n.centro ? 13 : n.livello === "manager" || n.livello === "referente" ? 8.5 + (n.carico || 0) / 100 * 3 : 3 + (n.carico || 0) / 100 * 2) * n.p.f * 1.5 * zoom * (0.55 + 0.45 * layout.k), n.livello === "manager" || n.livello === "referente" ? 4 : 2);
-      const c = colore(n);
+      const r = Math.max((n.centro ? 13 : n.livello === "manager" || n.livello === "referente" ? 8.5 + (n.carico || 0) / 100 * 3 : 3 + (n.carico || 0) / 100 * 2) * n.p.f * 1.5 * zoom * (0.55 + 0.45 * kk), n.livello === "manager" || n.livello === "referente" ? 4 : 2);
+      const c = riempimento(n);
       cx.globalAlpha = visibile(n) ? 1 : 0.15;
-      cx.shadowColor = c; cx.shadowBlur = n.attivo ? 14 : 0; cx.fillStyle = c;
+      if (n.centro) {   // Lorenzo: il sole
+        const pulsa = 1 + 0.06 * Math.sin(performance.now() / 600), R = r * 4.2 * pulsa;
+        const sole = cx.createRadialGradient(n.p.px, n.p.py, r * 0.5, n.p.px, n.p.py, R);
+        sole.addColorStop(0, "rgba(255,226,90,0.55)"); sole.addColorStop(0.45, "rgba(255,200,40,0.16)"); sole.addColorStop(1, "rgba(255,190,30,0)");
+        cx.fillStyle = sole; cx.beginPath(); cx.arc(n.p.px, n.p.py, R, 0, Math.PI * 2); cx.fill();
+      }
+      cx.shadowColor = c; cx.shadowBlur = n.centro ? 30 : n.attivo ? 14 : 0; cx.fillStyle = c;
       cx.beginPath(); cx.arc(n.p.px, n.p.py, r, 0, Math.PI * 2); cx.fill(); cx.shadowBlur = 0;
+      if (n.centro) { cx.fillStyle = "#fff6c4"; cx.beginPath(); cx.arc(n.p.px - r * 0.2, n.p.py - r * 0.2, r * 0.45, 0, Math.PI * 2); cx.fill(); }
       const az = n.aziende && n.aziende.length ? aziendaNome(n.aziende[0]) : null;
-      if (az) { cx.strokeStyle = az.colore; cx.lineWidth = 2; cx.beginPath(); cx.arc(n.p.px, n.p.py, r + 3, 0, Math.PI * 2); cx.stroke(); }
+      if (modello !== "sfera" && !n.centro) { cx.strokeStyle = colore(n); cx.lineWidth = 2; cx.beginPath(); cx.arc(n.p.px, n.p.py, r + 2.5, 0, Math.PI * 2); cx.stroke(); }
+      else if (az) { cx.strokeStyle = az.colore; cx.lineWidth = 2; cx.beginPath(); cx.arc(n.p.px, n.p.py, r + 3, 0, Math.PI * 2); cx.stroke(); }
       if (scelto === n.id) { cx.strokeStyle = "#fff"; cx.lineWidth = 2; cx.beginPath(); cx.arc(n.p.px, n.p.py, r + 7, 0, Math.PI * 2); cx.stroke(); }
       // etichette: solo se non coprono altre gia' scritte (chi e' scelto, il centro e i capi hanno la precedenza)
       n.etichetta = { x: n.p.px, y: n.p.py - r - 8, r, f: n.p.f };
@@ -258,12 +328,64 @@ function vistaOrganigramma(incorniciata) {
       cx.textAlign = "center"; cx.lineJoin = "round"; cx.lineWidth = 3; cx.strokeStyle = "rgba(8,12,18,0.85)"; cx.strokeText(n.nome, e.x, e.y);
       cx.fillStyle = "rgba(230,237,243," + Math.min(1, 0.5 + e.f * 0.5) + ")"; cx.fillText(n.nome, e.x, e.y);
     }
+    if (modello === "cost" || modello === "anelli") {
+      cx.font = "bold 12px Inter, system-ui, sans-serif"; cx.textAlign = "center"; cx.lineJoin = "round";
+      layout.gruppi.forEach((g, gi) => {
+        if (repFiltro != null && repFiltro !== gi) return;
+        const q = modello === "cost" ? proietta(g.c.x, g.c.y - g.ro - 0.25, g.c.z) : proietta((layout.anelli.r2 + 1.0) * Math.cos(g.am), 0, (layout.anelli.r2 + 1.0) * Math.sin(g.am));
+        cx.globalAlpha = Math.max(0.35, Math.min(1, 0.45 + q.f * 0.6));
+        cx.lineWidth = 3; cx.strokeStyle = "rgba(8,12,18,0.9)"; cx.strokeText(g.nome + " · " + g.membri.length, q.px, q.py);
+        cx.fillStyle = "hsl(" + g.hue + ",75%,68%)"; cx.fillText(g.nome + " · " + g.membri.length, q.px, q.py);
+      });
+    }
     cx.globalAlpha = 1;
   };
 
+  // passaggio morbido da un modello all'altro: ogni punto scivola verso la sua nuova posizione
+  const anima = () => {
+    if (!layout) return;
+    const ext = layout.ext[modello] || layout.estensione, tk = modello === "sfera" ? Math.min(1, 5.0 / ext) : Math.min(1.3, 5.4 / ext);
+    kk += (tk - kk) * 0.1;
+    for (const n of layout.nodi) {
+      const t = n.pos && n.pos[modello]; if (!t) continue;
+      n.x += (t.x - n.x) * 0.12; n.y += (t.y - n.y) * 0.12; n.z += (t.z - n.z) * 0.12;
+    }
+  };
+
+  const schedeBox = h("div", { class: "schede-reparti", style: "display:none" });
+  const disegnaSchede = () => {
+    schedeBox.style.display = modello === "schede" ? "block" : "none"; legenda.style.display = modello === "schede" ? "none" : "";
+    cv.style.visibility = modello === "schede" ? "hidden" : "visible";
+    if (modello !== "schede" || !layout) return;
+    const ok = (n) => visibile(n);
+    riempi(schedeBox, [
+      h("div", { class: "sr-sole" }, h("i", {}), h("b", {}, "Lorenzo"), h("span", {}, "Titolare · " + (layout.nodi.length - 1) + " soggetti in " + layout.gruppi.length + " reparti")),
+      h("div", { class: "sr-griglia" }, layout.gruppi.map((g, gi) => {
+        if (repFiltro != null && repFiltro !== gi) return null;
+        const membri = g.membri.filter(ok).sort((a, b) => (b.livello === "manager") - (a.livello === "manager") || String(a.nome).localeCompare(String(b.nome)));
+        if (cercaT && !membri.length) return null;
+        const attivi = g.membri.filter(n => n.attivo).length, rich = g.membri.reduce((t, n) => t + (n.richieste || 0), 0);
+        return h("div", { class: "sr-scheda", style: "--hue:" + g.hue },
+          h("div", { class: "sr-testa" }, h("b", {}, g.nome), h("span", {}, attivi + "/" + g.membri.length + " attivi" + (rich ? " · " + rich + " richieste" : ""))),
+          h("div", { class: "sr-membri" }, membri.map(n => h("button", { class: "sr-m" + (n.id === scelto ? " on" : ""), title: n.ruolo || "", onclick: () => mostraScheda(n) },
+            h("i", { style: "background:" + colore(n) }), n.nome))));
+      }))]);
+  };
+  const imposta = (m) => {
+    modello = m; try { localStorage.setItem("org_modello", m); } catch (e) { /* ok */ }
+    selMod.value = m; repFiltro = repFiltro != null && layout && repFiltro >= layout.gruppi.length ? null : repFiltro;
+    if (m === "anelli") rotX = 0.55;
+    disegnaLegenda(); disegnaSchede();
+  };
+  const selMod = h("select", { title: "Modo di visualizzazione" }, MODELLI.map(([v, t]) => h("option", { value: v }, "Vista: " + t)));
+  selMod.value = modello;
+  selMod.addEventListener("change", () => imposta(selMod.value));
+  const cerca = h("input", { type: "search", placeholder: "Cerca un soggetto…", style: "min-width:0" });
+  cerca.addEventListener("input", () => { cercaT = cerca.value.trim().toLowerCase(); disegnaSchede(); });
+
   const ciclo = () => {
     if (!cv.isConnected) return;
-    try { misura(); if (auto && !trascina) { rotY += 0.003; if (rotY > 6.2832) rotY -= 6.2832; } disegnaScena(); } catch (e) { /* un fotogramma sbagliato non ferma il resto */ }
+    try { if (modello === "schede") { requestAnimationFrame(ciclo); return; } misura(); anima(); if (auto && !trascina) { rotY += 0.003; if (rotY > 6.2832) rotY -= 6.2832; } disegnaScena(); } catch (e) { /* un fotogramma sbagliato non ferma il resto */ }
     requestAnimationFrame(ciclo);
   };
 
@@ -298,8 +420,14 @@ function vistaOrganigramma(incorniciata) {
   };
   const chiudiScheda = () => { scelto = null; scheda.style.display = "none"; };
 
-  const disegnaLegenda = () => riempi(legenda, [
-    h("div", {}, h("i", { style: "background:#f3b54a" }), "Lorenzo (centro)"),
+  const scegliReparto = (i) => { repFiltro = repFiltro === i ? null : i; disegnaLegenda(); disegnaSchede(); };
+  const disegnaLegenda = () => riempi(legenda, modello !== "sfera" && layout ? [
+    h("div", {}, h("i", { style: "background:" + SOLE + ";box-shadow:0 0 8px " + SOLE }), "Lorenzo (il sole)"),
+    layout.gruppi.map((g, i) => h("div", { class: "rep" + (repFiltro === i ? " on" : ""), style: "cursor:pointer;" + (repFiltro != null && repFiltro !== i ? "opacity:.45" : ""), onclick: () => scegliReparto(i) },
+      h("i", { style: "background:hsl(" + g.hue + ",68%,60%)" }), g.nome + " (" + g.membri.length + ")")),
+    h("div", { style: "color:#7d8a99" }, "Contorno: verde sereno · giallo pressione · rosso difficoltà · grigio spento"),
+    h("div", { style: "color:#7d8a99" }, "Tocca un reparto per isolarlo")] : [
+    h("div", {}, h("i", { style: "background:" + SOLE }), "Lorenzo (centro)"),
     h("div", {}, h("i", { style: "background:#9a7bd8" }), "Sentinelle (osservano, non intervengono)"),
     h("div", {}, h("i", { style: "background:#3fd3c0" }), "Sereno"),
     h("div", {}, h("i", { style: "background:#f3b54a" }), "Sotto pressione"),
@@ -363,13 +491,15 @@ function vistaOrganigramma(incorniciata) {
     try {
       dati = await api("GET", "/gestione/organigramma");
       layout = calcolaLayout(dati);
+      for (const n of layout.nodi) { const t = n.pos[modello]; n.x = t.x; n.y = t.y; n.z = t.z; }
+      kk = modello === "sfera" ? Math.min(1, 5.0 / layout.ext.sfera) : Math.min(1.3, 5.4 / layout.ext[modello]);
       const corrente = sel.value;
       riempi(sel, [h("option", { value: "" }, "Tutte le aziende"), dati.aziende.filter(z => z.attiva).map(z => h("option", { value: z.id }, z.nome))]);
       sel.value = corrente; azienda = sel.value;
       const cp = selPro.value;
       riempi(selPro, [h("option", { value: "" }, "Tutti i progetti"), (dati.progetti || []).map(z => h("option", { value: z.id }, z.nome))]);
       selPro.value = cp; progetto = selPro.value;
-      disegnaLegenda();
+      disegnaLegenda(); disegnaSchede();
       if (scelto !== null) { const n = layout.per.get(scelto); if (n) mostraScheda(n); }
     } catch (e) { /* ritenta al prossimo giro */ }
   };
@@ -402,7 +532,7 @@ function vistaOrganigramma(incorniciata) {
   }, { passive: true });
   cv.addEventListener("touchend", () => { pinch = 0; });
 
-  scena.append(h("div", { class: "comandi" }, sel, selPro, bRot,
+  scena.append(schedeBox, h("div", { class: "comandi" }, selMod, cerca, sel, selPro, bRot,
     h("button", { class: "s", onclick: () => { rotY = 0.4; rotX = 0.5; zoom = 1; } }, "Centra vista"),
     h("button", { class: "s", onclick: () => vai("impostazioni", "struttura") }, "+ Azienda / reparto"),
     h("button", { class: "s", onclick: () => modulo(null) }, "+ Nuovo agente")), legenda, scheda);

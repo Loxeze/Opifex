@@ -24,6 +24,7 @@ from .memoria_vettoriale import router as router_memvett
 from .documenti_blocco import router as router_blocco
 from .giro_domande import router as router_giro
 from .formazione_auto import router as router_formauto
+from .sfondo_arte import router as router_arte
 from .rotte_squadre import router as router_squadre
 from .rotte_avatar import router as router_avatar
 from .rotte_custode import router as router_custode
@@ -264,6 +265,7 @@ app.include_router(router_memvett)
 app.include_router(router_blocco)
 app.include_router(router_giro)
 app.include_router(router_formauto)
+app.include_router(router_arte)
 app.include_router(router_squadre)
 app.include_router(router_avatar)
 app.include_router(router_custode)

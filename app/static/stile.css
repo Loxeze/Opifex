@@ -298,3 +298,21 @@ table.anteprima{border-collapse:collapse;font-size:12px}table.anteprima th,table
 .casella{display:inline-flex;align-items:center;gap:4px;font-size:13px;cursor:pointer}
 .casella input{width:auto;margin:0}
 .chip-segmento{display:inline-flex;gap:2px}.chip-segmento button:first-child{border-top-right-radius:0;border-bottom-right-radius:0}.chip-segmento button:last-child{border-top-left-radius:0;border-bottom-left-radius:0;padding-left:8px;padding-right:8px}
+
+/* organigramma: vista a schede per reparto */
+.scena .schede-reparti{position:absolute;inset:0;overflow:auto;padding:12px 196px 16px 14px;z-index:1}
+.scena .sr-sole{display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:13px;color:var(--muted,#9fb0c0)}
+.scena .sr-sole i{width:18px;height:18px;border-radius:50%;background:#ffd23a;box-shadow:0 0 18px 4px rgba(255,210,58,.55)}
+.scena .sr-sole b{color:#ffd23a;font-size:15px}
+.scena .sr-griglia{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.scena .sr-scheda{background:rgba(13,17,23,.82);border:1px solid hsla(var(--hue),60%,55%,.45);border-top:3px solid hsl(var(--hue),68%,60%);border-radius:10px;padding:10px 12px}
+.scena .sr-testa{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.scena .sr-testa b{color:hsl(var(--hue),75%,68%);font-size:14px}
+.scena .sr-testa span{font-size:11px;color:#7d8a99}
+.scena .sr-membri{display:flex;flex-wrap:wrap;gap:5px}
+.scena .sr-m{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:12px;border:1px solid hsla(var(--hue),50%,55%,.4);background:hsla(var(--hue),60%,55%,.12);color:inherit;font-size:12px;cursor:pointer}
+.scena .sr-m i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.scena .sr-m.on{outline:2px solid #fff}
+.scena .legenda .rep.on{font-weight:600}
+.scena .comandi input[type=search]{width:100%}
+@media (max-width:760px){.scena .schede-reparti{padding:150px 10px 16px 10px}}
