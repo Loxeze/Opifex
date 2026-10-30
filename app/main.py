@@ -19,6 +19,7 @@ from .rotte_accessi import router as router_accessi
 from .rotte_progetti import router as router_progetti
 from .rotte_scheda import router as router_scheda
 from .rotte_ginnasio import router as router_ginnasio
+from .impara_esempio import router as router_esempio
 from .rotte_squadre import router as router_squadre
 from .rotte_avatar import router as router_avatar
 from .rotte_custode import router as router_custode
@@ -249,6 +250,7 @@ app.include_router(router_utenti)
 app.include_router(router_progetti)
 app.include_router(router_scheda)
 app.include_router(router_ginnasio)
+app.include_router(router_esempio)
 app.include_router(router_squadre)
 app.include_router(router_avatar)
 app.include_router(router_custode)

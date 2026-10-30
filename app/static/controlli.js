@@ -58,3 +58,35 @@ function vistaDiagnostica() {
     h("p", { class: "aiuto" }, "Un unico file con tutto cio' che serve per capire cosa e' andato storto: segnali sospetti in cima, errori, impostazioni e prompt degli agenti, riunioni (cosa e' stato detto, le richieste in coda), task, chiamate ai modelli, spese, notifiche e registro delle azioni. Chiavi, token e password non ci sono mai. Dentro ci sono pero' conversazioni reali: condividilo solo per l'analisi."),
     h("label", {}, "Periodo", ore), h("div", { class: "azioni" }, scarica), msg);
 }
+
+
+function vistaEsempio() {
+  const corpo = h("div"), msg = h("div"), lista = h("div");
+  const agente = h("select", {}), comp = h("input", { maxlength: 100, placeholder: "Nome della competenza, es. Costruire un sito vetrina" });
+  const obiettivo = h("input", { maxlength: 1000, placeholder: "Cosa volevi ottenere (facoltativo ma utile)" });
+  const testo = h("textarea", { style: "min-height:240px", placeholder: "Incolla qui la conversazione (tutta: le tue richieste e le risposte)" });
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/ginnasio/da-esempio");
+      agente.replaceChildren(h("option", { value: "" }, "— scegli l'agente che deve imparare —"), d.agenti.map(a => h("option", { value: a.id }, a.nome + " — " + a.ruolo)));
+      riempi(lista, d.esempi.length ? d.esempi.map(e => h("div", { class: "carta", style: "margin-bottom:6px" }, h("b", {}, e.competenza + " → " + (e.agente || "?")),
+        h("div", { class: "sotto" }, ({ in_studio: "Padre Casati sta studiando…", da_approvare: "Metodo pronto: approvalo in Ginnasio", errore: "Errore: " + (e.errore || "") })[e.stato] + " · " + new Date(e.creato_il).toLocaleString("it-IT") + " · " + e.caratteri + " caratteri"))) : h("p", { class: "sotto" }, "Nessun esempio ancora."));
+    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+  };
+  const invia = h("button", { class: "p", type: "button" }, "Fai studiare a Padre Casati");
+  invia.addEventListener("click", async () => {
+    invia.disabled = true;
+    try {
+      await api("POST", "/gestione/ginnasio/da-esempio", { agente_id: Number(agente.value), competenza: comp.value.trim(), trascrizione: testo.value, obiettivo: obiettivo.value.trim() });
+      msg.replaceChildren(avviso("Esempio ricevuto: Padre Casati lo studia e ti avvisa quando il metodo e' pronto (Ginnasio → bozze da approvare).", "ok"));
+      testo.value = ""; comp.value = ""; obiettivo.value = ""; carica();
+    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+    invia.disabled = false;
+  });
+  carica();
+  const t = setInterval(() => { if (!document.body.contains(lista)) clearInterval(t); else carica(); }, 8000);
+  return h("div", {}, h("h2", {}, "Impara da un esempio"),
+    h("p", { class: "aiuto" }, "Hai ottenuto un buon risultato in una conversazione (per esempio con ChatGPT)? Incollala qui e scegli l'agente: Padre Casati ne ricava un metodo di lavoro (stile, passi, scelte, frasi che hanno funzionato, criteri di qualita', errori da evitare). Lo rivedi e lo approvi in Ginnasio: da quel momento l'agente lavora cosi'. La conversazione e' solo materiale da studiare, non puo' dare ordini al sistema."),
+    h("label", {}, "Agente", agente), h("label", {}, "Competenza", comp), h("label", {}, "Obiettivo", obiettivo), h("label", {}, "Conversazione", testo),
+    h("div", { class: "azioni" }, invia), msg, h("h3", {}, "I tuoi esempi"), lista);
+}
