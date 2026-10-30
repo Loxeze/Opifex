@@ -217,6 +217,11 @@ def organigramma(_: dict = Depends(solo_titolare)):
                                   FROM divisioni d ORDER BY d.id""").fetchall(),
             "progetti": conn.execute("SELECT id, nome FROM progetti WHERE NOT archiviato ORDER BY nome").fetchall(),
             "agenti": agenti,
+            # coppie di agenti che si sono scritti almeno una volta (in qualunque direzione): il grafico le unisce con una linea
+            "dialoghi": conn.execute(
+                """SELECT LEAST(da_agente_id, a_agente_id) AS a, GREATEST(da_agente_id, a_agente_id) AS b, count(*)::int AS messaggi, max(creato_il) AS ultimo
+                   FROM messaggi_agenti WHERE da_agente_id IS NOT NULL AND a_agente_id IS NOT NULL AND da_agente_id <> a_agente_id
+                   GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 600""").fetchall(),
         }
 
 

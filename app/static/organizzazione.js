@@ -288,6 +288,19 @@ function vistaOrganigramma(incorniciata) {
       cx.beginPath(); cx.moveTo(s.p.px, s.p.py); cx.lineTo(n.p.px, n.p.py); cx.stroke();
     }
     cx.globalAlpha = 1;
+    // legami di dialogo: una linea fra due agenti che si sono scritti almeno una volta (piu' messaggi, linea piu' marcata)
+    if (dati && dati.dialoghi && dati.dialoghi.length) {
+      cx.save(); cx.lineCap = "round";
+      for (const d of dati.dialoghi) {
+        const A = layout.per.get(d.a), B = layout.per.get(d.b);
+        if (!A || !B || !A.p || !B.p || !visibile(A) || !visibile(B)) continue;
+        const fo = Math.min(1, Math.log2(1 + d.messaggi) / 5);
+        cx.strokeStyle = "rgba(94,234,212," + (0.38 + 0.4 * fo) + ")"; cx.lineWidth = 1.2 + 1.6 * fo;
+        cx.shadowColor = "rgba(94,234,212,.6)"; cx.shadowBlur = 6;
+        cx.beginPath(); cx.moveTo(A.p.px, A.p.py); cx.lineTo(B.p.px, B.p.py); cx.stroke();
+      }
+      cx.restore();
+    }
     disegnaImpulsi();
     const ord = layout.nodi.slice().sort((a, b) => b.p.z - a.p.z);
     const daEtichettare = [];
@@ -383,9 +396,14 @@ function vistaOrganigramma(incorniciata) {
   const cerca = h("input", { type: "search", placeholder: "Cerca un soggetto…", style: "min-width:0" });
   cerca.addEventListener("input", () => { cercaT = cerca.value.trim().toLowerCase(); disegnaSchede(); });
 
+  // rotazione lenta e uguale su ogni schermo: un giro completo in circa 3 minuti
+  const VELOCITA_ROT = 0.035;
+  let tPrima = performance.now();
   const ciclo = () => {
     if (!cv.isConnected) return;
-    try { if (modello === "schede") { requestAnimationFrame(ciclo); return; } misura(); anima(); if (auto && !trascina) { rotY += 0.003; if (rotY > 6.2832) rotY -= 6.2832; } disegnaScena(); } catch (e) { /* un fotogramma sbagliato non ferma il resto */ }
+    const tAdesso = performance.now();
+    try { if (modello === "schede") { requestAnimationFrame(ciclo); return; } misura(); anima(); if (auto && !trascina) { rotY += Math.min(0.1, (tAdesso - tPrima) / 1000) * VELOCITA_ROT; if (rotY > 6.2832) rotY -= 6.2832; } disegnaScena(); } catch (e) { /* un fotogramma sbagliato non ferma il resto */ }
+    tPrima = tAdesso;
     requestAnimationFrame(ciclo);
   };
 
@@ -434,6 +452,7 @@ function vistaOrganigramma(incorniciata) {
     h("div", {}, h("i", { style: "background:#e8795a" }), "In difficoltà"),
     h("div", {}, h("i", { style: "background:#4b5563" }), "Spento"),
     dati ? dati.aziende.filter(z => z.attiva).map(z => h("div", {}, h("i", { style: "background:transparent;border:2px solid " + z.colore }), z.nome)) : null,
+    h("div", { style: "color:#7d8a99" }, "Linea verde acqua: due agenti che si sono scritti"),
     h("div", { style: "color:#7d8a99" }, "I raggi di luce mostrano i messaggi in tempo reale"),
     h("div", { style: "color:#7d8a99" }, "Trascina: ruota · rotella: zoom · tocca un punto")]);
 
