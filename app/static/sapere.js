@@ -204,5 +204,31 @@ function vistaStudi() {
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
   carica();
-  return h("div", {}, h("h2", {}, "Studi di Padre Casati"), msg, corpo);
+  return h("div", {}, h("h2", {}, "Studi di Padre Casati"), pannelloFormazioneAuto(), msg, corpo);
+}
+
+function pannelloFormazioneAuto() {
+  const box = h("div"), msg = h("div");
+  const studi = h("input", { type: "checkbox" }), minimo = h("input", { type: "checkbox" }), giorni = h("input", { type: "number", min: 0, max: 90, style: "width:70px" });
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/formazione-auto");
+      studi.checked = d.studi_automatici; minimo.checked = d.minimo_attivo; if (document.activeElement !== giorni) giorni.value = d.giorni;
+      riempi(box, [
+        d.ginnasio_attivo ? null : avviso("Il Ginnasio è spento: le richieste di formazione restano in coda finché non lo accendi (Impostazioni → Conoscenza → Ginnasio).", "avv"),
+        h("p", { class: "sotto" }, "Studi in coda o in corso: " + d.studi_in_coda + (d.giri.length ? " · ultimo giro di formazione: " + ({ in_corso: "in corso…", concluso: "concluso", errore: "errore " + (d.giri[0].errore || "") })[d.giri[0].stato] + (d.giri[0].stato === "concluso" ? " (" + d.giri[0].interrogati + " agenti, " + d.giri[0].richieste + " richieste)" : "") : " · nessun giro ancora")),
+        d.minimi_mancanti.length ? h("details", {}, h("summary", {}, d.minimi_mancanti.length + " competenze necessarie ancora al livello zero (formazione prioritaria)"), d.minimi_mancanti.map(m => h("div", { class: "sotto" }, m.agente + " → " + m.competenza))) : h("p", { class: "sotto" }, "Nessuna competenza necessaria è al livello zero.")]);
+    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+  };
+  const salva = async () => { try { await api("PUT", "/gestione/formazione-auto/impostazioni", { studi_automatici: studi.checked, giorni: Number(giorni.value), minimo_attivo: minimo.checked }); msg.replaceChildren(avviso("Salvato.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } };
+  const giroOra = h("button", { class: "s", type: "button" }, "Fai il giro di formazione ora");
+  giroOra.addEventListener("click", async () => { giroOra.disabled = true; try { await api("POST", "/gestione/formazione-auto/giro"); msg.replaceChildren(avviso("Giro avviato: Padre Casati interroga gli agenti in sottofondo.", "ok")); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } giroOra.disabled = false; });
+  const salvaB = h("button", { class: "s", type: "button" }, "Salva"); salvaB.addEventListener("click", salva);
+  carica();
+  const t = setInterval(() => { if (!document.body.contains(box)) clearInterval(t); else carica(); }, 20000);
+  return h("details", { class: "carta", style: "margin-bottom:12px" }, h("summary", {}, "Coda e formazione automatiche"),
+    h("p", { class: "aiuto" }, "Gli studi approvati partono da soli, uno dopo l'altro. Quando la coda è finita, Padre Casati chiede a ogni agente quali competenze gli servono e quali vorrebbe approfondire: le richieste vanno in Ginnasio. Chi non ha almeno il livello 1 in una competenza necessaria viene formato per primo."),
+    h("label", { class: "interruttore" }, studi, h("span", {}, "Le proposte di studio entrano da sole in coda (senza la tua approvazione)")),
+    h("label", { class: "interruttore" }, minimo, h("span", {}, "Livello minimo 1 sulle competenze necessarie, con precedenza")),
+    h("label", {}, "Giro di formazione ogni quanti giorni (0 = mai in automatico)", giorni), h("div", { class: "azioni" }, salvaB, giroOra), msg, box);
 }

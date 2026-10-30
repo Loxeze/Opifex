@@ -23,6 +23,7 @@ from .impara_esempio import router as router_esempio
 from .memoria_vettoriale import router as router_memvett
 from .documenti_blocco import router as router_blocco
 from .giro_domande import router as router_giro
+from .formazione_auto import router as router_formauto
 from .rotte_squadre import router as router_squadre
 from .rotte_avatar import router as router_avatar
 from .rotte_custode import router as router_custode
@@ -155,6 +156,8 @@ async def _manutenzione():
         _passo("ginnasio", ginnasio.giro)
         _passo("memoria vettoriale", lambda c: __import__("app.memoria_vettoriale", fromlist=["x"]).indicizza(c))
         _passo("relazioni tra documenti", lambda c: __import__("app.memoria_vettoriale", fromlist=["x"]).relaziona(c))
+        _passo("studi in coda", lambda c: __import__("app.studio", fromlist=["x"]).giro(c))
+        _passo("formazione automatica", lambda c: __import__("app.formazione_auto", fromlist=["x"]).giro(c))
         _passo("giro di aggiornamento", lambda c: __import__("app.giro_domande", fromlist=["x"]).giro(c))
         _passo("miglioramento degli agenti (Padre Casati)", miglioramento.giro)
         _passo("controllo dipendenze", lambda c: dipendenze.controlla(c) if dipendenze.da_fare(c) else None)
@@ -260,6 +263,7 @@ app.include_router(router_esempio)
 app.include_router(router_memvett)
 app.include_router(router_blocco)
 app.include_router(router_giro)
+app.include_router(router_formauto)
 app.include_router(router_squadre)
 app.include_router(router_avatar)
 app.include_router(router_custode)

@@ -37,7 +37,7 @@ def crea(d: Nuovo, u: dict = Depends(solo_titolare)):
         except studio.ErroreStudio as e:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
         registro.registra(conn, u, "biblioteca", "studio avviato", d.tema[:150], "studio", i)
-    studio.avvia(i)
+    studio.avanza()
     return {"id": i}
 
 
@@ -55,7 +55,7 @@ def decidi(studio_id: int, d: Decisione, u: dict = Depends(solo_titolare)):
         t = conn.execute("SELECT tema FROM studi WHERE id = %s", (studio_id,)).fetchone()["tema"]
         registro.registra(conn, u, "biblioteca", "studio approvato" if nuovo == "approvato" else "studio scartato", t[:150], "studio", studio_id)
     if nuovo == "approvato":
-        studio.avvia(studio_id)
+        studio.avanza()
     return {"stato": nuovo}
 
 

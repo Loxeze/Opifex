@@ -42,9 +42,41 @@ def proponi(conn, tema: str, origine: str, motivo: str | None = None, *, riferim
         (t, (motivo or "").strip()[:1500] or None, origine, (riferimento or "")[:300] or None, documento_id, divisione_id, agente_id,
          "approvato" if da_utente else "proposto", da_utente)).fetchone()
     if not da_utente:
-        conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
-                     (f"Padre Casati propone di studiare «{t[:100]}» ({origine}): da approvare in Impostazioni → Studi.",))
+        if automatico(conn):   # la coda parte da sola: la proposta entra subito in coda (il limite giornaliero resta)
+            conn.execute("UPDATE studi SET stato = 'approvato', deciso_il = NOW() WHERE id = %s", (r["id"],))
+        else:
+            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
+                         (f"Padre Casati propone di studiare «{t[:100]}» ({origine}): da approvare in Impostazioni → Studi.",))
     return r["id"]
+
+
+def automatico(conn) -> bool:
+    r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'studi_automatici'").fetchone()
+    return (r["valore"] if r else "1") == "1"
+
+
+def avanza() -> int | None:
+    """Mette in lavorazione il prossimo studio approvato, se nessuno e' in corso. Gli studi vanno uno dopo l'altro, nell'ordine di arrivo."""
+    with connessione() as conn:
+        conn.execute("UPDATE studi SET stato = 'errore', errore = 'Interrotto: nessuna risposta dopo 40 minuti', concluso_il = NOW() WHERE stato = 'in_corso' AND COALESCE(avviato_il, deciso_il, creato_il) < NOW() - interval '40 minutes'")
+        r = conn.execute("""UPDATE studi SET stato = 'in_corso', avviato_il = NOW() WHERE id = (SELECT id FROM studi WHERE stato = 'approvato' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
+                            AND NOT EXISTS (SELECT 1 FROM studi WHERE stato = 'in_corso') RETURNING id""").fetchone()
+        conn.commit()
+    if r is None:
+        try:   # coda vuota: e' il momento di chiedere agli agenti cosa vogliono approfondire
+            from . import formazione_auto
+            formazione_auto.dopo_coda()
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+    avvia(r["id"], preso=True)
+    return r["id"]
+
+
+def giro(conn):
+    """Dal lavoro di fondo: se la coda e' ferma (nessuno in corso) fa partire il prossimo."""
+    conn.commit()
+    avanza()
 
 
 def da_documento(conn, documento_id: int, nome: str, divisione_id=None) -> int | None:
@@ -106,11 +138,11 @@ def decidi(conn, studio_id: int, approva: bool) -> str:
     return nuovo
 
 
-def avvia(studio_id: int):
+def avvia(studio_id: int, preso: bool = False):
     if SINCRONO:
-        _lavora(studio_id)
+        _lavora(studio_id, preso)
     else:
-        threading.Thread(target=_lavora, args=(studio_id,), daemon=True).start()
+        threading.Thread(target=_lavora, args=(studio_id, preso), daemon=True).start()
 
 
 def _prompt(conn, s: dict) -> str:
@@ -133,17 +165,27 @@ def _parti(testo: str) -> tuple[str, str]:
     return testo.strip()[:9000], re.sub(r"\s+", " ", sintesi)[:600]
 
 
-def _lavora(studio_id: int):
+def _lavora(studio_id: int, preso: bool = False):
+    try:
+        _studia(studio_id, preso)
+    finally:
+        try:
+            avanza()   # finito (o fallito) questo, parte il successivo
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _studia(studio_id: int, preso: bool = False):
     from .esecuzione import esegui_agente
     with connessione() as conn:
-        s = conn.execute("SELECT * FROM studi WHERE id = %s AND stato = 'approvato'", (studio_id,)).fetchone()
+        s = conn.execute("SELECT * FROM studi WHERE id = %s AND stato = %s", (studio_id, "in_corso" if preso else "approvato")).fetchone()
         if s is None:
             return
         cas = conn.execute("SELECT id FROM agenti WHERE ruolo_speciale = 'formatore' AND attivo LIMIT 1").fetchone()
         if cas is None:
             conn.execute("UPDATE studi SET stato = 'errore', errore = 'Padre Casati non e'' attivo', concluso_il = NOW() WHERE id = %s", (studio_id,))
             return
-        conn.execute("UPDATE studi SET stato = 'in_corso' WHERE id = %s", (studio_id,))
+        conn.execute("UPDATE studi SET stato = 'in_corso', avviato_il = COALESCE(avviato_il, NOW()) WHERE id = %s", (studio_id,))
         prompt = _prompt(conn, s)
         conn.commit()
     try:

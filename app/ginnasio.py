@@ -125,6 +125,8 @@ def richiedi(conn, competenza: str, livello: int, *, agente_id=None, motivo: str
 def punteggio(conn, r: dict) -> int:
     """Quanto e' in alto in graduatoria: urgenza, ruolo di chi va formato (PM e manager per primi), peso, attesa, scadenze del progetto, riequilibrio tra reparti."""
     p = r["urgenza"] * 100 + (r["peso"] - 1) * 25
+    if r.get("minimo"):
+        p += 10000   # competenza necessaria ancora al livello zero: passa avanti a tutto
     if r["agente_id"]:
         p += {"pm": 300, "manager": 200}.get(ruolo_agente(conn, r["agente_id"]), 0)
     p += min(60, max(0, (datetime.now(timezone.utc) - r["creata_il"]).days) * 5)
@@ -147,7 +149,7 @@ def coda(conn) -> list[dict]:
     for r in righe:
         r["punteggio"] = punteggio(conn, r)
         r["stima_token"] = stima(conn, r["livello"])
-    righe.sort(key=lambda r: (r["ordine_manuale"] is None, r["ordine_manuale"] if r["ordine_manuale"] is not None else 0, -r["punteggio"], r["id"]))
+    righe.sort(key=lambda r: (not r.get("minimo"), r["ordine_manuale"] is None, r["ordine_manuale"] if r["ordine_manuale"] is not None else 0, -r["punteggio"], r["id"]))
     return righe
 
 
