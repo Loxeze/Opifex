@@ -8,6 +8,7 @@ from .db import connessione
 MAX_CARATTERI = 4500
 MAX_ORA = 150
 MODELLO = "eleven_multilingual_v2"
+MODELLO_VELOCE = "eleven_turbo_v2_5"   # riunioni: parte a voce molto prima, italiano compreso
 
 
 class ErroreVoce(Exception):
@@ -59,7 +60,7 @@ def voci(conn) -> list[dict]:
     return [{"id": v["voice_id"], "nome": v.get("name", "?")} for v in r.json().get("voices", [])][:60]
 
 
-def sintetizza(testo: str, fascia: str = "interno", utente_id: int | None = None, voce_id: str | None = None) -> bytes:
+def sintetizza(testo: str, fascia: str = "interno", utente_id: int | None = None, voce_id: str | None = None, veloce: bool = False) -> bytes:
     testo = (testo or "").strip()
     if not testo:
         raise ErroreVoce("Niente da leggere", 422)
@@ -77,8 +78,8 @@ def sintetizza(testo: str, fascia: str = "interno", utente_id: int | None = None
             raise ErroreVoce("Troppe letture in un'ora: riprova piu' tardi", 429)
         chiave = _chiave(conn)
     try:
-        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voce_id}", params={"output_format": "mp3_44100_128"},
-                       headers={"xi-api-key": chiave, "content-type": "application/json"}, json={"text": testo, "model_id": MODELLO, "voice_settings": {"stability": 0.42, "similarity_boost": 0.8, "style": 0.25, "use_speaker_boost": True}}, timeout=90)
+        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voce_id}", params={"output_format": "mp3_44100_64" if veloce else "mp3_44100_128"},
+                       headers={"xi-api-key": chiave, "content-type": "application/json"}, json={"text": testo, "model_id": MODELLO_VELOCE if veloce else MODELLO, "voice_settings": {"stability": 0.42, "similarity_boost": 0.8, "style": 0.25, "use_speaker_boost": True}}, timeout=90)
     except httpx.HTTPError as e:
         raise ErroreVoce(f"ElevenLabs non raggiungibile ({type(e).__name__})", 502) from None
     if r.status_code != 200:

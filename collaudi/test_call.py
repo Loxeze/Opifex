@@ -58,7 +58,7 @@ aur = ID("Aurora")
 sql("UPDATE agenti SET livello='manager' WHERE id IN (%s,%s)", (marco, dario))
 ve.voci = lambda conn: [{"id": "v1", "nome": "Anna"}, {"id": "v2", "nome": "Bruno"}, {"id": "v3", "nome": "Carla"}]
 chiamate = []
-def finto_sintetizza(testo, fascia="interno", utente_id=None, voce_id=None):
+def finto_sintetizza(testo, fascia="interno", utente_id=None, voce_id=None, veloce=False):
     chiamate.append(voce_id); return b"ID3audio"
 ve.sintetizza = finto_sintetizza
 with TestClient(app) as c:
@@ -86,18 +86,19 @@ with TestClient(app) as c:
     ok("in riunione i manager usano il modello scelto per le riunioni, non quello dell'agente", modelli_visti and set(modelli_visti) == {"claude-opus-5-5"}, str(set(modelli_visti)))
     ok("il prompt vieta le conferme tipo «ho preso nota»", "VIETATO dire o far capire di aver registrato" in ultimi_msg[1] and "COME RISPONDI" in ultimi_msg[1] and "UNA domanda giusta" in ultimi_msg[1] and "Il ragionamento lo fai dentro di te" in ultimi_msg[1])
     q = c.get("/gestione/riunioni-call/qualita", headers=H).json()
-    ok("qualita' riunioni: di default il modello migliore col ragionamento alto", q["modello"] == "claude-opus-5-5" and q["sforzo"] == "high" and "claude-opus-5-5" in q["modelli"], str(q))
+    ok("qualita' riunioni: di default il modello migliore col ragionamento medio", q["modello"] == "claude-opus-5-5" and q["sforzo"] == "medium" and "claude-opus-5-5" in q["modelli"], str(q))
     ok("qualita' riunioni: modifica e controlli", c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-sonnet-5-5", "sforzo": "medium"}).status_code == 200
        and c.get("/gestione/riunioni-call/qualita", headers=H).json()["modello"] == "claude-sonnet-5-5"
        and c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "inventato"}).status_code == 422
        and c.put("/gestione/riunioni-call/qualita", headers=H, json={"sforzo": "enorme"}).status_code == 422
        and c.get("/gestione/riunioni-call/qualita", headers=HC).status_code == 403)
-    c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-opus-5-5", "sforzo": "high"})
+    c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-opus-5-5", "sforzo": "medium"})
     sql("UPDATE agenti SET modello_riunione='claude-haiku-5-5' WHERE id=%s", (dario,))
     copione[:] = [fine("Uno."), fine("Due.")]; modelli_visti.clear()
     c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Che programma facciamo per l'estate?"})
     ok("un agente con modello_riunione proprio lo usa, gli altri il globale", modelli_visti[:2] == ["claude-opus-5-5", "claude-haiku-5-5"], str(modelli_visti))
     sql("UPDATE agenti SET modello_riunione=NULL WHERE id=%s", (dario,))
+    ok("voce veloce nelle riunioni: modello turbo e parti spezzate", "veloce: true" in c.get("/app/riunioni_call.js").text and "spezza(testo)" in c.get("/app/riunioni_call.js").text and ve.MODELLO_VELOCE == "eleven_turbo_v2_5")
     ok("sql/103 Aurora/Elena su Sonnet", all(r[0] == "claude-sonnet-5-5" for r in sql("SELECT modello FROM agenti WHERE lower(nome) IN ('aurora','elena')")))
     ok("un'indicazione che nomina un manager lo interpella", call_riunioni.nominati_espliciti("Marco segui il sito", [{"nome": "Marco"}]) and not call_riunioni.nominati_espliciti("Il budget e' alto", [{"nome": "Marco"}]))
     ok("non e' piu' occupato", d["occupato"] is False)
@@ -174,7 +175,7 @@ with TestClient(app) as c:
     ok("errore di trascrizione riportato al browser (per passare al riconoscimento del browser)", c.post(f"/gestione/riunioni-call/{tid}/audio", headers=H, files=f).status_code == 409)
     ok("limite orario dedicato alle call", "limite_ora=MAX_ASCOLTI_ORA" in open("app/call_riunioni.py").read() and call_riunioni.MAX_ASCOLTI_ORA >= 600)
     ok("ElevenLabs: niente voce robotica di ripiego e precarico", all(k in c.get("/app/riunioni_call.js").text for k in ("precarica", "mancata")))
-    ok("scrittura/ascolto: il client ha il motore continuo", all(k in c.get("/app/riunioni_call.js").text for k in ("echoCancellation", "ora - ultimaVoce > 1300", "bloccato", "/audio", "SpeechRecognition")))
+    ok("scrittura/ascolto: il client ha il motore continuo", all(k in c.get("/app/riunioni_call.js").text for k in ("echoCancellation", "ora - ultimaVoce > 750", "bloccato", "/audio", "SpeechRecognition")))
 
     # voci
     vm = c.get("/gestione/voci-manager", headers=H).json()

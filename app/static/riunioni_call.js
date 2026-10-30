@@ -2,7 +2,7 @@
 // Riunioni vocali con i manager (Chat → Riunioni): si creano, si lancia la call, ogni manager risponde con la sua voce.
 
 const CallVoce = {
-  server: false, attiva: true, audio: null, sbloccato: false, mancata: false, risolvi: null, errore: "", bloccato: false,
+  server: false, attiva: true, audio: null, sbloccato: false, mancata: false, risolvi: null, errore: "", bloccato: false, fermato: false,
   el: null, ctxA: null, elOk: false, ctxOk: false,
   SILENZIO: "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=",
   elemento() {   // UN solo elemento audio, tenuto nella pagina: una volta sbloccato da un tocco, il telefono lo lascia suonare anche piu' tardi
@@ -57,26 +57,38 @@ const CallVoce = {
     const k = agenteId + "|" + testo;
     if (!this.cache.has(k)) {
       this.cache.set(k, (async () => {
-        const r = await fetch("/voce/leggi", { method: "POST", headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) }, body: JSON.stringify({ testo: testo.slice(0, 4400), agente_id: agenteId }) });
+        const r = await fetch("/voce/leggi", { method: "POST", headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) }, body: JSON.stringify({ testo: testo.slice(0, 4400), agente_id: agenteId, veloce: true }) });
         if (!r.ok) { let m = "voce non disponibile"; try { m = (await r.json()).detail || m; } catch (e) { /* ok */ } throw new Error(m); }
         return await r.blob();
       })());
     }
     return this.cache.get(k);
   },
-  precarica(agenteId, testo) { if (this.server && this.attiva) this.scarica(agenteId, testo).catch(() => {}); },
+  spezza(testo) {   // 2-3 parti a fine frase: la prima corta (parte prima), le altre piu' lunghe
+    const frasi = testo.match(/[^.!?…]+[.!?…]*\s*/g) || [testo], parti = [];
+    let cur = "", soglia = 90;
+    for (const f of frasi) { cur += f; if (cur.length >= soglia) { parti.push(cur.trim()); cur = ""; soglia = 260; } }
+    if (cur.trim()) { if (parti.length && cur.trim().length < 40) parti[parti.length - 1] += " " + cur.trim(); else parti.push(cur.trim()); }
+    return parti.length ? parti : [testo];
+  },
+  precarica(agenteId, testo) { if (this.server && this.attiva) this.spezza(testo).forEach(p => this.scarica(agenteId, p).catch(() => {})); },
   async parla(agenteId, testo) {
     if (!this.attiva) return;
     this.bloccato = false;
     if (this.server) {
       try {
-        const blob = await this.scarica(agenteId, testo);
-        this.cache.delete(agenteId + "|" + testo);
-        const esito = await this.suona(blob);
-        if (esito === "bloccato") { this.bloccato = true; return; }
-        if (esito === "ok") return;
-        this.errore = "audio non riproducibile";
-      } catch (e) { this.cache.delete(agenteId + "|" + testo); this.errore = (e && e.message) || "voce non disponibile"; }
+        const parti = this.spezza(testo);   // la prima frase parte subito, le altre si preparano mentre si ascolta
+        parti.forEach(p => this.scarica(agenteId, p).catch(() => {}));
+        for (const p of parti) {
+          const blob = await this.scarica(agenteId, p);
+          this.cache.delete(agenteId + "|" + p);
+          const esito = await this.suona(blob);
+          if (esito === "bloccato") { this.bloccato = true; return; }
+          if (esito !== "ok") { this.errore = "audio non riproducibile"; this.mancata = true; return; }
+          if (!this.attiva || this.fermato) return;
+        }
+        return;
+      } catch (e) { this.cache.clear(); this.errore = (e && e.message) || "voce non disponibile"; }
       this.mancata = true;   // ElevenLabs e' collegato: niente voce robotica al suo posto, si dice cosa non va
       return;
     }
@@ -91,7 +103,7 @@ const CallVoce = {
       setTimeout(() => { if (!partita && !speechSynthesis.speaking) { speechSynthesis.cancel(); this.bloccato = true; this.risolvi = null; ok(); } }, 3000);   // il telefono non lo lascia partire senza un tocco
     });
   },
-  ferma() { if (this.audio) { try { this.audio.pause(); } catch (e) { /* ok */ } this.audio = null; } if (this.risolvi) { const f = this.risolvi; this.risolvi = null; f(); } if ("speechSynthesis" in window) speechSynthesis.cancel(); },
+  ferma() { this.fermato = true; setTimeout(() => { this.fermato = false; }, 400); if (this.audio) { try { this.audio.pause(); } catch (e) { /* ok */ } this.audio = null; } if (this.risolvi) { const f = this.risolvi; this.risolvi = null; f(); } if ("speechSynthesis" in window) speechSynthesis.cancel(); },
 };
 
 ["pointerdown", "touchstart", "touchend", "keydown", "click"].forEach(ev => document.addEventListener(ev, () => CallVoce.sblocca(), { passive: true }));
@@ -107,7 +119,7 @@ function pannelloQualita() {
       sf.value = d.sforzo || "";
       const salva = async () => { try { await api("PUT", "/gestione/riunioni-call/qualita", { modello: mod.value, sforzo: sf.value }); msg.replaceChildren(avviso("Salvato: vale dalla prossima risposta.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } };
       mod.addEventListener("change", salva); sf.addEventListener("change", salva);
-      riempi(box, [h("p", { class: "aiuto" }, "Qui i manager rispondono col modello più capace e ragionano a fondo (consigliato: claude-opus-5-5, ragionamento alto). Costa di più e le risposte arrivano un po' più lentamente; per risparmiare scegli un modello più leggero."),
+      riempi(box, [h("p", { class: "aiuto" }, "Qui i manager rispondono col modello più capace e ragionano a fondo (consigliato: claude-opus-5-5, ragionamento medio: intelligente e veloce). «Alto» ragiona di più ma risponde più lentamente; fuori dalle riunioni ogni agente usa il suo modello."),
         h("div", { class: "riga", style: "align-items:center;gap:8px;flex-wrap:wrap" }, h("span", { style: "min-width:150px" }, "Modello"), mod), h("div", { class: "riga", style: "align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px" }, h("span", { style: "min-width:150px" }, "Ragionamento"), sf)]);
     } catch (e) { box.replaceChildren(avviso(e.message, "no")); }
   })();
@@ -263,7 +275,7 @@ function schermataCall(tid, esci) {
       } else rumore = rumore * 0.96 + rms * 0.04;
     } else {
       if (rms > soglia) ultimaVoce = ora;
-      if (ora - ultimaVoce > 1300 || ora - inizioReg > 60000) { chiudiRegistrazione(); }
+      if (ora - ultimaVoce > 750 || ora - inizioReg > 60000) { chiudiRegistrazione(); }
     }
   };
   const passaABrowser = () => {
@@ -312,13 +324,13 @@ function schermataCall(tid, esci) {
     try {
       const d = await api("GET", "/gestione/riunioni-call/" + tid + "?dopo=" + ultimo);
       riunione = riunione || d; occupato = d.occupato; bCoda.textContent = "Richieste in coda" + (d.in_coda ? " (" + d.in_coda + ")" : ""); bCoda.disabled = !d.in_coda;
-      for (const i of d.interventi) { ultimo = Math.max(ultimo, i.id); if (!i.da_utente) { riga(nomeDi(i.agente_id), i.testo, false); coda.push(i); } }
+      for (const i of d.interventi) { ultimo = Math.max(ultimo, i.id); if (!i.da_utente) { riga(nomeDi(i.agente_id), i.testo, false); coda.push(i); CallVoce.precarica(i.agente_id, i.testo); } }
       if (coda.length) riproduci();
       if (!occupato && inAttesa) { const t = inAttesa; inAttesa = ""; manda(t, false); }
       aggiornaStato();
       if (d.stato === "conclusa" || d.stato === "errore") { vivo = false; arresta(); mostraVerbale(d); return; }
     } catch (e) { stato.textContent = e.message; }
-    setTimeout(sondaggio, 1200);
+    setTimeout(sondaggio, occupato || parlando || trascrivendo ? 450 : 1000);
   };
   const mostraVerbale = (d) => { stato.textContent = ""; barra.style.width = "0%"; riempi(msg, [h("h3", {}, "Verbale"), h("div", { class: "risposta", style: "white-space:pre-wrap" }, d.verbale || "Il verbale non è disponibile." )]); };
   bInvia.addEventListener("click", () => { const t = campo.value; campo.value = ""; invia(t); });

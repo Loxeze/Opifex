@@ -1,3 +1,4 @@
 requests==2.32.3
 Pillow==11.0.0
 pillow-heif==0.20.0
+pypdf==5.1.0

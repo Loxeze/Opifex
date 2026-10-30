@@ -17,6 +17,6 @@ services:
       - |
         set -e
         command -v ffmpeg >/dev/null || (apt-get update && apt-get install -y --no-install-recommends ffmpeg)
-        python -c "import requests, PIL" 2>/dev/null || pip install --no-cache-dir requests==2.32.3 Pillow==11.0.0 pillow-heif==0.20.0
+        python -c "import requests, PIL, pypdf" 2>/dev/null || pip install --no-cache-dir requests==2.32.3 Pillow==11.0.0 pillow-heif==0.20.0 pypdf==5.1.0
         python -c "import os,urllib.request as u;r=u.Request(os.environ['OPIFEX_URL']+'/archivio-nas/connettore/programma',headers={'Authorization':'Bearer '+os.environ['OPIFEX_TOKEN']});open('/tmp/opifex_nas.py','wb').write(u.urlopen(r,timeout=60).read())"
         exec python -u /tmp/opifex_nas.py

@@ -14,10 +14,10 @@ from .permessi import solo_titolare
 router = APIRouter(prefix="/gestione", tags=["riunioni"])
 SINCRONO = False
 MAX_PARTECIPANTI = 8
-MAX_TOKEN_RISPOSTA = 1500
+MAX_TOKEN_RISPOSTA = 700
 NIENTE = "niente da aggiungere"
 MODELLO_RIUNIONI = "claude-opus-5-5"
-SFORZO_RIUNIONI = "high"
+SFORZO_RIUNIONI = "medium"   # Opus con ragionamento medio: intelligente ma risponde in pochi secondi
 REGOLE_STILE_BREVE = "diretto, tra colleghi; mai dire di aver registrato, annotato o preso nota."
 
 STILE = ("si parla come in una conversazione vocale tra colleghi che si capiscono al volo: dritti al punto, sulla sostanza, nel tono di chi sa gia' cosa fare. "
@@ -261,7 +261,7 @@ def _rispondi(tid: int, ids: list[int]):
                       "- Il ragionamento lo fai dentro di te: a voce porti solo la conclusione, precisa e puntuale, con al massimo il perche' in una frase. Mai raccontare i passaggi, i dubbi o cio' che stai valutando. Prendi posizione e dai la tua raccomandazione. Se vedi un rischio, un'alternativa migliore o un errore nel ragionamento di Lorenzo, diglielo con franchezza e rispetto.\n"
                       "- Usa quello che sai: documenti, progetti e fatti dell'organizzazione, e i tuoi strumenti (cerca davvero prima di dire che non sai). Cifre, nomi e date concreti; mai inventare: se manca un dato, di' quale e dove lo prenderesti.\n"
                       "- Capisci il contesto prima di rispondere: cosa sta cercando di ottenere Lorenzo, a che punto e' il progetto, cosa e' gia' stato deciso. Se ti manca qualcosa di decisivo, fai UNA domanda giusta e specifica (quella che sblocca la decisione, mai una domanda generica o ovvia) invece di indovinare.\n"
-                      "- Lunghezza naturale: una o due frasi per le cose semplici, fino a una decina di frasi parlate per quelle complesse. Italiano parlato e scorrevole, senza elenchi e senza markdown.\n"
+                      "- Lunghezza naturale: una o due frasi per le cose semplici, al massimo cinque o sei frasi parlate per quelle complesse. Italiano parlato e scorrevole, senza elenchi e senza markdown.\n"
                       "- Non ripetere cio' che hanno gia' detto gli altri: se concordi aggiungi solo cio' che manca. Dai un parere dalla tua competenza, non dalla loro.\n"
                       f"- Se davvero non hai nulla di utile da aggiungere rispondi esattamente «{NIENTE.capitalize()}».\n"
                       "Se hai una segnalazione importante ma fuori dal tema del momento, scrivila in una riga finale che inizia con «CODA:» (al massimo due frasi): Lorenzo la sentira' quando chiedera' le richieste in coda.")

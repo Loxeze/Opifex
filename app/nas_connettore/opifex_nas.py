@@ -7,6 +7,8 @@ e qualche miniatura. Gli originali non si muovono, tranne su richiesta esplicita
 """
 import io
 import json
+import re
+import zipfile
 import logging
 import os
 import subprocess
@@ -24,7 +26,15 @@ try:
 except Exception:  # noqa: BLE001
     pass
 
-VERSIONE = "1.1"
+try:
+    import pypdf  # noqa: F401 - per leggere i PDF; se manca (compose vecchio) lo installo da solo
+except ImportError:
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", "-q", "pypdf==5.1.0"], timeout=300, capture_output=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+VERSIONE = "1.2"
 URL = os.environ.get("OPIFEX_URL", "").rstrip("/")
 TOKEN = os.environ.get("OPIFEX_TOKEN", "")
 DATI = Path(os.environ.get("OPIFEX_DATI", "/dati"))
@@ -35,6 +45,8 @@ SEGMENTO_S = 480  # audio a pezzi da 8 minuti (mp3 mono 32 kbps: ~2 MB)
 EST_FOTO = (".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".heic", ".heif", ".bmp", ".gif", ".dng", ".cr2", ".cr3", ".nef", ".arw", ".orf", ".raf", ".rw2")
 EST_VIDEO = (".mp4", ".mov", ".mxf", ".mkv", ".avi", ".mts", ".m2ts", ".mpg", ".mpeg", ".webm", ".m4v", ".mp4v", ".braw")
 EST_AUDIO = (".wav", ".mp3", ".m4a", ".aif", ".aiff", ".flac", ".aac", ".ogg")
+EST_DOC = (".pdf", ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".txt", ".md", ".csv", ".rtf", ".html", ".htm", ".xml", ".json", ".srt", ".vtt")
+MAX_TESTO = 150_000
 SALTA = {"@eadir", "#recycle", ".thumbnails", "$recycle.bin", "system volume information", "@recently-snapshot", ".@__thumb"}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
@@ -54,7 +66,7 @@ def chiama(metodo: str, percorso: str, **kw):
 
 def tipo_di(nome: str):
     n = nome.lower()
-    return "foto" if n.endswith(EST_FOTO) else "video" if n.endswith(EST_VIDEO) else "audio" if n.endswith(EST_AUDIO) else None
+    return "foto" if n.endswith(EST_FOTO) else "video" if n.endswith(EST_VIDEO) else "audio" if n.endswith(EST_AUDIO) else "documento" if n.endswith(EST_DOC) else None
 
 
 # ---------------- miniature e schede ----------------
@@ -164,12 +176,64 @@ def scheda_audio(p: Path):
         return {}, []
 
 
+# ---------------- documenti scritti ----------------
+def _da_xml(b: bytes) -> str:
+    t = b.decode("utf-8", "replace")
+    t = re.sub(r"</(w:p|a:p|text:p|text:h|row|si)>", "\n", t)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&apos;", "'")
+    return re.sub(r"[ \t]+", " ", t)
+
+
+def testo_documento(p: Path) -> str:
+    n = p.name.lower()
+    if p.stat().st_size > 80 * 1024 * 1024:
+        return ""
+    if n.endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            return ""
+        out, tot = [], 0
+        for pg in PdfReader(str(p)).pages:
+            t = pg.extract_text() or ""
+            out.append(t); tot += len(t)
+            if tot > MAX_TESTO:
+                break
+        return "\n".join(out)
+    if n.endswith((".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp")):
+        with zipfile.ZipFile(p) as z:
+            nomi = z.namelist()
+            if n.endswith(".docx"):
+                parti = ["word/document.xml"]
+            elif n.endswith(".xlsx"):
+                parti = ["xl/sharedStrings.xml"]
+            elif n.endswith(".pptx"):
+                parti = sorted((x for x in nomi if re.match(r"ppt/slides/slide\d+\.xml$", x)), key=lambda x: int(re.findall(r"\d+", x)[-1]))
+            else:
+                parti = ["content.xml"]
+            out, tot = [], 0
+            for x in parti:
+                if x in nomi:
+                    t = _da_xml(z.read(x)); out.append(t); tot += len(t)
+                    if tot > MAX_TESTO:
+                        break
+            return "\n".join(out)
+    raw = p.read_bytes()[: MAX_TESTO * 2]
+    t = raw.decode("utf-8", "replace") if b"\x00" not in raw[:2000] else raw.decode("utf-16", "replace")
+    if n.endswith((".html", ".htm", ".xml")):
+        t = _da_xml(t.encode())
+    elif n.endswith(".rtf"):
+        t = re.sub(r"\\[a-z]+-?\d* ?|[{}]", " ", t)
+    return t
+
+
 # ---------------- scansione ----------------
 def elenca(radice: Path):
     for cartella, sotto, files in os.walk(radice):
         sotto[:] = [d for d in sorted(sotto) if d.lower() not in SALTA and not d.startswith(".")]
         for f in sorted(files):
-            if f.startswith(".") or not tipo_di(f):
+            if f.startswith(".") or f.startswith("~$") or not tipo_di(f):
                 continue
             p = Path(cartella) / f
             try:
@@ -182,13 +246,18 @@ def elenca(radice: Path):
 def invia_file(cid: int, radice: Path, rel: str) -> bool:
     p = radice / rel
     t = tipo_di(rel)
+    contenuto = ""
     try:
-        meta, mini = scheda_foto(p) if t == "foto" else scheda_video(p) if t == "video" else scheda_audio(p)
+        if t == "documento":
+            meta, mini = {}, []
+            contenuto = re.sub(r"\n\s*\n+", "\n", testo_documento(p))[:MAX_TESTO]
+        else:
+            meta, mini = scheda_foto(p) if t == "foto" else scheda_video(p) if t == "video" else scheda_audio(p)
     except Exception as e:  # noqa: BLE001 - file illeggibile: lo si annuncia comunque, senza miniatura
         log.warning("Scheda non letta per %s: %s", rel, type(e).__name__)
         meta, mini = {}, []
     files = [("miniature", (f"m{i}.jpg", b, "image/jpeg")) for i, b in enumerate(mini)]
-    chiama("POST", "/file", data={"cartella_id": cid, "rel": rel, "meta": json.dumps(meta)}, files=files or None, timeout=180)
+    chiama("POST", "/file", data={"cartella_id": cid, "rel": rel, "meta": json.dumps(meta), "contenuto": contenuto}, files=files or None, timeout=180)
     return True
 
 

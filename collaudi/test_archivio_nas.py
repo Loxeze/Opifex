@@ -66,7 +66,7 @@ with TestClient(app) as c:
     ok("config: cartelle e intervallo", cfg["cartelle"][0]["id"] == kid and cfg["intervallo"] == 900 and cfg["richieste"] == [])
     ok("connettore online", c.get("/gestione/archivio", headers=H).json()["connettori"][0]["online"] is True)
     el = [{"rel": "Montarrenti/torre.jpg", "size": 100, "mtime": 1700000000}, {"rel": "Montarrenti/intervista.mp4", "size": 900, "mtime": 1700000001},
-          {"rel": "../evasione.jpg", "size": 1, "mtime": 1}, {"rel": "note.txt", "size": 1, "mtime": 1}]
+          {"rel": "../evasione.jpg", "size": 1, "mtime": 1}, {"rel": "programma.exe", "size": 1, "mtime": 1}]
     s = c.post("/archivio-nas/connettore/sincronizza", headers=N, json={"cartella_id": kid, "scan": 1, "file": el}).json()
     ok("servono solo i file validi", sorted(s["servono"]) == ["Montarrenti/intervista.mp4", "Montarrenti/torre.jpg"], str(s))
     f = c.post("/archivio-nas/connettore/file", headers=N, data={"cartella_id": kid, "rel": "Montarrenti/torre.jpg", "meta": json.dumps({"larghezza": 4000, "altezza": 3000, "scattato_il": "2024-07-01T19:30:00", "fotocamera": "Sony A7", "luogo": {"lat": 43.2, "lon": 11.3}})},
@@ -131,6 +131,14 @@ with TestClient(app) as c:
     ok("strumento: lettura scheda", "Torre" in g("archivio_leggi", {"id": fid}))
     ok("strumento: trascrizione di una foto rifiutata", "ERRORE" in g("archivio_richiedi", {"id": fid, "tipo": "trascrizione"}))
     ok("strumento: richiesta foto", "accodata" in g("archivio_richiedi", {"id": fid, "tipo": "foto", "lato_max": 1600}))
+    sd = c.post("/archivio-nas/connettore/sincronizza", headers=N, json={"cartella_id": kid, "scan": 5, "file": [{"rel": "Bandi/relazione.docx", "size": 500, "mtime": 1700000009}]}).json()
+    ok("i documenti scritti vengono richiesti al connettore", sd["servono"] == ["Bandi/relazione.docx"], str(sd))
+    fd = c.post("/archivio-nas/connettore/file", headers=N, data={"cartella_id": kid, "rel": "Bandi/relazione.docx", "meta": "{}", "contenuto": "Relazione finale sul progetto Simposia.\nIl budget complessivo del castello ammonta a quarantamila euro. Simposia Simposia."})
+    ok("documento ricevuto e subito analizzato (nessun costo AI)", fd.status_code == 200 and sql("SELECT stato, tipo FROM archivio_file WHERE rel='Bandi/relazione.docx'") == [("analizzato", "documento")], fd.text[:200])
+    ok("il documento si trova dal contenuto", "relazione.docx" in g("archivio_cerca", {"testo": "quarantamila euro", "tipo": "documento"}))
+    ok("l'agente legge il testo del documento", "quarantamila euro" in g("archivio_leggi", {"id": sql("SELECT id FROM archivio_file WHERE rel='Bandi/relazione.docx'")[0][0]}))
+    ok("la descrizione del documento e' l'inizio del testo e ha parole chiave", sql("SELECT descrizione LIKE 'Relazione finale%%', 'simposia' = ANY(etichette) FROM archivio_file WHERE rel='Bandi/relazione.docx'") == [(True, True)])
+    ok("la lista cartelle conta i documenti", c.get("/gestione/archivio", headers=H).json()["cartelle"][0]["documenti"] == 1)
     ok("strumento: parametri sbagliati", g("archivio_leggi", {"id": "x"}).startswith("ERRORE"))
     ok("gli strumenti sono nel catalogo", {s["name"] for s in an.STRUMENTI} == {"archivio_cerca", "archivio_leggi", "archivio_richiedi"})
     ok("cartella errore dal connettore", c.post("/archivio-nas/connettore/fine-scansione", headers=N, json={"cartella_id": kid, "scan": 0, "errore": "non trovata"}).status_code == 200
@@ -146,7 +154,7 @@ nas = importlib.util.module_from_spec(spec); spec.loader.exec_module(nas)
 d = pathlib.Path(tempfile.mkdtemp())
 (d / "Progetto A").mkdir(); (d / "@eaDir").mkdir(); (d / ".nascosta").mkdir()
 im = Image.new("RGB", (3000, 2000), (10, 80, 160)); ex = Image.Exif(); ex[271] = "Sony"; ex[272] = "A7"; ex[306] = "2024:07:01 19:30:00"; im.save(d / "Progetto A" / "foto.jpg", exif=ex)
-(d / "@eaDir" / "x.jpg").write_bytes(jpg()); (d / ".nascosta" / "y.jpg").write_bytes(jpg()); (d / "Progetto A" / "nota.txt").write_text("x")
+(d / "@eaDir" / "x.jpg").write_bytes(jpg()); (d / ".nascosta" / "y.jpg").write_bytes(jpg()); (d / "Progetto A" / "nota.exe").write_text("x")
 subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=duration=3:size=640x360:rate=25", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-shortest", "-pix_fmt", "yuv420p", str(d / "Progetto A" / "clip.mp4")], check=True)
 trovati = sorted(r[0] for r in nas.elenca(d))
 ok("scansione: solo foto e video, senza cartelle di sistema", trovati == ["Progetto A/clip.mp4", "Progetto A/foto.jpg"], str(trovati))
@@ -165,4 +173,13 @@ ok("richiesta fuori da /dati rifiutata", bloccato)
 ok("nessun segreto nel programma del connettore", "ar_" not in open("app/nas_connettore/opifex_nas.py").read().replace('startswith("ar_")', ""))
 ok("il connettore scansiona subito le cartelle nuove (non aspetta l'intervallo)", 'c["id"] not in ultima' in open("app/nas_connettore/opifex_nas.py").read() and "ultima: dict[int, float]" in open("app/nas_connettore/opifex_nas.py").read())
 ok("sezione presente nell'interfaccia", "vistaArchivio" in open("app/static/dashboard.js").read() and "archivio_nas.js" in open("app/static/index.html").read() and "archivioAttivo" in open("app/static/app.js").read())
+(d / "Progetto A" / "memo.txt").write_text("Appunti sul bando Arthur: scadenza a novembre.", encoding="utf-8")
+with zipfile.ZipFile(d / "Progetto A" / "lettera.docx", "w") as zz:
+    zz.writestr("word/document.xml", "<w:document><w:p><w:t>Gentile Direttore &amp; amici</w:t></w:p><w:p><w:t>proroga richiesta</w:t></w:p></w:document>")
+with zipfile.ZipFile(d / "Progetto A" / "dati.xlsx", "w") as zz:
+    zz.writestr("xl/sharedStrings.xml", "<sst><si><t>Totale spese</t></si><si><t>Castello</t></si></sst>")
+ok("il connettore legge un file di testo", "scadenza a novembre" in nas.testo_documento(d / "Progetto A" / "memo.txt"))
+ok("il connettore legge un Word", "Gentile Direttore & amici" in nas.testo_documento(d / "Progetto A" / "lettera.docx") and "proroga richiesta" in nas.testo_documento(d / "Progetto A" / "lettera.docx"))
+ok("il connettore legge un Excel", "Totale spese" in nas.testo_documento(d / "Progetto A" / "dati.xlsx"))
+ok("il connettore elenca i documenti e salta i file temporanei di Office", {"memo.txt", "lettera.docx"} <= {r[0].rsplit("/", 1)[-1] for r in nas.elenca(d)} and nas.tipo_di("a.docx") == "documento")
 print("TOTALE", sum(ris), "/", len(ris))

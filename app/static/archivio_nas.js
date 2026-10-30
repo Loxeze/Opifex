@@ -33,7 +33,7 @@ function vistaArchivio() {
     const conn = h("select", {}, dati.connettori.map(c => h("option", { value: c.id }, c.nome)));
     const nome = h("input", { maxlength: 80, placeholder: "Nome (es. Montarrenti video)" });
     const perc = h("input", { maxlength: 300, placeholder: "Percorso sotto /dati (es. Video/Montarrenti), vuoto = tutto" });
-    const tipo = h("select", {}, [["misto", "Foto e video"], ["foto", "Solo foto"], ["video", "Solo video"]].map(([v, t]) => h("option", { value: v }, t)));
+    const tipo = h("select", {}, [["misto", "Foto, video e documenti"], ["foto", "Solo foto"], ["video", "Solo video"]].map(([v, t]) => h("option", { value: v }, t)));
     const pref = h("input", { maxlength: 300, placeholder: "Percorso sul PC (es. \\\\UGREEN\\Video oppure Z:\\Video)" });
     const prog = h("select", {}, h("option", { value: "" }, "Progetto: riconosci dal nome delle cartelle"), dati.progetti.map(p => h("option", { value: p.id }, p.nome)));
     const descr = h("input", { type: "checkbox" }); descr.checked = true;
@@ -51,7 +51,7 @@ function vistaArchivio() {
   const rigaCartella = (k) => h("div", { class: "carta", style: "margin-top:8px" },
     h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, h("b", {}, k.nome), h("span", { class: "etichetta" }, "/dati/" + (k.percorso || "")), h("span", { class: "etichetta " + (k.attiva ? "ok" : "no") }, k.attiva ? "attiva" : "sospesa"),
       k.errore ? h("span", { class: "etichetta no", title: k.errore }, "errore") : null),
-    h("div", { class: "sotto" }, `${k.totale} file (${k.foto} foto, ${k.video} video) · ${k.descritti} descritti · ${k.in_attesa} in attesa` + (k.ultima_scansione ? " · ultima scansione " + new Date(k.ultima_scansione).toLocaleString("it-IT") : " · non ancora scansionata")),
+    h("div", { class: "sotto" }, `${k.totale} file (${k.foto} foto, ${k.video} video, ${k.documenti || 0} documenti) · ${k.descritti} descritti · ${k.in_attesa} in attesa` + (k.ultima_scansione ? " · ultima scansione " + new Date(k.ultima_scansione).toLocaleString("it-IT") : " · non ancora scansionata")),
     k.errore ? h("div", { class: "sotto" }, k.errore) : null,
     h("div", { class: "azioni" },
       h("button", { class: "s", type: "button", onclick: async () => { try { await api("PUT", "/gestione/archivio/cartelle/" + k.id, { attiva: !k.attiva }); carica(); } catch (e) { err(e); } } }, k.attiva ? "Sospendi" : "Riattiva"),
@@ -69,7 +69,7 @@ function vistaArchivio() {
   };
 
   const q = h("input", { placeholder: "Cerca: soggetto, luogo, progetto, nome del file…", style: "flex:1;min-width:180px" });
-  const tipoQ = h("select", {}, [["", "Tutto"], ["foto", "Foto"], ["video", "Video"], ["audio", "Audio"]].map(([v, t]) => h("option", { value: v }, t)));
+  const tipoQ = h("select", {}, [["", "Tutto"], ["foto", "Foto"], ["video", "Video"], ["audio", "Audio"], ["documento", "Documenti"]].map(([v, t]) => h("option", { value: v }, t)));
   const oriQ = h("select", {}, [["", "Ogni formato"], ["verticale", "Verticale"], ["orizzontale", "Orizzontale"], ["quadrata", "Quadrata"]].map(([v, t]) => h("option", { value: v }, t)));
   const cercaBtn = h("button", { class: "p", type: "button" }, "Cerca");
   const lancia = async () => {
@@ -102,7 +102,7 @@ function vistaArchivio() {
   async function carica() {
     try { dati = await api("GET", "/gestione/archivio");
       riempi(stato, [
-        h("p", { class: "aiuto" }, "Le foto e i video restano sul tuo NAS: a Opifex arrivano solo schede e miniature. Gli agenti dei reparti Contenuti e Social possono cercare nell'archivio e chiedere al NAS una foto pronta per un post."),
+        h("p", { class: "aiuto" }, "Foto, video e documenti restano sul tuo NAS: a Opifex arrivano solo schede, miniature e il testo dei documenti (PDF, Word, Excel, PowerPoint, testo) per poterli cercare. Gli agenti dei reparti Contenuti e Social possono cercare nell'archivio e chiedere al NAS una foto pronta per un post."),
         dati.connettori.length ? dati.connettori.map(c => h("div", { class: "carta", style: "margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap" },
           h("b", {}, c.nome), h("span", { class: "etichetta " + (c.online ? "ok" : "no") }, c.online ? "online" : "non collegato"),
           h("span", { class: "sotto" }, c.ultimo_contatto ? "ultimo contatto " + new Date(c.ultimo_contatto).toLocaleString("it-IT") + (c.versione ? " · v" + c.versione : "") : "mai collegato"), pacchetto(c),
