@@ -266,3 +266,70 @@ function vistaContenuti() {
     campo("Nome dello stile", nome), campo("Tipo", tipo), campo("Note", nota), campo("File (XML, fcpxml, EDL, SRT/VTT, testo)", files),
     campo("Oppure documenti già in memoria (tieni premuto per sceglierne più d'uno)", docs), campo("Testo incollato", testo), campo("Video YouTube", urls), h("div", { class: "azioni" }, crea), msgS, schedaBox, lista);
 }
+
+// ---------- Profili social monitorati ----------
+function vistaMonitorSocial() {
+  const msg = h("div"), lista = h("div"), rapporti = h("div"), testoRapporto = h("div");
+  const num = (n) => n === null || n === undefined ? "—" : Number(n).toLocaleString("it-IT");
+  const piatt = h("select", {}, ["instagram", "youtube", "facebook", "linkedin", "altro"].map(v => h("option", { value: v }, v.charAt(0).toUpperCase() + v.slice(1))));
+  const indirizzo = h("input", { maxlength: 300, placeholder: "Indirizzo del profilo oppure @nome" }), nome = h("input", { maxlength: 120, placeholder: "Nome (facoltativo)" });
+  const proprio = h("input", { type: "checkbox" });
+  const aggiungi = h("button", { class: "p", type: "button" }, "Aggiungi il profilo");
+  const ytK = h("input", { type: "password", placeholder: "Chiave YouTube Data API", autocomplete: "off" }), mTok = h("input", { type: "password", placeholder: "Token Meta (Instagram Graph API)", autocomplete: "off" });
+  const mId = h("input", { placeholder: "ID account Instagram professionale (numero)" });
+  const ore = h("input", { type: "number", min: 1, max: 168, style: "width:70px" }), gg = h("input", { type: "number", min: 0, max: 60, style: "width:70px" });
+  const salva = h("button", { class: "s", type: "button" }, "Salva collegamenti e frequenze");
+  const stCol = h("div", { class: "sotto" });
+  const err = (e) => msg.replaceChildren(avviso(e.message, "no"));
+  aggiungi.addEventListener("click", async () => {
+    try { const r = await api("POST", "/gestione/social-monitor/profili", { piattaforma: piatt.value, indirizzo: indirizzo.value, nome: nome.value, proprio: proprio.checked });
+      indirizzo.value = ""; nome.value = ""; msg.replaceChildren(avviso(r.automatico ? "Aggiunto: provo a raccogliere i dati." : "Aggiunto. Per questa piattaforma i dati si inseriscono a mano (o li legge l'Analista dalle statistiche che incolli).", "ok"));
+      if (r.automatico) { try { await api("POST", "/gestione/social-monitor/profili/" + r.id + "/raccogli"); } catch (e) { err(e); } } carica();
+    } catch (e) { err(e); }
+  });
+  salva.addEventListener("click", async () => {
+    const b = { ore: Number(ore.value), giorni_rapporto: Number(gg.value) };
+    if (ytK.value.trim()) b.youtube_chiave = ytK.value; if (mTok.value.trim()) b.meta_token = mTok.value; if (mId.value.trim()) b.meta_ig_id = mId.value;
+    try { await api("PUT", "/gestione/social-monitor/collegamenti", b); ytK.value = ""; mTok.value = ""; msg.replaceChildren(avviso("Salvato.", "ok")); carica(); } catch (e) { err(e); }
+  });
+  const rilev = (p) => {
+    const s = h("input", { type: "number", min: 0, placeholder: "Seguaci", style: "width:110px" }), t = h("textarea", { rows: 3, placeholder: "Incolla qui le statistiche (esportazione, numeri dei post, note)" });
+    const ok = h("button", { class: "p", type: "button" }, "Salva la rilevazione");
+    ok.addEventListener("click", async () => { try { await api("POST", "/gestione/social-monitor/profili/" + p.id + "/rilevazione", { seguaci: s.value === "" ? null : Number(s.value), testo: t.value }); carica(); } catch (e) { err(e); } });
+    return h("div", { class: "carta", style: "margin-top:6px" }, h("div", { style: "display:flex;gap:6px;flex-wrap:wrap" }, s, ok), t);
+  };
+  const apriRapporto = async (id) => { try { const r = await api("GET", "/gestione/social-monitor/rapporti/" + id);
+    testoRapporto.replaceChildren(h("div", { class: "carta" }, h("pre", { style: "white-space:pre-wrap;font:inherit" }, r.testo || (r.errore ? "Errore: " + r.errore : "In preparazione…")), h("button", { class: "s", type: "button", onclick: () => testoRapporto.replaceChildren() }, "Chiudi"))); } catch (e) { err(e); } };
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/social-monitor");
+      if (document.activeElement !== ore) ore.value = d.ore; if (document.activeElement !== gg) gg.value = d.giorni_rapporto;
+      stCol.textContent = "YouTube: " + (d.collegamenti.youtube ? "collegato" : "non collegato") + " · Instagram: " + (d.collegamenti.instagram ? "collegato" : "non collegato") + ". Facebook e LinkedIn: solo rilevazioni inserite a mano.";
+      riempi(lista, d.profili.length ? d.profili.map(p => {
+        const u = p.ultima, tr = (p.storico || []).length > 1 ? (p.storico[p.storico.length - 1] - p.storico[0]) : null;
+        const box = h("div", { class: "carta", style: "margin-bottom:8px" },
+          h("b", {}, p.nome), " · " + p.piattaforma + (p.proprio ? " · nostro" : " · seguito") + (p.azienda ? " · " + p.azienda : ""),
+          h("div", { class: "sotto" }, u ? "Seguaci " + num(u.seguaci) + " · contenuti " + num(u.contenuti) + (u.visualizzazioni ? " · visualizzazioni " + num(u.visualizzazioni) : "") + (tr !== null ? " · da " + p.storico.length + " rilevazioni: " + (tr >= 0 ? "+" : "") + tr : "") + " · " + new Date(u.rilevata_il).toLocaleDateString("it-IT") + " (" + u.origine + ")" : "Nessuna rilevazione ancora."),
+          p.errore ? h("div", { class: "sotto", style: "color:#e8795a" }, p.errore) : null);
+        const az = h("div", { class: "azioni" });
+        if (["youtube", "instagram"].includes(p.piattaforma)) az.append(h("button", { class: "s", type: "button", onclick: async () => { try { await api("POST", "/gestione/social-monitor/profili/" + p.id + "/raccogli"); msg.replaceChildren(); } catch (e) { err(e); } carica(); } }, "Raccogli ora"));
+        let aperto = null;
+        az.append(h("button", { class: "s", type: "button", onclick: () => { if (aperto) { aperto.remove(); aperto = null; } else { aperto = rilev(p); box.append(aperto); } } }, "Inserisci rilevazione"));
+        az.append(h("button", { class: "s", type: "button", onclick: async () => { if (!confirm("Togliere «" + p.nome + "» dal monitoraggio (con le sue rilevazioni)?")) return; try { await api("DELETE", "/gestione/social-monitor/profili/" + p.id); carica(); } catch (e) { err(e); } } }, "Togli"));
+        box.append(az); return box;
+      }) : h("p", { class: "sotto" }, "Nessun profilo ancora."));
+      riempi(rapporti, d.rapporti.map(r => h("div", { class: "sotto" }, new Date(r.creato_il).toLocaleString("it-IT") + " · " + ({ in_corso: "in preparazione…", pronto: "pronto", errore: "errore" })[r.stato] + " (" + r.origine + ") ", h("a", { href: "#", onclick: ev => { ev.preventDefault(); apriRapporto(r.id); } }, "apri"))));
+    } catch (e) { err(e); }
+  };
+  const rapp = h("button", { class: "p", type: "button" }, "Prepara il rapporto ora"), imp = h("button", { class: "s", type: "button" }, "Aggiungi i canali collegati a Buffer");
+  rapp.addEventListener("click", async () => { try { await api("POST", "/gestione/social-monitor/rapporto"); msg.replaceChildren(avviso("Rapporto in preparazione: compare qui sotto fra poco.", "ok")); setTimeout(carica, 4000); } catch (e) { err(e); } });
+  imp.addEventListener("click", async () => { try { const r = await api("POST", "/gestione/social-monitor/importa-canali"); msg.replaceChildren(avviso(r.aggiunti + " canali aggiunti come «nostri».", "ok")); carica(); } catch (e) { err(e); } });
+  carica();
+  const t = setInterval(() => { if (!document.body.contains(lista)) clearInterval(t); else if (!["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) carica(); }, 20000);
+  return h("div", {}, h("h2", {}, "Profili social monitorati"),
+    h("p", { class: "aiuto" }, "Indica i profili (tuoi e di altri) che il reparto Social deve seguire: l'Analista ne rileva seguaci e contenuti, confronta l'andamento e scrive un rapporto con le raccomandazioni. Per YouTube e Instagram i dati arrivano dalle API ufficiali; per Facebook e LinkedIn non esiste un accesso ufficiale ai dati di altri, quindi si inseriscono a mano."),
+    h("h3", {}, "Nuovo profilo"), h("label", {}, "Piattaforma", piatt), h("label", {}, "Indirizzo o @nome", indirizzo), h("label", {}, "Nome", nome), h("label", {}, proprio, " È un profilo nostro (su cui operiamo)"), h("div", { class: "azioni" }, aggiungi, imp), msg,
+    h("h3", {}, "Profili"), lista, h("h3", {}, "Rapporti"), h("div", { class: "azioni" }, rapp), rapporti, testoRapporto,
+    h("h3", {}, "Collegamenti e frequenza"), stCol, h("p", { class: "aiuto" }, "YouTube: crea una chiave «YouTube Data API v3» (gratuita) nella console Google Cloud. Instagram: serve un account Instagram professionale collegato a una pagina Facebook e un'app Meta; il token e l'ID dell'account si ricavano da lì. Le chiavi si conservano cifrate e non vengono mai mostrate."),
+    ytK, mTok, mId, h("label", {}, "Raccogli ogni (ore)", ore), h("label", {}, "Rapporto automatico ogni (giorni, 0 = mai)", gg), h("div", { class: "azioni" }, salva));
+}

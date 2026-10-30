@@ -97,7 +97,7 @@ def stato(conn) -> list[dict]:
 
 
 # In fase di prova i reparti nuovi girano su Haiku (costo basso); i revisori restano sul modello migliore
-PROVA_ECONOMICA = ("editoria", "social", "ricerca")
+PROVA_ECONOMICA = ("editoria", "social", "ricerca", "contenuti")
 MODELLO_PROVA = "claude-haiku-5-5"
 
 
