@@ -199,6 +199,10 @@ async def _trigger_orari():
 async def ciclo_vita(app: FastAPI):
     import asyncio
     apri_pool()
+    if not os.environ.get("OPIFEX_SENZA_LIBRERIE"):
+        import threading as _th
+        from . import dipendenze as _dip
+        _th.Thread(target=_dip.assicura_librerie, daemon=True).start()   # librerie mancanti dopo un aggiornamento: si installano da sole
     try:
         from . import percorsi
         percorsi.recupera_interrotti()

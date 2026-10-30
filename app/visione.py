@@ -87,3 +87,43 @@ def leggi(immagini: list[tuple[str, bytes]], fascia: str = "interno") -> str:
     if not testo:
         raise VisioneNonDisponibile("Nell'immagine non ho trovato nulla da leggere")
     return testo
+
+
+def chiedi(immagini: list[tuple[str, bytes]], istruzione: str, richiesta: str, fascia: str = "interno", modello_preferito: str = "", max_token: int = 600) -> str:
+    """Come leggi(), ma con istruzione e richiesta proprie (usata dall'archivio per descrivere foto e fotogrammi). Il costo e' registrato."""
+    if not immagini:
+        raise VisioneNonDisponibile("Nessuna immagine")
+    k = fornitori.chiave("anthropic")
+    if not k:
+        raise VisioneNonDisponibile("Serve la chiave Anthropic per leggere le immagini")
+    with connessione() as conn:
+        modello = None
+        if modello_preferito and conn.execute("SELECT 1 FROM modelli_ai WHERE nome = %s", (modello_preferito,)).fetchone():
+            f = conn.execute("SELECT fascia_dati_max AS ff, non_conservazione_attiva AS nc, dpa_firmato AS dpa FROM fornitori_ai WHERE nome='anthropic'").fetchone()
+            if f and riservatezza.puo_uscire(fascia, "riservato", f["ff"], f["nc"], f["dpa"])[0]:
+                modello = modello_preferito
+        if modello is None:
+            modello = _modello(conn, fascia)
+    blocchi = []
+    for mime, dati in immagini[:MAX_IMMAGINI]:
+        m, b64 = _prepara(dati, mime)
+        blocchi.append({"type": "image", "source": {"type": "base64", "media_type": m, "data": b64}})
+    blocchi.append({"type": "text", "text": richiesta})
+    corpo = {"model": modello, "max_tokens": max_token, "system": istruzione, "messages": [{"role": "user", "content": blocchi}]}
+    r = fornitori.invia("https://api.anthropic.com/v1/messages",
+                        {"x-api-key": k, "anthropic-version": "2023-06-01", "content-type": "application/json"}, corpo, 120)
+    if r.status_code != 200:
+        raise VisioneNonDisponibile(f"Lettura immagine non riuscita ({r.status_code})")
+    d = r.json()
+    testo = "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text").strip()
+    try:
+        with connessione() as conn:
+            pr = conn.execute("SELECT costo_input_per_milione AS ci, costo_output_per_milione AS co FROM modelli_ai WHERE nome=%s", (modello,)).fetchone()
+            ti, to = d["usage"]["input_tokens"], d["usage"]["output_tokens"]
+            costo = (float(pr["ci"] or 0) * ti + float(pr["co"] or 0) * to) / 1_000_000 if pr else 0
+            conn.execute("INSERT INTO costi_api (agente_id, modello, token_input, token_output, costo_stimato) VALUES (NULL,%s,%s,%s,%s)", (modello, ti, to, costo))
+    except Exception:
+        pass
+    if not testo:
+        raise VisioneNonDisponibile("Nessuna risposta dal modello")
+    return testo

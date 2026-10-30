@@ -170,7 +170,7 @@ function vistaGiro() {
         ok.addEventListener("click", () => r.value.trim() && manda("/gestione/giro/domande/" + q.id + "/risposta", { risposta: r.value }));
         r.addEventListener("keydown", e => { if (e.key === "Enter") ok.click(); });
         no.addEventListener("click", () => manda("/gestione/giro/domande/" + q.id + "/salta"));
-        return h("div", { class: "carta", style: "margin-bottom:8px" }, h("b", {}, q.agente + " chiede: " + q.domanda), h("div", { style: "display:flex;gap:6px;margin-top:6px" }, r, ok, no));
+        return h("div", { class: "carta", style: "margin-bottom:8px" }, h("b", {}, q.agente + " chiede: " + q.domanda), h("div", { style: "display:flex;gap:6px;margin-top:6px" }, r, bottoneMic(r, msg), ok, no));
       }) : h("p", { class: "sotto" }, "Nessun giro aperto."));
       riempi(fatti, d.fatti.length ? d.fatti.map(f => h("div", { class: "sotto", style: "margin-bottom:4px" }, f.testo + " ",
         h("a", { href: "#", onclick: async ev => { ev.preventDefault(); try { await api("DELETE", "/gestione/giro/fatti/" + f.id); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "togli"))) : h("p", { class: "sotto" }, "Ancora nessun fatto."));
@@ -183,11 +183,11 @@ function vistaGiro() {
   const aggiungi = h("button", { class: "s", type: "button" }, "Aggiungi");
   aggiungi.addEventListener("click", async () => { if (nuovo.value.trim().length < 5) return; try { await api("POST", "/gestione/giro/fatti", { testo: nuovo.value }); nuovo.value = ""; carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } });
   carica();
-  const t = setInterval(() => { if (!document.body.contains(corpo)) clearInterval(t); else if (document.activeElement.tagName !== "INPUT") carica(); }, 15000);
+  const t = setInterval(() => { if (!document.body.contains(corpo)) clearInterval(t); else if (document.activeElement.tagName !== "INPUT" && !(typeof Voce !== "undefined" && Voce.inAscolto && Voce.inAscolto())) carica(); }, 15000);
   return h("div", {}, h("h2", {}, "Giro di aggiornamento"),
     h("p", { class: "aiuto" }, "Ogni tanto Aurora e i manager ti fanno poche domande brevissime sulle strutture e sui progetti (relazioni con un ente, a che punto è un progetto). Le tue risposte diventano fatti che tutti gli agenti ricevono. Puoi rispondere a voce con la dettatura del telefono."),
     h("label", {}, "Ogni quanti giorni (0 = mai in automatico)", giorni), h("div", { class: "azioni" }, salva, avvia), msg,
-    h("h3", {}, "Domande"), corpo, h("h3", {}, "Cosa sanno ora tutti gli agenti"), h("div", { style: "display:flex;gap:6px" }, nuovo, aggiungi), fatti);
+    h("h3", {}, "Domande"), corpo, h("h3", {}, "Cosa sanno ora tutti gli agenti"), h("div", { style: "display:flex;gap:6px" }, nuovo, bottoneMic(nuovo, msg), aggiungi), fatti);
 }
 
 // ---------- Contenuti: brief e stili di montaggio ----------

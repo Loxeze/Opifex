@@ -1,6 +1,9 @@
 """Controllo delle dipendenze: una volta a settimana confronta le librerie in uso (requirements.txt) con il database pubblico delle vulnerabilita' OSV.
 Se ne trova, avvisa Lorenzo con nome, versione e identificativo; non aggiorna nulla da solo."""
+import importlib.metadata
 import json
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -74,3 +77,39 @@ def stato(_: dict = Depends(solo_titolare)):
 def controlla_ora(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         return controlla(conn)
+
+
+def mancanti(percorso: Path | None = None) -> list[tuple[str, str]]:
+    """Librerie di requirements.txt non installate in questo ambiente (puo' succedere se l'aggiornamento non ha potuto installarle)."""
+    out = []
+    for n, v in librerie(percorso):
+        try:
+            importlib.metadata.version(n)
+        except importlib.metadata.PackageNotFoundError:
+            out.append((n, v))
+    return out
+
+
+def assicura_librerie(percorso: Path | None = None, installa=None) -> dict:
+    """All'avvio: se manca qualche libreria richiesta, la installa nell'ambiente dell'app (stesse versioni di requirements.txt) e avvisa Lorenzo.
+    Le librerie si caricano al primo uso, quindi di solito non serve riavviare. Mai installato nulla che non sia nell'elenco."""
+    m = mancanti(percorso)
+    if not m:
+        return {"mancanti": [], "esito": "ok"}
+    elenco = [f"{n}=={v}" for n, v in m]
+    try:
+        if installa is not None:
+            esito = installa(elenco)
+        else:
+            r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check", *elenco], capture_output=True, text=True, timeout=900)
+            esito = "ok" if r.returncode == 0 else (r.stderr or r.stdout or "errore")[-200:]
+    except Exception as e:  # noqa: BLE001
+        esito = f"{type(e).__name__}: {e}"[:200]
+    try:
+        with connessione() as conn:
+            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (
+                ("Ho installato le librerie mancanti: " + ", ".join(n for n, _ in m) + "." if esito == "ok"
+                 else "Mancano delle librerie (" + ", ".join(n for n, _ in m) + ") e non sono riuscito a installarle da solo: " + str(esito)[:150]),))
+    except Exception:
+        pass
+    return {"mancanti": [n for n, _ in m], "esito": esito}
