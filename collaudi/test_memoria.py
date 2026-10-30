@@ -42,10 +42,10 @@ ID = lambda n: sql("SELECT id FROM agenti WHERE nome=%s", (n,))[0][0]
 with TestClient(app) as c:
     H = {"Authorization": "Bearer " + c.post("/login", json={"email": "l@p.it", "password": "PasswordLunga!2026"}).json()["token"]}
     aurora, scout, marco = ID("Aurora"), ID("Scout"), ID("Marco")
-    ok("Aurora vede tutto e usa Drive di default; Scout no", sql("SELECT vede_tutto, drive_attivo FROM agenti WHERE id=%s", (aurora,))[0] == (True, True)
-       and sql("SELECT vede_tutto, drive_attivo FROM agenti WHERE id=%s", (scout,))[0] == (False, False))
+    ok("Aurora vede tutto; Drive per tutti (senza vede_tutto per Scout)", sql("SELECT vede_tutto, drive_attivo FROM agenti WHERE id=%s", (aurora,))[0] == (True, True)
+       and sql("SELECT vede_tutto, drive_attivo FROM agenti WHERE id=%s", (scout,))[0] == (False, True))
     ag = {a["nome"]: a for a in c.get("/gestione/agenti", headers=H).json()}
-    ok("l'elenco espone vede_tutto e drive_attivo", ag["Aurora"]["vede_tutto"] is True and ag["Scout"]["drive_attivo"] is False)
+    ok("l'elenco espone vede_tutto e drive_attivo", ag["Aurora"]["vede_tutto"] is True and ag["Scout"]["drive_attivo"] is True)
     ok("si possono accendere dal modulo", c.put(f"/gestione/agenti/{scout}", headers=H, json={"drive_attivo": True}).status_code == 200
        and sql("SELECT drive_attivo FROM agenti WHERE id=%s", (scout,))[0][0] is True)
     c.put(f"/gestione/agenti/{scout}", headers=H, json={"drive_attivo": False})

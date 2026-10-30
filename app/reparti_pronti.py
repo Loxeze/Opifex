@@ -81,7 +81,8 @@ def _crea(conn, div_id, sup_id, nome, ruolo, livello, modello, istr, **extra):
     from . import competenze_base
     istr = competenze_base.con_blocchi(nome, livello, istr)
     cols = {"divisione_id": div_id, "superiore_id": sup_id, "nome": nome, "ruolo": ruolo, "livello": livello, "tipo": "divisione", "modello": modello,
-            "fascia_dati_max": "interno", "dialoghi_attivi": extra.pop("dialoghi_attivi", True), "istruzioni": istr, **extra}
+            "fascia_dati_max": "interno", "dialoghi_attivi": extra.pop("dialoghi_attivi", True), "drive_attivo": extra.pop("drive_attivo", True),
+            "vede_attivita": extra.pop("vede_attivita", livello == "manager"), "istruzioni": istr, **extra}
     k = list(cols)
     return conn.execute(f"INSERT INTO agenti ({','.join(k)}) VALUES ({','.join(['%s'] * len(k))}) RETURNING id", [cols[x] for x in k]).fetchone()["id"], True
 

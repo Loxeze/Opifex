@@ -27,9 +27,19 @@ REGOLE_RIUNIONE = (
 DOMANDA = re.compile(r"\?|\b(cosa|che cosa|come|perch[eé]|quando|quanto|quanti|quante|chi|dove|quale|quali|puoi|potete|potresti|dimmi|dimmelo|dicci|spiega\w*|raccontami|aggiorna\w*|riepilog\w*|riassum\w*|fammi|fatemi|dammi|datemi|mostra\w*|elenca\w*|voglio sapere|vorrei sapere|cosa ne pensi|che ne pensi|parere|opinione|richieste|in coda|stato|punto della situazione)\b", re.I)
 
 
+DOMANDA_PURA = re.compile(r"\?|\b(cosa|che cosa|come|perch[eé]|quando|quanto|quanti|quante|chi|dove|quale|quali|dimmi|dicci|spiega\w*|raccontami|cosa ne pensi|che ne pensi)\b", re.I)
+LAVORO = re.compile(r"\b(prepar\w+|scriv\w+|redig\w+|produc\w+|produr\w+|genera\w*|cre[ai]\w*|realizz\w+|compil\w+|stend\w+|sviluppa\w*|costruisc\w+|costruit\w+|fai|facci|fate|"
+                    r"mandami|mandaci|inviami|consegn\w+|documento|bozza|relazione|report|presentazione|analisi|tabella|foglio|file|proposta|verifica\w*|controlla\w*|cerca\w*|ricerca|trova\w*|valuta\w*|stima\w*|calcola\w*|confronta\w*)\b", re.I)
+
+
+def e_lavoro(testo: str) -> bool:
+    """Un incarico: chiede di produrre qualcosa (un documento, un'analisi, una ricerca...)."""
+    return bool(LAVORO.search(testo or "")) and not DOMANDA_PURA.search(testo or "")
+
+
 def e_indicazione(testo: str) -> bool:
-    """Un'indicazione, decisione o informazione (non una domanda ne' una richiesta): va solo registrata."""
-    return not DOMANDA.search(testo or "")
+    """Un'indicazione, decisione o informazione (ne' una domanda, ne' una richiesta, ne' un incarico): va solo registrata."""
+    return not DOMANDA.search(testo or "") and not e_lavoro(testo)
 
 
 class ErroreCall(Exception):
@@ -186,6 +196,51 @@ def _rispondi(tid: int, ids: list[int]):
             conn.execute("UPDATE tavoli SET occupato = FALSE WHERE id = %s", (tid,))
 
 
+def _lavora(tid: int, aid: int, task_id: int, testo: str):
+    """Esegue l'incarico in autonomia (con tutti gli strumenti dell'agente, anche Drive) e lo riferisce nella riunione."""
+    from .esecuzione import esegui_agente
+    try:
+        with connessione() as conn:
+            t = conn.execute("SELECT titolo, ordine_del_giorno FROM tavoli WHERE id = %s", (tid,)).fetchone()
+            nome = conn.execute("SELECT nome FROM agenti WHERE id = %s", (aid,)).fetchone()["nome"]
+            storia = tavoli._storia(tavoli._interventi(conn, tid))
+        prompt = (f"INCARICO DA RIUNIONE «{t['titolo']}». Lorenzo ti ha chiesto: «{testo}»\n\nContesto della riunione (dato):\n{storia}\n\n"
+                  "Esegui il lavoro completo adesso, non solo una risposta a voce. Se hai gli strumenti Google, crea o aggiorna il documento nella cartella Opifex con un nome chiaro; "
+                  "altrimenti scrivi qui il documento intero. Non dichiarare di aver creato un file se lo strumento ha dato errore.\n"
+                  "Chiudi con una riga che inizia con «PAROLE:» e dice a voce, in al massimo due frasi, cosa hai consegnato e dove si trova.")
+        r = esegui_agente(aid, prompt, "interno", None, max_token=16000)["risposta"].strip()
+        stato = "ok"
+    except Exception as e:  # noqa: BLE001
+        r, stato = "Incarico non riuscito: " + str(e)[:300], "errore"
+    m = re.search(r"^\s*PAROLE\s*:\s*(.+)$", r, re.I | re.M)
+    parlato = (m.group(1).strip() if m else None) or (f"Ho finito: il lavoro e' nella task {task_id}." if stato == "ok" else f"Non sono riuscito a completare l'incarico: lo trovi nella task {task_id}.")
+    corpo = re.sub(r"^\s*PAROLE\s*:.*$", "", r, flags=re.I | re.M).strip()
+    with connessione() as conn:
+        conn.execute("INSERT INTO task_commenti (task_id, agente_id, testo) VALUES (%s,%s,%s)", (task_id, aid, corpo or r))
+        conn.execute("UPDATE task SET stato = %s, aggiornata_il = NOW()" + (", completata_il = NOW()" if stato == "ok" else "") + " WHERE id = %s", ("completata" if stato == "ok" else "in_corso", task_id))
+        conn.execute("INSERT INTO tavoli_interventi (tavolo_id, turno, agente_id, testo) VALUES (%s,1,%s,%s)", (tid, aid, parlato[:1500]))
+        conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"{nome} ha {'consegnato' if stato == 'ok' else 'provato a eseguire'} l'incarico della riunione «{t['titolo'][:60]}» (task {task_id}).",))
+
+
+def assegna_incarico(conn, tid: int, ids: list[int], testo: str):
+    """Per ogni agente interpellato: una task vera, un «preso in carico» a voce e il lavoro che parte in background."""
+    t = conn.execute("SELECT titolo FROM tavoli WHERE id = %s", (tid,)).fetchone()
+    lavori = []
+    for aid in ids:
+        titolo = f"Dalla riunione «{t['titolo'][:60]}»: {testo[:90]}"
+        task_id = conn.execute("""INSERT INTO task (titolo, descrizione, stato, priorita, assegnato_agente_id) VALUES (%s,%s,'in_corso','alta',%s) RETURNING id""",
+                               (titolo, f"Richiesta di Lorenzo in riunione:\n{testo}", aid)).fetchone()["id"]
+        conn.execute("INSERT INTO tavoli_interventi (tavolo_id, turno, agente_id, testo) VALUES (%s,1,%s,%s)",
+                     (tid, aid, f"Preso in carico. Ci lavoro adesso e ti avviso appena e' pronto; lo trovi anche nella task {task_id}."))
+        lavori.append((aid, task_id))
+    conn.commit()
+    for aid, task_id in lavori:
+        if SINCRONO:
+            _lavora(tid, aid, task_id, testo)
+        else:
+            threading.Thread(target=_lavora, args=(tid, aid, task_id, testo), daemon=True).start()
+
+
 def turno(conn, tid: int, testo: str) -> int:
     t = conn.execute("SELECT stato, occupato, tipo FROM tavoli WHERE id = %s AND tipo = 'call'", (tid,)).fetchone()
     if t is None:
@@ -203,10 +258,13 @@ def turno(conn, tid: int, testo: str) -> int:
         consegna_coda(conn, tid)    # «avete richieste?»: parlano le richieste messe in coda, senza altre risposte
         conn.commit()
         return iid
+    ids = [p["id"] for p in interpellati(testo, part)]
+    if e_lavoro(testo):
+        assegna_incarico(conn, tid, ids, testo)    # un incarico: parte il lavoro vero, la conversazione resta libera
+        return iid
     if e_indicazione(testo):
         conn.commit()      # solo registrata: nessun manager viene interpellato (nessuna risposta, nessun token)
         return iid
-    ids = [p["id"] for p in interpellati(testo, part)]
     conn.execute("UPDATE tavoli SET occupato = TRUE WHERE id = %s", (tid,))
     conn.commit()
     if SINCRONO:

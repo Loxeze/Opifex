@@ -70,6 +70,7 @@ from .note_aurora import router as router_note_aurora
 from .posta_decisioni import router as router_posta_decisioni
 from .miglioramento import router as router_miglioramento
 from .dipendenze import router as router_dipendenze
+from .diagnostica import router as router_diagnostica
 from .scheda_impresa import router as router_impresa
 from .tavoli import router as router_tavoli
 from .call_riunioni import router as router_call
@@ -295,6 +296,7 @@ app.include_router(router_note_aurora)
 app.include_router(router_posta_decisioni)
 app.include_router(router_miglioramento)
 app.include_router(router_dipendenze)
+app.include_router(router_diagnostica)
 app.include_router(router_impresa)
 app.include_router(router_tavoli)
 app.include_router(router_call)

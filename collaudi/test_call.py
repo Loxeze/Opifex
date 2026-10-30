@@ -123,6 +123,26 @@ with TestClient(app) as c:
     sql("UPDATE tavoli SET occupato=FALSE WHERE id=%s", (tid,))
     ok("la regola scritta e' esposta e nel prompt", "nessuno la ripete" in c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()["regole"] and "Non ripetere mai le sue parole" in ultimi_msg[-1] and "REGOLE DELLA RIUNIONE" in ultimi_msg[-1])
     ok("nel verbale Lorenzo ha il suo nome", "Lorenzo:" in __import__("app.tavoli", fromlist=["x"])._storia(__import__("app.tavoli", fromlist=["x"])._interventi(__import__("app.db", fromlist=["x"]).connessione().__enter__(), tid)))
+    # incarichi: «preparami un documento» non e' un'indicazione
+    sql("UPDATE tavoli SET occupato=FALSE WHERE id=%s", (tid,))
+    copione[:] = [fine("Ecco il documento completo sull'estate.\nPAROLE: Ho scritto il piano estate, lo trovi nella task."), fine("Documento sul budget pronto.\nPAROLE: Ho finito il budget.")]
+    ultimi_msg.clear()
+    r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Marco e Dario, preparatemi un documento con il piano per l'estate"})
+    d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
+    ok("un incarico parte davvero: task create, preso in carico e consegna a voce", r.json().get("registrata") is False and sql("SELECT count(*) FROM task WHERE titolo LIKE 'Dalla riunione%%'")[0][0] == 2
+       and any("Preso in carico" in i["testo"] for i in d["interventi"]) and any("Ho scritto il piano estate" in i["testo"] for i in d["interventi"]), str([i["testo"][:50] for i in d["interventi"][-6:]]))
+    ok("il documento intero e' nella task, la sintesi parlata no", sql("SELECT count(*) FROM task_commenti WHERE testo LIKE 'Ecco il documento completo%%'")[0][0] == 1 and "PAROLE" not in " ".join(i["testo"] for i in d["interventi"]))
+    ok("task completate e notifica", sql("SELECT count(*) FROM task WHERE titolo LIKE 'Dalla riunione%%' AND stato='completata'")[0][0] == 2 and sql("SELECT count(*) FROM notifiche WHERE testo LIKE '%%incarico della riunione%%'")[0][0] == 2)
+    ok("una domanda che contiene «documento» resta una domanda", not call_riunioni.e_lavoro("Quanto costa fare il documento?") and call_riunioni.e_lavoro("Scrivi la relazione") and not call_riunioni.e_indicazione("Scrivi la relazione"))
+    # permessi predefiniti
+    ok("tutti gli agenti attivi hanno Drive e dialoghi, i manager vedono tutto", sql("SELECT count(*) FROM agenti WHERE attivo AND NOT sentinella AND NOT drive_attivo")[0][0] == 0 and sql("SELECT count(*) FROM agenti WHERE attivo AND NOT sentinella AND livello IN ('manager','referente') AND NOT vede_attivita")[0][0] == 0)
+    with __import__("app.db", fromlist=["x"]).connessione() as cn:
+        from app import memoria
+        ag = cn.execute("SELECT a.*, 'interno' AS fascia_fornitore, TRUE AS non_conservazione_attiva, TRUE AS dpa_firmato FROM agenti a WHERE a.id=%s", (marco,)).fetchone()
+        txt = memoria.attivita_agenti(cn, {**ag, "fascia_dati_max": "interno", "vede_tutto": False, "livello": "manager"})
+        ok("i manager vedono cosa hanno fatto gli altri agenti nelle ultime 24 ore", "Ecco il documento completo" in txt or "Documento sul budget" in txt, txt[:200])
+        txt2 = memoria.attivita_agenti(cn, {**ag, "fascia_dati_max": "interno", "vede_tutto": False, "livello": "operativo", "divisione_id": ag["divisione_id"]})
+        ok("senza vede_tutto solo il proprio reparto", isinstance(txt2, str))
     # ascolto continuo
     from app import trascrizione
     risposte = ["Dario, e il sito?", "Sottotitoli e revisione a cura di QTSS", "ERR"]
@@ -166,4 +186,18 @@ with TestClient(app) as c:
     ok("riunione inesistente", c.get("/gestione/riunioni-call/99999", headers=H).status_code == 404)
     ok("interpellati: nome intero e non parziale", [p["nome"] for p in call_riunioni.interpellati("Marcoli cosa dice", [{"nome": "Marco"}, {"nome": "Dario"}])] == ["Marco", "Dario"])
     ok("viste servite", "vistaRiunioniCall" in c.get("/app/riunioni_call.js").text and '"riunioni", "Riunioni"' in c.get("/app/chat.js").text)
+    # diagnostica
+    sql("UPDATE tavoli SET occupato=TRUE, creato_il = NOW() - interval '1 hour' WHERE id=%s", (r2,))
+    sql("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('chiave_api_finta','SEGRETISSIMO') ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore")
+    rd = c.get("/gestione/diagnostica?ore=24", headers=H)
+    ok("diagnostica scaricabile come file", rd.status_code == 200 and "attachment" in rd.headers.get("content-disposition", "") and rd.headers["content-type"].startswith("application/json"), rd.text[:200])
+    dg = rd.json()
+    ok("contiene versione, sospetti, configurazione e attivita'", dg["versione_opifex"] and "sospetti" in dg and "agenti" in dg["configurazione"] and "tavoli_interventi" in dg["attivita"])
+    ok("riporta la riunione rimasta in sospeso", any("occupato da piu' di 10 minuti" in x for x in dg["sospetti"]), str(dg["sospetti"]))
+    ok("contiene cio' che e' stato detto in riunione, comprese le richieste in coda", any("budget" in str(i.get("testo")) for i in dg["attivita"]["tavoli_interventi"]["dati"]) and any(i.get("coda") in (1, 2) for i in dg["attivita"]["tavoli_interventi"]["dati"]))
+    ok("contiene le istruzioni degli agenti", any(a.get("istruzioni") for a in dg["configurazione"]["agenti"]["dati"]))
+    ok("nessun segreto nel file", "SEGRETISSIMO" not in rd.text and all(a.get("password_hash") in (None, "[omesso]") for a in dg["configurazione"].get("utenti", {"dati": []})["dati"]))
+    ok("le impostazioni ci sono ma il valore segreto no", any(x.get("chiave") == "chiave_api_finta" and x.get("valore") == "[omesso]" for x in dg["configurazione"]["impostazioni_sistema"]["dati"]))
+    ok("riservata al titolare", c.get("/gestione/diagnostica", headers=HC).status_code == 403)
+    ok("vista servita", "vistaDiagnostica" in c.get("/app/controlli.js").text)
 print("TOTALE", sum(ris), "/", len(ris))

@@ -19,6 +19,10 @@ def ok(n, c, d=""):
 def sql(q, p=None):
     with psycopg.connect(DSN, autocommit=True) as c:
         cur = c.execute(q, p); return cur.fetchall() if cur.description else None
+AZ0 = None
+def _az0():
+    r = sql("SELECT id FROM aziende ORDER BY id LIMIT 1")
+    return r[0][0] if r else sql("INSERT INTO aziende (nome) VALUES ('Impresa di prova') RETURNING id")[0][0]
 sql("INSERT INTO utenti (nome,email,password_hash,ruolo_globale) VALUES ('L','l@p.it',%s,'titolare')", (cifra_password("PasswordLunga!2026"),))
 uid = sql("SELECT id FROM utenti")[0][0]
 sql("UPDATE agenti SET dialoghi_attivi = FALSE")
@@ -78,7 +82,7 @@ with TestClient(app) as c:
         telegram.gestisci_messaggio(conn, "tok", upd("/agenti")); conn.commit()
         ok("/agente e /agenti", "Scout" in inviati[-1])
     # ---- 4. progetti: modifica + allineamento
-    pid = c.post("/gestione/progetti", headers=H, json={"nome": "Bando Alfa", "descrizione": "x", "agenti": [scout]}).json()["id"]
+    pid = c.post("/gestione/progetti", headers=H, json={"azienda_id": _az0(), "nome": "Bando Alfa", "descrizione": "x", "agenti": [scout]}).json()["id"]
     r = c.put(f"/gestione/progetti/{pid}", headers=H, json={"nome": "Bando Beta", "descrizione": "nuova", "allineamento": "Obiettivo: vincere il bando Beta entro dicembre."})
     ok("modifica progetto: nome e descrizione cambiati", r.status_code == 200 and sql("SELECT nome, descrizione FROM progetti WHERE id=%s", (pid,))[0] == ("Bando Beta", "nuova"), r.text)
     ok("allineamento salvato con data", sql("SELECT allineamento_il IS NOT NULL FROM progetti WHERE id=%s", (pid,))[0][0])
@@ -102,7 +106,7 @@ with TestClient(app) as c:
     ok("allineamento impresa", c.put(f"/gestione/aziende/{az}/allineamento", headers=H, json={"testo": "Impresa Uno punta al turismo lento."}).status_code == 200)
     visti.clear(); sql("UPDATE agenti SET modello='claude-haiku-5-5', accesso_web=FALSE WHERE id=%s", (scout,))
     # fornitore non anthropic per evitare il ciclo strumenti: uso messaggio diretto
-    sql("UPDATE agenti SET modello='gpt-4o' WHERE id=%s", (scout,))
+    sql("UPDATE agenti SET modello='gpt-4o', drive_attivo=FALSE WHERE id=%s", (scout,))
     c.post(f"/agenti/{scout}/chat", headers=H, json={"messaggio": "ciao", "fascia_dati": "interno"})
     ok("gli agenti ricevono sempre i documenti di allineamento (progetto e impresa)", visti and "vincere il bando Beta" in visti[-1] and "turismo lento" in visti[-1], str(visti)[-300:])
     sql("UPDATE fornitori_ai SET non_conservazione_attiva = FALSE WHERE nome='openai'")
@@ -163,7 +167,21 @@ with TestClient(app) as c:
     ok("password sbagliata: errore chiaro", c.post(f"/gestione/posta/{cid}/prova", headers=H).json()["ok"] is False and sql("SELECT stato FROM caselle_posta")[0][0] == "errore")
     FakeIMAP.login_ok = True
     ok("riprovo: torna attiva", c.post(f"/gestione/posta/{cid}/prova", headers=H).json()["ok"] is True)
-    ok("assegno la casella a Scout", c.put(f"/gestione/posta/{cid}/agenti", headers=H, json={"agenti": [scout]}).status_code == 200)
+    rr = c.put(f"/gestione/posta/{cid}/agente", headers=H, json={"agente_id": scout})
+    ok("agente di un altro dipartimento: ammesso (sceglie il titolare), con avviso se non puo' ricevere dati riservati", rr.status_code == 200 and "avviso" in rr.json(), rr.text[:200])
+    ok("l'elenco della scheda posta mostra tutti gli agenti accesi, con quelli 'naturali' indicati", all("naturale" in a for a in c.get("/gestione/posta", headers=H).json()["agenti"]) and scout in [a["id"] for a in c.get("/gestione/posta", headers=H).json()["agenti"]])
+    c.put(f"/gestione/posta/{cid}/agente", headers=H, json={"agente_id": None})
+    sql("UPDATE divisioni SET gestisce_posta = TRUE WHERE id = (SELECT divisione_id FROM agenti WHERE id=%s)", (scout,))
+    ok("assegno la casella a Scout", c.put(f"/gestione/posta/{cid}/agente", headers=H, json={"agente_id": scout}).status_code == 200)
+    r2 = c.post("/gestione/posta", headers=H, json={"etichetta": "Seconda", "email": "due@logos.it", "password": "PasswordPosta!2"}); cid2 = r2.json().get("id")
+    altro = sql("SELECT id FROM agenti WHERE divisione_id=(SELECT divisione_id FROM agenti WHERE id=%s) AND id<>%s LIMIT 1", (scout, scout))[0][0]
+    ok("due caselle allo stesso agente", c.put(f"/gestione/posta/{cid2}/agente", headers=H, json={"agente_id": scout}).status_code == 200 and sql("SELECT count(*) FROM agenti_caselle_posta WHERE agente_id=%s", (scout,))[0][0] == 2)
+    c.put(f"/gestione/posta/{cid2}/agente", headers=H, json={"agente_id": altro})
+    ok("accesso esclusivo: la casella passa all'altro agente e Scout non la ha piu'", sql("SELECT agente_id FROM agenti_caselle_posta WHERE casella_id=%s", (cid2,))[0][0] == altro and sql("SELECT count(*) FROM agenti_caselle_posta WHERE agente_id=%s", (scout,))[0][0] == 1)
+    ok("una casella non puo' avere due agenti (vincolo del database)", sql("SELECT count(*) FROM (SELECT casella_id FROM agenti_caselle_posta GROUP BY casella_id HAVING count(*)>1) x")[0][0] == 0)
+    ok("togliere la casella all'agente", c.put(f"/gestione/posta/{cid2}/agente", headers=H, json={"agente_id": None}).status_code == 200 and sql("SELECT count(*) FROM agenti_caselle_posta WHERE casella_id=%s", (cid2,))[0][0] == 0)
+    ok("esiste il dipartimento Corrispondenza", sql("SELECT gestisce_posta FROM divisioni WHERE nome='Corrispondenza'")[0][0] is True)
+    c.delete(f"/gestione/posta/{cid2}", headers=H)
     sql("UPDATE agenti SET modello='claude-haiku-5-5' WHERE id=%s", (scout,))
     uso = {"input_tokens": 10, "output_tokens": 5}
     ricevuti.clear()

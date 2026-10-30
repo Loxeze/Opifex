@@ -59,7 +59,7 @@ class DatiAgente(BaseModel):
     modello_dialogo: str | None = None
     dialoghi_attivi: bool = False
     vede_tutto: bool = False
-    drive_attivo: bool = False
+    drive_attivo: bool = True
     gmail_account_id: int | None = None
     social_attivo: bool = False
     email_attivo: bool = False

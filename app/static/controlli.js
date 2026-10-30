@@ -35,3 +35,26 @@ function vistaDipendenze() {
       try { const r = await api("POST", "/gestione/dipendenze/controlla"); msg.replaceChildren(); const d = await api("GET", "/gestione/dipendenze"); mostra(d.ultimo); }
       catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Controlla adesso")), msg, corpo);
 }
+
+
+function vistaDiagnostica() {
+  const msg = h("div");
+  const ore = h("select", {}, [["6", "ultime 6 ore"], ["24", "ultime 24 ore"], ["72", "ultimi 3 giorni"], ["168", "ultima settimana"]].map(([v, t]) => h("option", { value: v }, t)));
+  ore.value = "24";
+  const scarica = h("button", { class: "p", type: "button" }, "⬇ Scarica il file di diagnostica");
+  scarica.addEventListener("click", async () => {
+    scarica.disabled = true; msg.replaceChildren(avviso("Preparo il file…", "ok"));
+    try {
+      const r = await fetch("/gestione/diagnostica?ore=" + ore.value, { headers: token ? { Authorization: "Bearer " + token } : {} });
+      if (!r.ok) { let d = null; try { d = await r.json(); } catch (e) { /* ok */ } throw new Error(messaggioErrore(d)); }
+      const blob = await r.blob(), url = URL.createObjectURL(blob), a = document.createElement("a");
+      a.href = url; a.download = ((r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || "diagnostica-opifex.json";
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+      msg.replaceChildren(avviso("File scaricato (" + Math.round(blob.size / 1024) + " KB). Mandamelo in chat e lo analizzo.", "ok"));
+    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+    scarica.disabled = false;
+  });
+  return h("div", {}, h("h2", {}, "Diagnostica"),
+    h("p", { class: "aiuto" }, "Un unico file con tutto cio' che serve per capire cosa e' andato storto: segnali sospetti in cima, errori, impostazioni e prompt degli agenti, riunioni (cosa e' stato detto, le richieste in coda), task, chiamate ai modelli, spese, notifiche e registro delle azioni. Chiavi, token e password non ci sono mai. Dentro ci sono pero' conversazioni reali: condividilo solo per l'analisi."),
+    h("label", {}, "Periodo", ore), h("div", { class: "azioni" }, scarica), msg);
+}

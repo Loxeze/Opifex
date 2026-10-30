@@ -207,6 +207,9 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             sc = memoria.scambi_colleghi(conn, a_f)
             if sc:
                 prefisso.append(sc); dim["colleghi"] = len(sc)
+        at_ctx = memoria.attivita_agenti(conn, a_f)
+        if at_ctx:
+            prefisso.append(at_ctx); dim["attivita_agenti"] = len(at_ctx)
         sp_ctx = scheda_progetto.contesto(conn, a_f)
         if sp_ctx:
             prefisso.append(sp_ctx); dim["scheda_progetto"] = len(sp_ctx)

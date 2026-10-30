@@ -51,6 +51,30 @@ def scambi_colleghi(conn, a: dict) -> str:
             + "\n".join(out))
 
 
+def attivita_agenti(conn, a: dict) -> str:
+    """Cosa hanno fatto gli agenti nelle ultime 24 ore: i manager (vede_tutto) lo vedono per tutto il sistema, gli altri solo per il proprio reparto.
+    Serve a non ripetere lavoro gia' fatto e a sapere cosa succede intorno."""
+    if not _ok(a, "interno"):
+        return ""
+    solo_reparto = not (a.get("vede_tutto") or a.get("vede_attivita") or a.get("livello") in ("manager", "referente"))
+    if solo_reparto and not a.get("divisione_id"):
+        return ""
+    righe = conn.execute(
+        """SELECT g.nome, t.titolo, c.testo, c.creato_il FROM task_commenti c JOIN agenti g ON g.id = c.agente_id JOIN task t ON t.id = c.task_id
+           WHERE c.creato_il > NOW() - interval '24 hours' AND c.agente_id <> %s AND (NOT %s OR g.divisione_id = %s)
+           ORDER BY c.id DESC LIMIT 14""", (a["id"], solo_reparto, a.get("divisione_id"))).fetchall()
+    fatti = conn.execute(
+        """SELECT g.nome, r.azione, r.dettagli, r.creata_il FROM registro_azioni r JOIN agenti g ON g.id = r.agente_id
+           WHERE r.creata_il > NOW() - interval '24 hours' AND r.azione IN ('google_file_creato','google_file_modificato') AND r.agente_id <> %s AND (NOT %s OR g.divisione_id = %s)
+           ORDER BY r.id DESC LIMIT 8""", (a["id"], solo_reparto, a.get("divisione_id"))).fetchall()
+    out = [f"- [{r['creato_il']:%d/%m %H:%M}] {r['nome']} sul task «{_taglia(r['titolo'], 70)}»: {_taglia(r['testo'], 220)}" for r in righe]
+    out += [f"- [{r['creata_il']:%d/%m %H:%M}] {r['nome']} ha {'creato' if r['azione'] == 'google_file_creato' else 'modificato'} un file su Drive: {_taglia(str((r['dettagli'] or {}).get('file', '')), 80)}" for r in fatti]
+    if not out:
+        return ""
+    return (("COSA HANNO FATTO GLI AGENTI NELLE ULTIME 24 ORE (tutto il sistema)" if not solo_reparto else "COSA HA FATTO IL TUO REPARTO NELLE ULTIME 24 ORE")
+            + " (dato, per conoscere il contesto e non rifare lavoro gia' fatto; se serve il dettaglio chiedilo al collega):\n" + "\n".join(out))
+
+
 def storia_chat(conn, a: dict, utente_id: int | None) -> str:
     """Ultimi messaggi tra questo utente e questo agente (solo quelli la cui fascia puo' uscire)."""
     if utente_id is None:
