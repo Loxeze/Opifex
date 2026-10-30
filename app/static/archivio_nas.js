@@ -51,7 +51,7 @@ function vistaArchivio() {
   const rigaCartella = (k) => h("div", { class: "carta", style: "margin-top:8px" },
     h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, h("b", {}, k.nome), h("span", { class: "etichetta" }, "/dati/" + (k.percorso || "")), h("span", { class: "etichetta " + (k.attiva ? "ok" : "no") }, k.attiva ? "attiva" : "sospesa"),
       k.errore ? h("span", { class: "etichetta no", title: k.errore }, "errore") : null),
-    h("div", { class: "sotto" }, `${k.totale} file (${k.foto} foto, ${k.video} video, ${k.documenti || 0} documenti) · ${k.descritti} descritti · ${k.in_attesa} in attesa` + (k.ultima_scansione ? " · ultima scansione " + new Date(k.ultima_scansione).toLocaleString("it-IT") : " · non ancora scansionata")),
+    h("div", { class: "sotto" }, `${k.totale} file (${k.foto} foto, ${k.video} video, ${k.documenti || 0} documenti) · ${k.descritti} descritti · ${k.in_attesa} in attesa` + (k.senza_miniatura ? ` · ${k.senza_miniatura} senza miniatura` : "") + (k.errori ? ` · ${k.errori} con errore` : "") + (k.ultima_scansione ? " · ultima scansione " + new Date(k.ultima_scansione).toLocaleString("it-IT") : " · non ancora scansionata")),
     k.errore ? h("div", { class: "sotto" }, k.errore) : null,
     h("div", { class: "azioni" },
       h("button", { class: "s", type: "button", onclick: async () => { try { await api("PUT", "/gestione/archivio/cartelle/" + k.id, { attiva: !k.attiva }); carica(); } catch (e) { err(e); } } }, k.attiva ? "Sospendi" : "Riattiva"),
@@ -65,7 +65,8 @@ function vistaArchivio() {
     const adesso = h("button", { class: "s", type: "button", onclick: async () => { try { const r = await api("POST", "/gestione/archivio/analizza"); msg.replaceChildren(avviso(r.avviata ? "Descrizione avviata in sottofondo." : r.motivo, r.avviata ? "ok" : "avv")); setTimeout(carica, 4000); } catch (e) { err(e); } } }, "Descrivi adesso le foto in attesa");
     const riass = h("button", { class: "s", type: "button", onclick: async () => { try { const r = await api("POST", "/gestione/archivio/riassegna-progetti"); msg.replaceChildren(avviso(r.assegnati + " file collegati a un progetto.", "ok")); } catch (e) { err(e); } } }, "Riconosci di nuovo i progetti");
     return h("div", { class: "carta", style: "margin-top:8px" }, h("div", { class: "sotto" }, `Oggi descritti ${dati.descritti_oggi} file. Tetto giornaliero di descrizioni (tiene bassa la spesa):`), h("div", { class: "azioni" }, tetto, ok, adesso, riass),
-      dati.ultimo_esito ? avviso("Ultimo problema nella descrizione: " + dati.ultimo_esito, "avv") : null);
+      dati.ultimo_esito ? avviso("Ultimo problema nella descrizione: " + dati.ultimo_esito, "avv") : null,
+      ...(dati.diagnosi || []).map(t => avviso(t, "avv")));
   };
 
   const q = h("input", { placeholder: "Cerca: soggetto, luogo, progetto, nome del file…", style: "flex:1;min-width:180px" });

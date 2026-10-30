@@ -190,11 +190,12 @@ def sincronizza(d: Sincronizza, c: dict = Depends(connettore_corrente)):
         if not voci:
             return {"servono": []}
         esistenti = {x["rel"]: x for x in conn.execute(
-            "SELECT rel, dimensione, EXTRACT(EPOCH FROM modificato_il)::bigint AS m, stato FROM archivio_file WHERE cartella_id = %s AND rel = ANY(%s)", (d.cartella_id, list(voci))).fetchall()}
+            "SELECT rel, tipo, dimensione, EXTRACT(EPOCH FROM modificato_il)::bigint AS m, stato, (tentato_il IS NULL OR tentato_il < NOW() - interval '6 hours') AS riprova FROM archivio_file WHERE cartella_id = %s AND rel = ANY(%s)", (d.cartella_id, list(voci))).fetchall()}
         servono = []
         for rel, e in voci.items():
             x = esistenti.get(rel)
-            if x and x["dimensione"] == e.size and x["m"] == e.mtime and x["stato"] != "da_analizzare" or (x and x["dimensione"] == e.size and x["m"] == e.mtime and conn.execute(
+            senza = bool(x) and x["stato"] == "senza_miniatura" and x["tipo"] in ("foto", "video") and x["riprova"]   # miniatura mancata la volta scorsa (es. ffmpeg assente): riprovo
+            if x and not senza and x["dimensione"] == e.size and x["m"] == e.mtime and x["stato"] != "da_analizzare" or (x and not senza and x["dimensione"] == e.size and x["m"] == e.mtime and conn.execute(
                     "SELECT 1 FROM archivio_miniature WHERE file_id = (SELECT id FROM archivio_file WHERE cartella_id = %s AND rel = %s)", (d.cartella_id, rel)).fetchone()):
                 conn.execute("UPDATE archivio_file SET visto_scan = %s, assente = FALSE WHERE cartella_id = %s AND rel = %s", (d.scan, d.cartella_id, rel))
                 continue
@@ -249,7 +250,7 @@ async def ricevi_file(cartella_id: int = Form(...), rel: str = Form(...), meta: 
                 scatto_ts = None
             conn.execute(
                 """UPDATE archivio_file SET durata_s = %s, larghezza = %s, altezza = %s, codec = %s, fps = %s, scattato_il = %s, fotocamera = %s, luogo = %s::jsonb,
-                       progetto_id = %s, stato = %s, errore = NULL WHERE id = %s""",
+                       progetto_id = %s, stato = %s, errore = NULL, tentato_il = NOW() WHERE id = %s""",
                 (num("durata_s", 0, 10 ** 6), num("larghezza", 1, 200000, int), num("altezza", 1, 200000, int), testo("codec", 40), num("fps", 0, 1000), scatto_ts,
                  testo("fotocamera", 120), json.dumps({"lat": round(float(luogo["lat"]), 4), "lon": round(float(luogo["lon"]), 4)}) if luogo else None,
                  pid, "da_analizzare" if imm else "senza_miniatura", f["id"]))
@@ -473,13 +474,33 @@ def stato(_: dict = Depends(solo_titolare)):
                       (SELECT count(*) FROM archivio_file f WHERE f.cartella_id = k.id AND NOT f.assente AND f.tipo = 'foto') AS foto,
                       (SELECT count(*) FROM archivio_file f WHERE f.cartella_id = k.id AND NOT f.assente AND f.tipo = 'video') AS video,
                       (SELECT count(*) FROM archivio_file f WHERE f.cartella_id = k.id AND NOT f.assente AND f.tipo = 'documento') AS documenti,
+                      (SELECT count(*) FROM archivio_file f WHERE f.cartella_id = k.id AND NOT f.assente AND f.stato = 'senza_miniatura' AND f.tipo IN ('foto', 'video')) AS senza_miniatura,
+                      (SELECT count(*) FROM archivio_file f WHERE f.cartella_id = k.id AND NOT f.assente AND f.stato = 'errore') AS errori,
                       (SELECT count(*) FROM archivio_file f WHERE f.cartella_id = k.id AND NOT f.assente AND f.stato = 'analizzato') AS descritti,
                       (SELECT count(*) FROM archivio_file f WHERE f.cartella_id = k.id AND NOT f.assente AND f.stato = 'da_analizzare') AS in_attesa
                FROM archivio_cartelle k ORDER BY k.id""").fetchall()
         richieste = conn.execute(
             """SELECT r.id, r.tipo, r.stato, r.creata_il, r.errore, f.id AS file_id, f.nome, (r.dati IS NOT NULL) AS scaricabile, a.nome AS agente
                FROM archivio_richieste r JOIN archivio_file f ON f.id = r.file_id LEFT JOIN agenti a ON a.id = r.agente_id ORDER BY r.id DESC LIMIT 15""").fetchall()
-        return {"connettori": connettori, "cartelle": cartelle, "richieste": richieste,
+        diagnosi = []
+        if not any(x["online"] for x in connettori):
+            diagnosi.append("Il programma sul NAS non si e' fatto sentire negli ultimi minuti: controlla che il contenitore Docker sia acceso.")
+        try:
+            from . import fornitori, visione
+            if not fornitori.chiave("anthropic"):
+                diagnosi.append("Manca la chiave Anthropic: senza non si possono descrivere le foto (Impostazioni → Collegamenti).")
+            else:
+                visione._modello(conn, "interno")
+        except visione.VisioneNonDisponibile as e:
+            diagnosi.append("Le foto non possono essere descritte: " + str(e) + " (Impostazioni → Sicurezza: dichiara non conservazione e DPA per Anthropic).")
+        for k in cartelle:
+            if k["attiva"] and not k["descrivi"] and (k["foto"] or k["video"]):
+                diagnosi.append(f"Nella cartella «{k['nome']}» e' spenta l'opzione «Descrivi le foto con l'intelligenza artificiale».")
+            if k["senza_miniatura"]:
+                diagnosi.append(f"Nella cartella «{k['nome']}» {k['senza_miniatura']} foto/video non hanno una miniatura, quindi non si possono descrivere: il NAS le riprova da solo ogni 6 ore (servono ffmpeg e Pillow nel contenitore; per le foto HEIC pillow-heif).")
+            if k["errori"]:
+                diagnosi.append(f"Nella cartella «{k['nome']}» {k['errori']} file hanno dato errore nella descrizione: premi «Descrivi adesso» per riprovare.")
+        return {"connettori": connettori, "cartelle": cartelle, "richieste": richieste, "diagnosi": diagnosi,
                 "tetto_giorno": _int(conn, "archivio_tetto_giorno", TETTO_GIORNO), "per_giro": _int(conn, "archivio_per_giro", PER_GIRO),
                 "descritti_oggi": conn.execute("SELECT count(*) AS n FROM archivio_file WHERE descritto_il >= date_trunc('day', NOW())").fetchone()["n"],
                 "ultimo_esito": _imp(conn, "archivio_ultimo_esito"),
@@ -600,8 +621,10 @@ def impostazioni(d: Impostazioni, _: dict = Depends(solo_titolare)):
 @router.post("/analizza", status_code=202)
 def analizza(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
+        conn.execute("UPDATE archivio_file SET stato = 'da_analizzare', errore = NULL WHERE stato = 'errore' AND NOT assente AND EXISTS (SELECT 1 FROM archivio_miniature m WHERE m.file_id = archivio_file.id)")
+        rip = conn.execute("UPDATE archivio_file SET tentato_il = NULL WHERE stato = 'senza_miniatura' AND NOT assente AND tipo IN ('foto', 'video')").rowcount
         if not conn.execute("SELECT 1 FROM archivio_file WHERE stato = 'da_analizzare' AND NOT assente LIMIT 1").fetchone():
-            return {"avviata": False, "motivo": "Nessun file da descrivere"}
+            return {"avviata": False, "motivo": (f"Nessun file pronto da descrivere. {rip} file senza miniatura verranno riprovati alla prossima scansione del NAS (entro pochi minuti): se restano cosi', controlla che il contenitore abbia ffmpeg e Pillow." if rip else "Nessun file da descrivere")}
     if SINCRONO:
         _lotto_in_coda(300)
     else:
