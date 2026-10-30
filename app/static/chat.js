@@ -81,7 +81,7 @@ function conversazioniChat() {
   const f = h("select", { title: "Tipo di dati nel messaggio" }, Object.entries(ETICHETTA_FASCIA).map(([v, t]) => h("option", { value: v }, t)));
   f.value = stato.chatFascia || "pubblico";
   f.addEventListener("change", () => { stato.chatFascia = f.value; bozzaCambiata(); });
-  const allegati = h("input", { type: "file", multiple: true, style: "display:none", accept: ".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,.html,.htm,.json,.xml,.eml,.txt,.md,.csv,.tsv,.png,.jpg,.jpeg,.webp,.gif" });
+  const allegati = h("input", { type: "file", multiple: true, style: "display:none", accept: ".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,.html,.htm,.json,.xml,.fcpxml,.edl,.srt,.vtt,.eml,.txt,.md,.csv,.tsv,.png,.jpg,.jpeg,.webp,.gif" });
   const elencoAll = h("span", { class: "sotto" });
   allegati.addEventListener("change", () => { elencoAll.textContent = allegati.files.length ? [...allegati.files].map(x => x.name).join(", ") : ""; });
   const bAllega = h("button", { class: "s", type: "button", title: "Allega file (fino a 5, 10 MB ciascuno)", onclick: () => allegati.click() }, "📎");

@@ -71,7 +71,8 @@ EDITORIA = {
 }
 from .reparto_social import SOCIALE, REGOLE_SOC
 from .reparto_ricerca import RICERCA, REGOLE_RS
-REPARTI = {"legale": LEGALE, "sviluppo": SVILUPPO, "editoria": EDITORIA, "social": SOCIALE, "ricerca": RICERCA}
+from .reparto_contenuti import CONTENUTI
+REPARTI = {"legale": LEGALE, "sviluppo": SVILUPPO, "editoria": EDITORIA, "social": SOCIALE, "ricerca": RICERCA, "contenuti": CONTENUTI}
 
 
 def _crea(conn, div_id, sup_id, nome, ruolo, livello, modello, istr, **extra):
@@ -121,6 +122,12 @@ def attiva(conn, chiave: str, utente: dict | None = None) -> dict:
             aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", _mod(chiave, nome, "claude-sonnet-5-5"), istr + " " + REGOLE_RS, **{"usa_biblioteca": True, **extra})
             if nuovo:
                 creati.append(nome)
+        elif chiave == "contenuti":
+            nome, ruolo, istr, extra = voce
+            extra = dict(extra); livello = extra.pop("_livello", "operativo")
+            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, livello, _mod(chiave, nome, "claude-sonnet-5-5"), istr, **{"usa_biblioteca": False, **extra})
+            if nuovo:
+                creati.append(nome)
         elif chiave == "social":
             nome, ruolo, istr, extra = voce
             aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", _mod(chiave, nome, "claude-sonnet-5-5"), istr + " " + REGOLE_SOC, usa_biblioteca=True, **extra)
@@ -144,6 +151,11 @@ def attiva(conn, chiave: str, utente: dict | None = None) -> dict:
                 creati.append(nome + " (GPT)")
     if chiave == "sviluppo" and nuovo is not None:
         conn.execute("UPDATE agenti SET sandbox_attivo = TRUE WHERE id = %s", (man,))
+    if d.get("azienda"):   # il reparto lavora per questa impresa: divisione e agenti vi vengono collegati
+        z = conn.execute("SELECT id FROM aziende WHERE nome ILIKE %s AND attiva ORDER BY id LIMIT 1", (d["azienda"] + "%",)).fetchone()
+        if z:
+            conn.execute("UPDATE divisioni SET azienda_id = %s WHERE id = %s AND azienda_id IS NULL", (z["id"], div_id))
+            conn.execute("""INSERT INTO agenti_aziende (agente_id, azienda_id) SELECT id, %s FROM agenti WHERE divisione_id = %s ON CONFLICT DO NOTHING""", (z["id"], div_id))
     spenti = []
     for vecchio in d.get("sostituisce", []):
         r = conn.execute("UPDATE agenti SET attivo = FALSE WHERE nome = %s AND attivo AND divisione_id IS DISTINCT FROM %s RETURNING id", (vecchio, div_id)).fetchone()

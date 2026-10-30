@@ -189,3 +189,80 @@ function vistaGiro() {
     h("label", {}, "Ogni quanti giorni (0 = mai in automatico)", giorni), h("div", { class: "azioni" }, salva, avvia), msg,
     h("h3", {}, "Domande"), corpo, h("h3", {}, "Cosa sanno ora tutti gli agenti"), h("div", { style: "display:flex;gap:6px" }, nuovo, aggiungi), fatti);
 }
+
+// ---------- Contenuti: brief e stili di montaggio ----------
+function vistaContenuti() {
+  const msgB = h("div"), msgS = h("div"), lista = h("div"), schedaBox = h("div");
+  const campo = (et, el) => h("label", {}, et, el);
+  const sel = (voci, val) => h("select", {}, voci.map(v => h("option", { value: v }, v)), val ? null : null);
+  // --- brief ---
+  const titolo = h("input", { maxlength: 150, placeholder: "Es. Puntata 12 del podcast / Reel mostra Montarrenti" });
+  const formato = sel(["video", "podcast", "reel", "documentario", "spot", "grafica", "audio", "foto", "testo", "altro"]);
+  const programma = sel(["indifferente", "premiere", "resolve"]);
+  const obiettivo = h("textarea", { rows: 2, maxlength: 800, placeholder: "Cosa deve ottenere e per chi" });
+  const durata = h("input", { maxlength: 60, placeholder: "Es. 45 secondi / 12 minuti" });
+  const materiali = h("textarea", { rows: 2, maxlength: 1200, placeholder: "Che materiale c'è: riprese, interviste, audio, foto, trascrizioni…" });
+  const stile = h("select", {}, h("option", { value: "" }, "Nessuno in particolare"));
+  const esempi = h("textarea", { rows: 4, maxlength: 3000, placeholder: "Incolla qui esempi: trascrizioni, descrizioni di un montaggio che ti piace, un elenco di clip con i tempi, un copione…" });
+  const note = h("input", { maxlength: 800, placeholder: "Altre note" });
+  const manda = h("button", { class: "p", type: "button" }, "Manda il brief al Direttore dei Contenuti");
+  manda.addEventListener("click", async () => {
+    manda.disabled = true;
+    try {
+      const r = await api("POST", "/gestione/contenuti/brief", { titolo: titolo.value, formato: formato.value, programma: programma.value, obiettivo: obiettivo.value, durata: durata.value,
+        materiali: materiali.value, stile_id: stile.value ? Number(stile.value) : null, esempi: esempi.value, note: note.value });
+      msgB.replaceChildren(avviso("Brief inviato: è la task #" + r.task_id + ", la trovi nelle Task.", "ok")); titolo.value = ""; obiettivo.value = ""; esempi.value = "";
+    } catch (e) { msgB.replaceChildren(avviso(e.message, "no")); }
+    manda.disabled = false;
+  });
+  // --- stili ---
+  const nome = h("input", { maxlength: 120, placeholder: "Es. Il mio stile documentario / Stile podcast di X" });
+  const tipo = h("select", {}, h("option", { value: "mio" }, "È il mio stile (miei montaggi)"), h("option", { value: "riferimento" }, "Stile di riferimento da imitare"));
+  const nota = h("input", { maxlength: 1000, placeholder: "Cosa ti piace di questo stile, cosa va imitato" });
+  const testo = h("textarea", { rows: 4, maxlength: 60000, placeholder: "Incolla esempi (descrizioni, trascrizioni, elenchi di clip con i tempi)" });
+  const urls = h("textarea", { rows: 2, placeholder: "Indirizzi di video YouTube, uno per riga: se hanno i sottotitoli ne leggo parole, tempi e ritmo del parlato" });
+  const files = h("input", { type: "file", multiple: true, accept: ".xml,.fcpxml,.edl,.srt,.vtt,.txt,.md,.pdf,.docx" });
+  const docs = h("select", { multiple: true, size: 5 });
+  const crea = h("button", { class: "p", type: "button" }, "Studia e crea la scheda di stile");
+  crea.addEventListener("click", async () => {
+    crea.disabled = true;
+    try {
+      const fd = new FormData(); fd.append("nome", nome.value); fd.append("tipo", tipo.value); fd.append("note", nota.value); fd.append("testo", testo.value); fd.append("urls", urls.value);
+      fd.append("documenti", [...docs.selectedOptions].map(o => o.value).join(","));
+      for (const f of files.files) fd.append("files", f);
+      const r = await api("POST", "/gestione/contenuti/stili", fd);
+      msgS.replaceChildren(avviso("Studio avviato: la scheda sarà pronta fra poco." + (r.avvisi.length ? " Non letto: " + r.avvisi.join("; ") : ""), r.avvisi.length ? "no" : "ok"));
+      files.value = ""; testo.value = ""; urls.value = ""; nome.value = ""; carica();
+    } catch (e) { msgS.replaceChildren(avviso(e.message, "no")); }
+    crea.disabled = false;
+  });
+  const apri = async (id) => {
+    try {
+      const s = await api("GET", "/gestione/contenuti/stili/" + id);
+      const chiudi = h("button", { class: "s", type: "button", onclick: () => schedaBox.replaceChildren() }, "Chiudi");
+      const rifai = h("button", { class: "s", type: "button" }, "Rianalizza");
+      rifai.addEventListener("click", async () => { try { await api("POST", "/gestione/contenuti/stili/" + id + "/rianalizza"); schedaBox.replaceChildren(); carica(); } catch (e) { msgS.replaceChildren(avviso(e.message, "no")); } });
+      schedaBox.replaceChildren(h("div", { class: "carta" }, h("h3", {}, s.nome), h("pre", { style: "white-space:pre-wrap;font:inherit" }, s.scheda || (s.errore ? "Errore: " + s.errore : "Analisi in corso…")), h("div", { class: "azioni" }, rifai, chiudi)));
+    } catch (e) { msgS.replaceChildren(avviso(e.message, "no")); }
+  };
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/contenuti");
+      riempi(stile, [h("option", { value: "" }, "Nessuno in particolare"), d.stili.filter(s => s.ha_scheda).map(s => h("option", { value: s.id }, s.nome))]);
+      riempi(docs, d.documenti.map(x => h("option", { value: x.id }, x.nome)));
+      riempi(lista, !d.attivo ? h("p", { class: "aiuto" }, "Il reparto Contenuti non è ancora attivo: attivalo da «Reparti pronti».") : d.stili.length ? d.stili.map(s => h("div", { class: "carta", style: "margin-bottom:6px" },
+        h("b", {}, s.nome), " · " + (s.tipo === "mio" ? "mio stile" : "riferimento") + " · " + ({ in_analisi: "in analisi…", pronto: "pronta", errore: "errore" })[s.stato] + (s.errore ? " (" + s.errore + ")" : ""),
+        h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => apri(s.id) }, "Apri la scheda"),
+          h("button", { class: "s", type: "button", onclick: async () => { if (!confirm("Eliminare lo stile «" + s.nome + "»?")) return; try { await api("DELETE", "/gestione/contenuti/stili/" + s.id); carica(); } catch (e) { msgS.replaceChildren(avviso(e.message, "no")); } } }, "Elimina")))) : h("p", { class: "sotto" }, "Nessuno stile ancora."));
+    } catch (e) { msgS.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  const t = setInterval(() => { if (!document.body.contains(lista)) clearInterval(t); else if (document.activeElement.tagName !== "TEXTAREA" && document.activeElement.tagName !== "INPUT") carica(); }, 15000);
+  return h("div", {}, h("h2", {}, "Contenuti: brief e stili di montaggio"),
+    h("h3", {}, "Nuovo brief"), h("p", { class: "aiuto" }, "Descrivi cosa serve; il Direttore dei Contenuti lo smista a copy, grafica, audio, foto e montatori. Puoi indicare uno stile e incollare esempi da replicare."),
+    campo("Titolo", titolo), campo("Formato", formato), campo("Programma di montaggio", programma), campo("Obiettivo e pubblico", obiettivo), campo("Durata", durata), campo("Materiali disponibili", materiali),
+    campo("Stile di riferimento", stile), campo("Esempi da replicare", esempi), campo("Note", note), h("div", { class: "azioni" }, manda), msgB,
+    h("h3", {}, "Stili di montaggio"), h("p", { class: "aiuto" }, "Fai studiare ai montatori il tuo modo di montare: carica gli XML di Premiere, i fcpxml di DaVinci o le EDL dei tuoi montaggi (ne misuro ritmo dei tagli, transizioni, titoli), aggiungi sottotitoli, esempi incollati o video YouTube. Ne esce una scheda di stile che i montatori usano nei brief."),
+    campo("Nome dello stile", nome), campo("Tipo", tipo), campo("Note", nota), campo("File (XML, fcpxml, EDL, SRT/VTT, testo)", files),
+    campo("Oppure documenti già in memoria (tieni premuto per sceglierne più d'uno)", docs), campo("Testo incollato", testo), campo("Video YouTube", urls), h("div", { class: "azioni" }, crea), msgS, schedaBox, lista);
+}

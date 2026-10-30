@@ -12,8 +12,8 @@ MAX_CARATTERI = 2_000_000
 DIMENSIONE_PEZZO = 1200
 IMMAGINI = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
 ESTENSIONI = (".pdf", ".txt", ".md", ".csv", ".tsv", ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".rtf",
-              ".html", ".htm", ".json", ".xml", ".eml") + tuple(IMMAGINI)
-ELENCO_FORMATI = "PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), OpenDocument, RTF, HTML, JSON, XML, e-mail (.eml), TXT, MD, CSV e immagini (PNG, JPG, WEBP, GIF)"
+              ".html", ".htm", ".json", ".xml", ".eml", ".fcpxml", ".edl", ".srt", ".vtt") + tuple(IMMAGINI)
+ELENCO_FORMATI = "PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), OpenDocument, RTF, HTML, JSON, XML, montaggi (xmeml, fcpxml, EDL), sottotitoli (SRT, VTT), e-mail (.eml), TXT, MD, CSV e immagini (PNG, JPG, WEBP, GIF)"
 
 
 class FileNonLeggibile(Exception):
@@ -218,8 +218,12 @@ def estrai_testo(nome_file: str, contenuto: bytes, visione=None) -> str:
         p = _DaHtml(); p.feed(_decodifica(contenuto)); testo = "".join(p.parti)
     elif n.endswith(".eml"):
         testo = _eml(contenuto)
-    elif n.endswith((".json", ".xml")):
-        testo = _decodifica(contenuto)
+    elif n.endswith((".json", ".xml", ".fcpxml", ".edl", ".srt", ".vtt")):
+        from . import montaggio_xml
+        try:
+            testo = montaggio_xml.analizza(nome_file, contenuto) or _decodifica(contenuto)
+        except montaggio_xml.MontaggioNonLeggibile as e:
+            raise FileNonLeggibile(str(e)) from None
     elif n.endswith(".docx"):
         try:
             with zipfile.ZipFile(io.BytesIO(contenuto)) as z:
