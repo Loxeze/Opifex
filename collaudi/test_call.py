@@ -36,9 +36,9 @@ sql("INSERT INTO accessi_divisione (utente_id, divisione_id, puo_approvare, puo_
 uso = lambda: {"input_tokens": 100, "output_tokens": 20}
 def chiama(nome, dati, i="t"): return {"stop_reason": "tool_use", "usage": uso(), "content": [{"type": "tool_use", "id": i, "name": nome, "input": dati}]}
 def fine(t): return {"stop_reason": "end_turn", "usage": uso(), "content": [{"type": "text", "text": t}]}
-copione, strumenti_visti, ultimi_msg = [], [], []
+copione, strumenti_visti, ultimi_msg, modelli_visti, sforzi_visti = [], [], [], [], []
 def finta_api(corpo):
-    ultimi_msg.append(json.dumps(corpo.get("messages"), ensure_ascii=False))
+    ultimi_msg.append(json.dumps(corpo.get("messages"), ensure_ascii=False)); modelli_visti.append(corpo.get("model"))
     strumenti_visti.append([t["name"] for t in corpo.get("tools", [])])
     return copione.pop(0) if copione else fine("ok")
 agente_browser._chiama_api = finta_api
@@ -83,7 +83,16 @@ with TestClient(app) as c:
     d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
     ok("risposta di tutti e due, in ordine", [(i["da_utente"], i["agente_id"]) for i in d["interventi"]][1:] == [(True, None), (False, marco), (False, dario)] and "Che cosa vuoi sapere" in d["interventi"][0]["testo"] and d["interventi"][0]["agente_id"] == aur, str(d["interventi"]))
     ok("il secondo ha visto la risposta del primo", "servono eventi serali" in ultimi_msg[1])
-    ok("il prompt vieta le conferme tipo «ho preso nota»", "VIETATO dire o far capire di aver registrato" in ultimi_msg[1] and "ascolta, capisci, agisci" in ultimi_msg[1])
+    ok("in riunione i manager usano il modello scelto per le riunioni, non quello dell'agente", modelli_visti and set(modelli_visti) == {"claude-opus-5-5"}, str(set(modelli_visti)))
+    ok("il prompt vieta le conferme tipo «ho preso nota»", "VIETATO dire o far capire di aver registrato" in ultimi_msg[1] and "COME RISPONDI" in ultimi_msg[1] and "UNA domanda mirata" in ultimi_msg[1])
+    q = c.get("/gestione/riunioni-call/qualita", headers=H).json()
+    ok("qualita' riunioni: di default il modello migliore col ragionamento alto", q["modello"] == "claude-opus-5-5" and q["sforzo"] == "high" and "claude-opus-5-5" in q["modelli"], str(q))
+    ok("qualita' riunioni: modifica e controlli", c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-sonnet-5-5", "sforzo": "medium"}).status_code == 200
+       and c.get("/gestione/riunioni-call/qualita", headers=H).json()["modello"] == "claude-sonnet-5-5"
+       and c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "inventato"}).status_code == 422
+       and c.put("/gestione/riunioni-call/qualita", headers=H, json={"sforzo": "enorme"}).status_code == 422
+       and c.get("/gestione/riunioni-call/qualita", headers=HC).status_code == 403)
+    c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-opus-5-5", "sforzo": "high"})
     ok("un'indicazione che nomina un manager lo interpella", call_riunioni.nominati_espliciti("Marco segui il sito", [{"nome": "Marco"}]) and not call_riunioni.nominati_espliciti("Il budget e' alto", [{"nome": "Marco"}]))
     ok("non e' piu' occupato", d["occupato"] is False)
     ok("i partecipanti hanno la voce", all(p["voce_id"] for p in d["partecipanti"]))
@@ -97,7 +106,7 @@ with TestClient(app) as c:
     nuovi = [i for i in d["interventi"] if i["id"] > ult]
     ok("nominando Dario risponde solo lui, senza la riga CODA", [(i["da_utente"], i["agente_id"]) for i in nuovi] == [(True, None), (False, dario)] and "CODA" not in nuovi[-1]["testo"], str(nuovi))
     ok("la richiesta e' in coda e non e' stata detta", d["in_coda"] == 1 and "budget" not in " ".join(i["testo"] for i in d["interventi"] if i["agente_id"] == dario and "decisione" in i["testo"]))
-    ok("il prompt vieta di proporre temi propri", "SOLO a cio' che ha appena chiesto" in ultimi_msg[0] and "CODA:" in ultimi_msg[0])
+    ok("il prompt chiede di entrare nel merito e rimanda i temi propri alla coda", "Entra nel merito" in ultimi_msg[0] and "non propongono argomenti propri" in ultimi_msg[0] and "CODA:" in ultimi_msg[0])
     n0 = len(d["interventi"])
     r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Avete richieste in coda?"})
     d2 = c.get(f"/gestione/riunioni-call/{tid}?dopo={nuovi[-1]['id']}", headers=H).json()
@@ -123,7 +132,7 @@ with TestClient(app) as c:
     r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Marco, quanto costa il sito?"})
     ok("una domanda invece riceve risposta", r.json().get("registrata") is False)
     sql("UPDATE tavoli SET occupato=FALSE WHERE id=%s", (tid,))
-    ok("la regola scritta e' esposta e nel prompt", "nessuno la ripete" in c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()["regole"] and "Non ripetere mai le sue parole" in ultimi_msg[-1] and "REGOLE DELLA RIUNIONE" in ultimi_msg[-1])
+    ok("la regola scritta e' esposta e nel prompt", "nessuno la ripete" in c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()["regole"] and "Non ripetere cio" in ultimi_msg[-1] and "REGOLE DELLA RIUNIONE" in ultimi_msg[-1])
     ok("nel verbale Lorenzo ha il suo nome", "Lorenzo:" in __import__("app.tavoli", fromlist=["x"])._storia(__import__("app.tavoli", fromlist=["x"])._interventi(__import__("app.db", fromlist=["x"]).connessione().__enter__(), tid)))
     # incarichi: «preparami un documento» non e' un'indicazione
     sql("UPDATE tavoli SET occupato=FALSE WHERE id=%s", (tid,))

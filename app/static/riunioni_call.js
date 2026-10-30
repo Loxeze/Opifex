@@ -96,6 +96,24 @@ const CallVoce = {
 
 ["pointerdown", "touchstart", "touchend", "keydown", "click"].forEach(ev => document.addEventListener(ev, () => CallVoce.sblocca(), { passive: true }));
 
+function pannelloQualita() {
+  const box = h("div"), msg = h("div");
+  (async () => {
+    try {
+      const d = await api("GET", "/gestione/riunioni-call/qualita");
+      const mod = h("select", {}, h("option", { value: "" }, "Il modello di ciascun agente"), d.modelli.map(m => h("option", { value: m }, m)));
+      mod.value = d.modello || "";
+      const sf = h("select", {}, [["", "Quello di ciascun agente"], ["low", "Basso (più veloce)"], ["medium", "Medio"], ["high", "Alto (ragiona di più)"]].map(([v, t]) => h("option", { value: v }, t)));
+      sf.value = d.sforzo || "";
+      const salva = async () => { try { await api("PUT", "/gestione/riunioni-call/qualita", { modello: mod.value, sforzo: sf.value }); msg.replaceChildren(avviso("Salvato: vale dalla prossima risposta.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } };
+      mod.addEventListener("change", salva); sf.addEventListener("change", salva);
+      riempi(box, [h("p", { class: "aiuto" }, "Qui i manager rispondono col modello più capace e ragionano a fondo (consigliato: claude-opus-5-5, ragionamento alto). Costa di più e le risposte arrivano un po' più lentamente; per risparmiare scegli un modello più leggero."),
+        h("div", { class: "riga", style: "align-items:center;gap:8px;flex-wrap:wrap" }, h("span", { style: "min-width:150px" }, "Modello"), mod), h("div", { class: "riga", style: "align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px" }, h("span", { style: "min-width:150px" }, "Ragionamento"), sf)]);
+    } catch (e) { box.replaceChildren(avviso(e.message, "no")); }
+  })();
+  return h("details", { class: "carta", style: "margin-bottom:12px" }, h("summary", {}, "Qualità delle risposte"), box, msg);
+}
+
 function pannelloVociManager() {
   const box = h("div"), msg = h("div");
   const carica = async () => {
@@ -144,7 +162,7 @@ function vistaRiunioniCall() {
             r.stato === "conclusa" || r.stato === "errore" ? "Apri verbale" : r.stato === "in_corso" ? "Rientra nella call" : "Avvia la call")))) : h("p", { class: "sotto" }, "Nessuna riunione ancora."));
       } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
     };
-    riempi(corpo, [pannelloVociManager(), h("h3", {}, "Nuova riunione"), titolo, odg, h("label", {}, "Quando (facoltativo)", quando), h("p", { class: "aiuto" }, "Chi partecipa:"), scelti,
+    riempi(corpo, [pannelloQualita(), pannelloVociManager(), h("h3", {}, "Nuova riunione"), titolo, odg, h("label", {}, "Quando (facoltativo)", quando), h("p", { class: "aiuto" }, "Chi partecipa:"), scelti,
       h("div", { class: "azioni" },
         h("button", { class: "p", onclick: async () => {
           const part = caselle.filter(x => x[1].checked).map(x => x[0].nome);

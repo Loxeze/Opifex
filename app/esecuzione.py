@@ -47,11 +47,11 @@ def _carica_agente(conn, agente_id: int) -> dict:
                f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
                f.non_conservazione_attiva, f.dpa_firmato
         FROM agenti a
-        LEFT JOIN modelli_ai m ON m.nome = a.modello
+        LEFT JOIN modelli_ai m ON m.nome = COALESCE((SELECT nome FROM modelli_ai WHERE nome = %s), a.modello)
         LEFT JOIN fornitori_ai f ON f.id = m.fornitore_id
         WHERE a.id = %s
         """,
-        (agente_id,),
+        (fornitori.MODELLO_FORZATO.get(), agente_id),
     ).fetchone()
     if riga is None:
         raise EsecuzioneBloccata("Agente inesistente")
@@ -93,7 +93,7 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
     try:
         with connessione() as _c:
             _r = _c.execute("SELECT sforzo FROM agenti WHERE id = %s", (agente_id,)).fetchone()
-        tk_s = fornitori.SFORZO.set(_r["sforzo"] if _r else None)
+        tk_s = fornitori.SFORZO.set(fornitori.SFORZO_FORZATO.get() or (_r["sforzo"] if _r else None))
         try:
             out = _esegui_agente_interno(agente_id, messaggio, fascia_dati, utente_id, memorizza, max_token, allegati)
         finally:

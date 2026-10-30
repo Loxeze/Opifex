@@ -16,6 +16,8 @@ SINCRONO = False
 MAX_PARTECIPANTI = 8
 MAX_TOKEN_RISPOSTA = 1500
 NIENTE = "niente da aggiungere"
+MODELLO_RIUNIONI = "claude-opus-5-5"
+SFORZO_RIUNIONI = "high"
 REGOLE_STILE_BREVE = "diretto, tra colleghi; mai dire di aver registrato, annotato o preso nota."
 
 STILE = ("si parla come in una conversazione vocale tra colleghi che si capiscono al volo: dritti al punto, sulla sostanza, nel tono di chi sa gia' cosa fare. "
@@ -188,8 +190,49 @@ def consegna_coda(conn, tid: int) -> int:
     return len(righe)
 
 
+def qualita(conn) -> dict:
+    """Modello e sforzo di ragionamento usati dai manager in riunione (vuoto = quelli dell'agente)."""
+    r = {x["chiave"]: x["valore"] for x in conn.execute("SELECT chiave, valore FROM impostazioni_sistema WHERE chiave IN ('riunioni_modello','riunioni_sforzo')").fetchall()}
+    return {"modello": r["riunioni_modello"] if "riunioni_modello" in r else MODELLO_RIUNIONI,
+            "sforzo": r["riunioni_sforzo"] if "riunioni_sforzo" in r else SFORZO_RIUNIONI}
+
+
+def _applica_qualita():
+    """Nel thread corrente: i manager rispondono col modello e lo sforzo scelti per le riunioni."""
+    from . import fornitori
+    with connessione() as conn:
+        q = qualita(conn)
+    fornitori.MODELLO_FORZATO.set(q["modello"] or None)
+    fornitori.SFORZO_FORZATO.set(q["sforzo"] or None)
+
+
+class Qualita(BaseModel):
+    modello: str | None = Field(default=None, max_length=80)
+    sforzo: str | None = Field(default=None, max_length=10)
+
+
+@router.get("/riunioni-call/qualita")
+def leggi_qualita(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return {**qualita(conn), "modelli": [m["nome"] for m in conn.execute("SELECT nome FROM modelli_ai WHERE nome LIKE 'claude-%' ORDER BY nome").fetchall()]}
+
+
+@router.put("/riunioni-call/qualita")
+def imposta_qualita(d: Qualita, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        if d.sforzo is not None and d.sforzo not in ("", "low", "medium", "high"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Sforzo non valido")
+        if d.modello and not conn.execute("SELECT 1 FROM modelli_ai WHERE nome = %s", (d.modello,)).fetchone():
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Modello non registrato")
+        for k, v in (("riunioni_modello", d.modello), ("riunioni_sforzo", d.sforzo)):
+            if v is not None:
+                conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (k, v))
+    return {"ok": True}
+
+
 def _rispondi(tid: int, ids: list[int]):
     from .esecuzione import esegui_agente
+    _applica_qualita()
     try:
         with connessione() as conn:
             t = conn.execute("SELECT * FROM tavoli WHERE id = %s", (tid,)).fetchone()
@@ -202,11 +245,16 @@ def _rispondi(tid: int, ids: list[int]):
                 storia = tavoli._storia(tavoli._interventi(conn, tid))
             prompt = (f"RIUNIONE VOCALE «{t['titolo']}» con Lorenzo. Partecipanti: {nomi}. Tu sei {p['nome']} ({p['ruolo']}).\n\nORDINE DEL GIORNO (dato):\n{t['ordine_del_giorno']}\n\n"
                       f"CONVERSAZIONE FINORA:\n{storia}\n\n"
-                      "REGOLE DELLA RIUNIONE:\n" + REGOLE_RIUNIONE + "\n\nLorenzo guida la riunione e decide la linea: rispondi SOLO a cio' che ha appena chiesto, senza anticipare altri temi, senza proporre argomenti tuoi e senza porgli domande. Non ripetere mai le sue parole. "
-                      "Rispondi a voce: italiano parlato, al massimo 4 frasi (spesso ne basta una), nessun elenco e nessun markdown, per la tua competenza e senza ripetere cio' che hanno detto gli altri. Lorenzo ti sta parlando come parlerebbe a un collaboratore di fiducia: ascolta, capisci, agisci. "
-                      f"Se non hai nulla di utile da aggiungere rispondi esattamente «{NIENTE.capitalize()}». Non inventare fatti: se non lo sai, dillo.\n"
-                      "Se hai una richiesta, una segnalazione, una decisione che ti serve o un tema tuo da portargli, NON dirlo ora: scrivilo in una riga finale che inizia con «CODA:» (al massimo due frasi). "
-                      "Lorenzo la sentira' dopo, quando chiedera' le richieste in coda.")
+                      "REGOLE DELLA RIUNIONE:\n" + REGOLE_RIUNIONE + "\n\n"
+                      "Lorenzo e' il titolare e ti parla a voce come a un collaboratore senior di cui si fida: si aspetta intelligenza e giudizio, non burocrazia.\n"
+                      "COME RISPONDI:\n"
+                      "- Entra nel merito: ragiona sul problema, prendi posizione e dai la tua raccomandazione con il perche' in una frase. Se vedi un rischio, un'alternativa migliore o un errore nel ragionamento di Lorenzo, diglielo con franchezza e rispetto.\n"
+                      "- Usa quello che sai: documenti, progetti e fatti dell'organizzazione, e i tuoi strumenti (cerca davvero prima di dire che non sai). Cifre, nomi e date concreti; mai inventare: se manca un dato, di' quale e dove lo prenderesti.\n"
+                      "- Se la richiesta e' ambigua o ti manca un'informazione decisiva, fai UNA domanda mirata invece di indovinare.\n"
+                      "- Lunghezza naturale: una o due frasi per le cose semplici, fino a una decina di frasi parlate per quelle complesse. Italiano parlato e scorrevole, senza elenchi e senza markdown.\n"
+                      "- Non ripetere cio' che hanno gia' detto gli altri: se concordi aggiungi solo cio' che manca. Dai un parere dalla tua competenza, non dalla loro.\n"
+                      f"- Se davvero non hai nulla di utile da aggiungere rispondi esattamente «{NIENTE.capitalize()}».\n"
+                      "Se hai una segnalazione importante ma fuori dal tema del momento, scrivila in una riga finale che inizia con «CODA:» (al massimo due frasi): Lorenzo la sentira' quando chiedera' le richieste in coda.")
             try:
                 testo = esegui_agente(aid, prompt, "interno", None, max_token=MAX_TOKEN_RISPOSTA)["risposta"].strip()
             except Exception as e:  # noqa: BLE001
@@ -225,6 +273,7 @@ def _rispondi(tid: int, ids: list[int]):
 def _lavora(tid: int, aid: int, task_id: int, testo: str):
     """Esegue l'incarico in autonomia (con tutti gli strumenti dell'agente, anche Drive) e lo riferisce nella riunione."""
     from .esecuzione import esegui_agente
+    _applica_qualita()
     try:
         with connessione() as conn:
             t = conn.execute("SELECT titolo, ordine_del_giorno FROM tavoli WHERE id = %s", (tid,)).fetchone()

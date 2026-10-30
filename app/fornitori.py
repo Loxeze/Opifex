@@ -44,6 +44,8 @@ CODICI_TRANSITORI = {408, 409, 425, 429, 500, 502, 503, 504, 529}   # sovraccari
 
 
 import contextvars
+MODELLO_FORZATO = contextvars.ContextVar("modello_forzato", default=None)   # nome del modello da usare al posto di quello dell'agente (riunioni: massima qualita')
+SFORZO_FORZATO = contextvars.ContextVar("sforzo_forzato", default=None)
 SFORZO = contextvars.ContextVar("sforzo_agente", default=None)   # 'low' | 'medium' | 'high': sforzo di ragionamento dell'agente in esecuzione (solo modelli Anthropic)
 
 
