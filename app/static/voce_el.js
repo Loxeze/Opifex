@@ -39,10 +39,28 @@ function pulsanteAscolta(daiTesto, etichetta, agenteId) {
     try {
       const r = await fetch("/voce/leggi", { method: "POST", headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) }, body: JSON.stringify({ testo: daiTesto(), agente_id: typeof agenteId === "function" ? agenteId() : (agenteId || null) }) });
       if (!r.ok) { let d = null; try { d = await r.json(); } catch (e) { /* ignora */ } throw new Error(messaggioErrore(d)); }
-      const url = URL.createObjectURL(await r.blob());
-      audio = new Audio(url);
-      audio.addEventListener("ended", () => { audio = null; b.textContent = etichetta || "▶ Ascolta"; URL.revokeObjectURL(url); });
-      await audio.play(); b.textContent = "⏹ Ferma";
+      const buf = await r.arrayBuffer();
+      const testa = new Uint8Array(buf.slice(0, 3));
+      const mp3 = (testa[0] === 0x49 && testa[1] === 0x44 && testa[2] === 0x33) || (testa[0] === 0xff && (testa[1] & 0xe0) === 0xe0);
+      if (!mp3) { let m = "La risposta non è un audio"; try { m += ": " + new TextDecoder().decode(buf.slice(0, 160)); } catch (e) { /* ignora */ } throw new Error(m); }
+      const blob = new Blob([buf], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      const finito = () => { audio = null; b.textContent = etichetta || "▶ Ascolta"; URL.revokeObjectURL(url); };
+      audio = new Audio(); audio.preload = "auto";
+      audio.addEventListener("ended", finito);
+      audio.src = url;
+      try { await audio.play(); b.textContent = "⏹ Ferma"; }
+      catch (e1) {   // piano B: decodifica con WebAudio (alcuni browser rifiutano l'elemento audio ma suonano così)
+        audio = null;
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) throw e1;
+        const ctx = new Ctx(); await ctx.resume();
+        const dati = await ctx.decodeAudioData(buf.slice(0));
+        const src = ctx.createBufferSource(); src.buffer = dati; src.connect(ctx.destination);
+        audio = { pause() { try { src.stop(); } catch (e) { /* ok */ } } };
+        src.onended = () => { finito(); ctx.close(); };
+        src.start(); b.textContent = "⏹ Ferma";
+      }
     } catch (e) { audio = null; msg.textContent = e.message; b.textContent = etichetta || "▶ Ascolta"; }
     b.disabled = false;
   });

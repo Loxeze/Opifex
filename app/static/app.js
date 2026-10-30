@@ -75,11 +75,11 @@ function mostraAccesso(errore) {
 // ---------- Struttura ----------
 const VISTE = [["dashboard", "Dashboard"], ["chat", "Chat"], ["task", "Task"], ["progetti", "Progetti"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["crm", "CRM"], ["documenti", "Documenti"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
 const GRUPPI_IMP = [["Io e account", ["profilo", "voce", "app"]], ["Organizzazione", ["struttura", "utenti", "reparti", "tavoli", "cerimoniere", "quando", "smistamento"]],
-  ["Collegamenti", ["collegamenti", "connessioni", "siti", "canali", "social", "monitorsocial", "percorsi"]], ["Conoscenza e formazione", ["biblioteca", "studi", "memoria", "imprese", "noteaurora", "miglioramenti", "dossier"]],
+  ["Collegamenti", ["collegamenti", "connessioni", "siti", "canali", "social", "monitorsocial", "archivio", "percorsi"]], ["Conoscenza e formazione", ["biblioteca", "studi", "memoria", "imprese", "noteaurora", "miglioramenti", "dossier"]],
   ["Controllo e sicurezza", ["sicurezza", "registro", "sentinelle", "salute", "sandbox"]], ["Sistema", ["aggiornamenti", "misure", "spesareparti", "dipendenze", "diagnostica", "esempio", "memoriavett", "giro", "contenuti", "sistema"]]];
 const VISTE_COLLABORATORE = [["task", "Task"], ["progetti", "Progetti"], ["iniziative", "Iniziative"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Collegamenti (Google, posta)"], ["connessioni", "Connessioni a siti e app"], ["siti", "Siti e hosting (chiavi)"],
-  ["canali", "Canali (Telegram)"], ["social", "Social"], ["monitorsocial", "Profili social monitorati"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["imprese", "Schede d'impresa"], ["tavoli", "Tavoli di lavoro"], ["noteaurora", "Note di Aurora"], ["miglioramenti", "Miglioramento degli agenti"], ["spesareparti", "Spesa per reparto"], ["dipendenze", "Controllo delle librerie"], ["diagnostica", "Diagnostica (log scaricabile)"], ["esempio", "Impara da un esempio"], ["memoriavett", "Memoria condivisa (vettoriale)"], ["giro", "Giro di aggiornamento"], ["contenuti", "Contenuti: brief e stili di montaggio"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["misure", "Consumi (dove vanno i token)"], ["sistema", "Backup e costi"]];
+  ["canali", "Canali (Telegram)"], ["social", "Social"], ["monitorsocial", "Profili social monitorati"], ["archivio", "Archivio NAS"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["imprese", "Schede d'impresa"], ["tavoli", "Tavoli di lavoro"], ["noteaurora", "Note di Aurora"], ["miglioramenti", "Miglioramento degli agenti"], ["spesareparti", "Spesa per reparto"], ["dipendenze", "Controllo delle librerie"], ["diagnostica", "Diagnostica (log scaricabile)"], ["esempio", "Impara da un esempio"], ["memoriavett", "Memoria condivisa (vettoriale)"], ["giro", "Giro di aggiornamento"], ["contenuti", "Contenuti: brief e stili di montaggio"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["misure", "Consumi (dove vanno i token)"], ["sistema", "Backup e costi"]];
 
 function vai(vista, sezione) { if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "social" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
@@ -244,6 +244,7 @@ function modulo(a) {
   const emailAttivo = h("input", { type: "checkbox" }); emailAttivo.checked = !!d.email_attivo;
   const crmAttivo = h("input", { type: "checkbox" }); crmAttivo.checked = !!d.crm_attivo;
   const canvaAttivo = h("input", { type: "checkbox" }); canvaAttivo.checked = !!d.canva_attivo;
+  const archivioAttivo = h("input", { type: "checkbox" }); archivioAttivo.checked = !!d.archivio_attivo;
   const driveAttivo = h("input", { type: "checkbox" }); driveAttivo.checked = !!d.drive_attivo;
   const conn = stato.connessioni.map(c => {
     const cb = h("input", { type: "checkbox", value: c.id }); cb.checked = d.connessioni.includes(c.id);
@@ -291,7 +292,7 @@ function modulo(a) {
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,
       fasi: fasi.filter(f => f.titolo.trim()).map(f => ({ ...f, titolo: f.titolo.trim() })),
-      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, email_attivo: emailAttivo.checked, crm_attivo: crmAttivo.checked, canva_attivo: canvaAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null,
+      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, email_attivo: emailAttivo.checked, crm_attivo: crmAttivo.checked, canva_attivo: canvaAttivo.checked, archivio_attivo: archivioAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null,
       connessioni: conn.filter(([, cb]) => cb.checked).map(([c]) => c.id),
     };
     try {
@@ -385,6 +386,7 @@ function modulo(a) {
       h("div", { class: "interruttore" }, vedeTutto, h("span", {}, "Vede cosa fai e cosa ti dicono gli altri agenti (sintesi recente, nei limiti di riservatezza)")),
       h("label", {}, "Casella di posta che gestisce (legge e prepara bozze, non invia)", gmailSel),
       h("div", { class: "interruttore" }, socialAttivo, h("span", {}, "Può preparare post per i social via Buffer (non pubblica: li approvi tu dalla pagina Social)")),
+      h("div", { class: "interruttore" }, archivioAttivo, h("span", {}, "Può cercare foto e video nell'Archivio NAS e chiedere foto pronte o trascrizioni (serve il connettore sul NAS)")),
       h("div", { class: "interruttore" }, canvaAttivo, h("span", {}, "Può creare ed esportare design su Canva (serve Canva collegato in Collegamenti)")),
       h("div", { class: "interruttore" }, crmAttivo, h("span", {}, "Può consultare i conteggi del CRM (solo numeri aggregati, mai nomi o recapiti)")),
       h("div", { class: "interruttore" }, emailAttivo, h("span", {}, "Può preparare campagne email via Brevo (non invia: le approvi tu dalla pagina Email)")),

@@ -1,0 +1,13 @@
+# Opifex - connettore per il NAS. Modifica solo la parte "volumes": una riga per ogni cartella condivisa del NAS
+# che vuoi far conoscere a Opifex (sempre in sola lettura, ":ro"). A sinistra il percorso sul NAS, a destra /dati/<nome>.
+services:
+  opifex-nas:
+    build: .
+    container_name: opifex-@@NOME@@
+    restart: unless-stopped
+    environment:
+      OPIFEX_URL: "@@URL@@"
+      OPIFEX_TOKEN: "@@TOKEN@@"
+    volumes:
+      - /volume1/Video:/dati/Video:ro
+      - /volume1/Foto:/dati/Foto:ro

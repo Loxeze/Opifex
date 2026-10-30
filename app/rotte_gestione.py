@@ -66,6 +66,7 @@ class DatiAgente(BaseModel):
     rimanda_a: str | None = Field(default=None, max_length=300)
     crm_attivo: bool = False
     canva_attivo: bool = False
+    archivio_attivo: bool = False
     fasi: list[Fase] = []
     connessioni: list[int] = []
 
@@ -98,6 +99,7 @@ class ModificaAgente(BaseModel):
     rimanda_a: str | None = Field(default=None, max_length=300)
     crm_attivo: bool | None = None
     canva_attivo: bool | None = None
+    archivio_attivo: bool | None = None
     fasi: list[Fase] | None = None
     connessioni: list[int] | None = None
 
@@ -155,7 +157,7 @@ SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divis
        a.sentinella,
        CASE WHEN a.sentinella THEN 'sentinella' WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' ELSE a.livello END AS categoria,
        a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.sforzo, a.budget_token_mensile,
-       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.rimanda_a, a.crm_attivo, a.canva_attivo, ETICHETTA_SQL AS etichetta,
+       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.rimanda_a, a.crm_attivo, a.canva_attivo, a.archivio_attivo, ETICHETTA_SQL AS etichetta,
        COALESCE((SELECT json_agg(json_build_object('titolo', f.titolo, 'istruzioni', f.istruzioni, 'approvazione', f.approvazione,
                                                     'parere_superiore', f.parere_superiore) ORDER BY f.posizione)
                  FROM fasi_agente f WHERE f.agente_id = a.id), '[]'::json) AS fasi,
@@ -228,6 +230,8 @@ def crea(d: DatiAgente, utente: dict = Depends(solo_titolare)):
             conn.execute("UPDATE agenti SET crm_attivo = TRUE WHERE id = %s", (riga["id"],))
         if d.canva_attivo:
             conn.execute("UPDATE agenti SET canva_attivo = TRUE WHERE id = %s", (riga["id"],))
+        if d.archivio_attivo:
+            conn.execute("UPDATE agenti SET archivio_attivo = TRUE WHERE id = %s", (riga["id"],))
         if d.rimanda_a:
             conn.execute("UPDATE agenti SET rimanda_a = %s WHERE id = %s", (d.rimanda_a.strip() or None, riga["id"]))
         _scrivi_connessioni(conn, riga["id"], d.connessioni)

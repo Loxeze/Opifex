@@ -1,0 +1,34 @@
+OPIFEX - CONNETTORE PER IL NAS
+==============================
+
+Cosa fa
+-------
+Gira sul NAS dentro un contenitore Docker e si collega SOLO in uscita a Opifex: non devi aprire nessuna porta del router.
+Legge (in sola lettura) le cartelle che gli indichi, e per ogni foto/video manda a Opifex una scheda con misure, data, fotocamera e
+qualche miniatura. Gli originali restano sul NAS. Escono dal NAS soltanto:
+  - le miniature (piccole, 512 px);
+  - una foto ridimensionata, SE un agente o tu la chiedete per un post;
+  - l'audio di un video, SE ne chiedete la trascrizione.
+
+Installazione (UGREEN UGOS Pro)
+-------------------------------
+1. Estrai questa cartella "opifex-nas" in una cartella condivisa del NAS (per esempio "docker/opifex-nas").
+2. Apri docker-compose.yml con un editor di testo e controlla la sezione "volumes": a sinistra il percorso REALE delle tue cartelle sul NAS
+   (di solito /volume1/NomeCartella; lo vedi in File Manager > proprieta' della cartella), a destra /dati/NomeCartella.
+   Lascia sempre ":ro" in fondo (sola lettura).
+3. In UGOS apri l'app Docker > Progetto > Crea, scegli la cartella opifex-nas e il file docker-compose.yml, poi Avvia.
+   (In alternativa, da SSH:  cd opifex-nas && docker compose up -d --build)
+4. In Opifex, sezione Archivio NAS: il connettore compare "online" entro un minuto. Aggiungi le cartelle da catalogare:
+   come "percorso" scrivi il percorso sotto /dati (per esempio "Video/Montarrenti"), oppure lascia vuoto per tutto /dati.
+
+Sicurezza
+---------
+- La chiave nel docker-compose.yml e' segreta: non condividerla. Se la perdi o sospetti qualcosa, in Opifex scarica un pacchetto nuovo:
+  la chiave vecchia smette subito di funzionare.
+- Il contenitore monta le tue cartelle solo in lettura: non puo' modificare ne' cancellare nulla.
+
+Se qualcosa non va
+------------------
+- Log del contenitore: in UGOS Docker > Contenitori > opifex-... > Log.
+- "Cartella non trovata": il percorso scritto in Opifex non corrisponde a un volume del docker-compose.
+- La prima scansione di un archivio grande puo' durare ore: e' normale, procede da sola e riparte da dove era arrivata.

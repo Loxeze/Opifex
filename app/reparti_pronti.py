@@ -125,12 +125,12 @@ def attiva(conn, chiave: str, utente: dict | None = None) -> dict:
         elif chiave == "contenuti":
             nome, ruolo, istr, extra = voce
             extra = dict(extra); livello = extra.pop("_livello", "operativo")
-            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, livello, _mod(chiave, nome, "claude-sonnet-5-5"), istr, **{"usa_biblioteca": False, **extra})
+            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, livello, _mod(chiave, nome, "claude-sonnet-5-5"), istr, **{"usa_biblioteca": False, "archivio_attivo": True, **extra})
             if nuovo:
                 creati.append(nome)
         elif chiave == "social":
             nome, ruolo, istr, extra = voce
-            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", _mod(chiave, nome, "claude-sonnet-5-5"), istr + " " + REGOLE_SOC, usa_biblioteca=True, **extra)
+            aid, nuovo = _crea(conn, div_id, man, nome, ruolo, "operativo", _mod(chiave, nome, "claude-sonnet-5-5"), istr + " " + REGOLE_SOC, usa_biblioteca=True, **{"archivio_attivo": True, **extra})
             if nuovo:
                 creati.append(nome)
         elif chiave in ("legale", "editoria"):
