@@ -34,7 +34,7 @@ except ImportError:
     except Exception:  # noqa: BLE001
         pass
 
-VERSIONE = "1.2"
+VERSIONE = "1.3"
 URL = os.environ.get("OPIFEX_URL", "").rstrip("/")
 TOKEN = os.environ.get("OPIFEX_TOKEN", "")
 DATI = Path(os.environ.get("OPIFEX_DATI", "/dati"))
@@ -229,11 +229,21 @@ def testo_documento(p: Path) -> str:
 
 
 # ---------------- scansione ----------------
-def elenca(radice: Path):
-    for cartella, sotto, files in os.walk(radice):
+def elenca(radice: Path, stat: dict | None = None):
+    st_ = stat if stat is not None else {}
+    st_.update({"cartelle": 0, "illeggibili": 0, "altri": 0, "estensioni": {}})
+
+    def errore(e):
+        st_["illeggibili"] += 1
+    for cartella, sotto, files in os.walk(radice, onerror=errore):
+        st_["cartelle"] += 1
         sotto[:] = [d for d in sorted(sotto) if d.lower() not in SALTA and not d.startswith(".")]
         for f in sorted(files):
             if f.startswith(".") or f.startswith("~$") or not tipo_di(f):
+                if not f.startswith("."):
+                    st_["altri"] += 1
+                    e = f.rsplit(".", 1)[-1].lower()[:6] if "." in f else "(senza)"
+                    st_["estensioni"][e] = st_["estensioni"].get(e, 0) + 1
                 continue
             p = Path(cartella) / f
             try:
@@ -285,12 +295,30 @@ def scansiona(cartella: dict) -> None:
             if nuovi % 25 == 0:
                 evadi_richieste()
         lotto.clear()
-    for rel, size, mtime in elenca(radice):
+    stat: dict = {}
+    for rel, size, mtime in elenca(radice, stat):
         lotto.append((rel, size, mtime))
         totale += 1
         if len(lotto) >= LOTTO:
             svuota()
     svuota()
+    if totale == 0:   # nessun file riconosciuto: dico perche', senza cancellare nulla dal catalogo
+        try:
+            radice_elenco = ", ".join(sorted(x.name for x in radice.iterdir())[:6])
+        except OSError:
+            radice_elenco = ""
+        if stat.get("illeggibili"):
+            msg = f"Il contenitore non riesce a leggere {stat['illeggibili']} cartelle (permessi): dai al contenitore il permesso di lettura sulla cartella condivisa."
+        elif not stat.get("altri") and stat.get("cartelle", 0) <= 1 and not radice_elenco:
+            msg = f"La cartella /dati/{cartella['percorso']} e' VUOTA per il contenitore: il percorso a sinistra dei due punti in 'volumes' del docker-compose non esiste sul NAS o e' sbagliato (Docker ne crea una vuota)."
+        elif stat.get("altri"):
+            top = ", ".join(f".{k} x{v}" for k, v in sorted(stat["estensioni"].items(), key=lambda x: -x[1])[:5])
+            msg = f"Visti {stat['altri']} file ma nessuno di tipo foto, video, audio o documento riconosciuto ({top})."
+        else:
+            msg = f"Trovate {stat.get('cartelle', 0)} cartelle ma nessun file dentro. Contenuto: {radice_elenco or 'vuoto'}."
+        chiama("POST", "/fine-scansione", json={"cartella_id": cid, "scan": 0, "errore": msg[:290]})
+        log.warning("Cartella %s: %s", cartella["percorso"] or "/", msg)
+        return
     chiama("POST", "/fine-scansione", json={"cartella_id": cid, "scan": scan})
     log.info("Cartella %s: %d file visti, %d nuovi o cambiati", cartella["percorso"] or "/", totale, nuovi)
 
