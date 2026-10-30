@@ -123,7 +123,11 @@ async def carica(file: list[UploadFile] = File(...), fascia_dati: str = Form("in
                     if not pezzo:
                         break
                     await run_in_threadpool(out.write, pezzo)
+            await f.close()   # libera subito la copia temporanea di Starlette: sul disco resta una sola copia alla volta
             files.append(((f.filename or "documento").strip(), dest))
+    except OSError as ex:
+        shutil.rmtree(cartella, ignore_errors=True)
+        raise HTTPException(status.HTTP_507_INSUFFICIENT_STORAGE, f"Spazio sul server insufficiente o scrittura non riuscita ({ex.strerror or type(ex).__name__}): libera spazio e riprova") from None
     except BaseException:
         shutil.rmtree(cartella, ignore_errors=True)
         raise
@@ -134,6 +138,9 @@ async def carica(file: list[UploadFile] = File(...), fascia_dati: str = Form("in
             except HTTPException:
                 shutil.rmtree(cartella, ignore_errors=True)
                 raise
+            except Exception as ex:  # noqa: BLE001
+                shutil.rmtree(cartella, ignore_errors=True)
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Caricamento non riuscito ({type(ex).__name__}): {str(ex)[:160]}") from None
     return {"id": await run_in_threadpool(lavoro), "formati": ELENCO_FORMATI}
 
 

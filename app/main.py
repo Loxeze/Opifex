@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -252,6 +252,14 @@ async def intestazioni_sicure(richiesta, call_next):
     if richiesta.url.path.startswith("/app"):
         risposta.headers["Cache-Control"] = "no-cache"   # il browser controlla sempre se c'e' una versione nuova (ETag): niente grafica vecchia dopo un aggiornamento
     return risposta
+
+
+@app.exception_handler(Exception)
+async def errore_imprevisto(richiesta, ex):
+    """Un guasto non previsto non deve diventare un muto «errore sconosciuto»: la causa si legge a schermo e resta nel registro del servizio."""
+    import logging
+    logging.getLogger("opifex").error("Errore imprevisto su %s %s", richiesta.method, richiesta.url.path, exc_info=ex)
+    return JSONResponse({"detail": f"Errore del server ({type(ex).__name__}): {str(ex)[:200] or 'senza dettagli'}"}, status_code=500)
 
 
 app.include_router(router_agenti)

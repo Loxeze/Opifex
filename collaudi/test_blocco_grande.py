@@ -45,4 +45,12 @@ with TestClient(app) as c:
     ok("zip da disco", r.status_code == 202 and d == (30, 30), str(d))
     r = c.post("/gestione/documenti-blocco", headers=H, files=[("file", ("vuoto.xyz", b"a", "text/plain"))], data={"fascia_dati": "interno"})
     ok("formato non supportato segnalato, non bloccante", r.status_code == 202 and sql("SELECT saltati FROM caricamenti_blocco ORDER BY id DESC LIMIT 1")[0][0] == 1)
+    from fastapi import APIRouter
+    rt = APIRouter()
+    @rt.get("/_guasto")
+    def _g(): raise RuntimeError("prova di guasto")
+    app.include_router(rt)
+    with TestClient(app, raise_server_exceptions=False) as c2:
+        r = c2.get("/_guasto")
+        ok("guasto imprevisto: messaggio leggibile in JSON", r.status_code == 500 and "RuntimeError" in r.json()["detail"] and "prova di guasto" in r.json()["detail"], r.text[:150])
 print("TOTALE", sum(ris), "/", len(ris))
