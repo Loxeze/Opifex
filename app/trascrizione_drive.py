@@ -1,17 +1,15 @@
-"""Trascrizione dell'audio di un video o di un file audio su Drive: scarica, estrae l'audio con ffmpeg, lo taglia in blocchi da 5 minuti e li trascrive
+"""Trascrizione dell'audio di un video o di un file audio su Drive: legge dal flusso di Drive, estrae l'audio con ffmpeg, lo taglia in blocchi da 5 minuti e li trascrive
 (Whisper). Il testo esce con i tempi [mm:ss] per ogni blocco. A pezzi da 40 minuti per volta, cosi' una chiamata resta breve."""
 import os
 import shutil
 import subprocess
 import tempfile
 
-import httpx
-
 from . import trascrizione
 
+_URL = os.environ.get("OPIFEX_DRIVE_MEDIA", "https://www.googleapis.com/drive/v3/files/{fid}?alt=media")
 BLOCCO_S = 300
 BLOCCHI_PER_CHIAMATA = 8
-MAX_BYTE_SCARICO = 1_500_000_000
 MAX_MINUTI = 240
 
 
@@ -40,30 +38,17 @@ def trascrivi(tok: str, fid: str, nome: str, durata_s: int | None, da_minuto: in
     if da_minuto >= MAX_MINUTI:
         return "ERRORE: oltre le 4 ore non trascrivo"
     with tempfile.TemporaryDirectory(prefix="trasc_") as d:
-        sorgente = os.path.join(d, "sorgente")
-        scaricati = 0
+        # ffmpeg legge il file direttamente da Drive (a flusso, senza salvarlo): funziona anche con riprese da diversi GB
+        sorgente = _URL.format(fid=fid)
+        cmd = [ff, "-v", "error", "-headers", f"Authorization: Bearer {tok}\r\n", "-ss", str(da_minuto * 60), "-i", sorgente, "-t", str(BLOCCO_S * BLOCCHI_PER_CHIAMATA),
+               "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k", "-f", "segment", "-segment_time", str(BLOCCO_S), "-reset_timestamps", "1", os.path.join(d, "b%03d.mp3")]
         try:
-            with httpx.stream("GET", f"https://www.googleapis.com/drive/v3/files/{fid}", params={"alt": "media"},
-                              headers={"Authorization": "Bearer " + tok}, timeout=120) as r:
-                if r.status_code >= 400:
-                    return f"ERRORE: Drive ha risposto {r.status_code} scaricando il file"
-                with open(sorgente, "wb") as f:
-                    for pezzo in r.iter_bytes(1 << 20):
-                        scaricati += len(pezzo)
-                        if scaricati > MAX_BYTE_SCARICO:
-                            return "ERRORE: file troppo grande per la trascrizione (oltre 1,5 GB): chiedi a Lorenzo un'esportazione solo audio"
-                        f.write(pezzo)
-        except httpx.HTTPError as e:
-            return f"ERRORE: scaricamento non riuscito ({type(e).__name__})"
-        cmd = [ff, "-v", "error", "-ss", str(da_minuto * 60), "-i", sorgente, "-t", str(BLOCCO_S * BLOCCHI_PER_CHIAMATA), "-vn", "-ac", "1", "-ar", "16000",
-               "-b:a", "32k", "-f", "segment", "-segment_time", str(BLOCCO_S), "-reset_timestamps", "1", os.path.join(d, "b%03d.mp3")]
-        try:
-            p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=1500)
         except subprocess.TimeoutExpired:
-            return "ERRORE: l'estrazione dell'audio ha impiegato troppo"
+            return "ERRORE: la lettura dell'audio da Drive ha impiegato troppo: riprova, o chiedi a Lorenzo un'esportazione solo audio"
         blocchi = sorted(x for x in os.listdir(d) if x.startswith("b") and x.endswith(".mp3"))
         if not blocchi:
-            return "ERRORE: nel file non c'e' audio da trascrivere" + (f" ({p.stderr.strip()[:150]})" if p.stderr.strip() else "")
+            return "ERRORE: nel file non c'e' audio da trascrivere" + (f" ({p.stderr.strip()[-200:]})" if p.stderr.strip() else "")
         out, fine = [], False
         for i, b in enumerate(blocchi):
             with open(os.path.join(d, b), "rb") as f:
