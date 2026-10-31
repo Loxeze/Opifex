@@ -240,7 +240,8 @@ function conversazioniChat() {
   // ----- invio -----
   const invia = async () => {
     if (!S.agenteId || (!testo.value.trim() && !allegati.files.length)) return;
-    msg.replaceChildren(); Voce.ferma();
+    msg.replaceChildren(); await Voce.chiudiEAttendi(); Voce.ferma();
+    if (!testo.value.trim() && !allegati.files.length) return;
     bInvia.disabled = true; bInvia.textContent = "Invio…";
     const id = S.agenteId;
     try {

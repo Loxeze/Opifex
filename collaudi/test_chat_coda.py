@@ -76,9 +76,10 @@ with TestClient(app) as c:
     # in corso e ripresa
     sql("INSERT INTO chat_coda (agente_id, utente_id, messaggio, stato) VALUES (%s,(SELECT id FROM utenti WHERE email='l@p.it'),'pendente','in_lavoro')", (marco,))
     ok("messaggi in attesa elencati per riprendere", [x["messaggio"] for x in c.get("/chat-coda", headers=H).json()] == ["pendente"] and c.get("/chat-coda", headers=HC).json() == [])
+    sql("UPDATE chat_coda SET riprese = 1 WHERE messaggio='pendente'")   # gia' ripreso una volta: non riparte di nuovo
     with connessione() as cn:
         chat_coda.riavvio(cn)
-    ok("al riavvio i lavori a meta' risultano interrotti", sql("SELECT stato FROM chat_coda WHERE messaggio='pendente'") == [("errore",)])
+    ok("al riavvio i lavori a meta' (gia' ripresi) risultano interrotti", sql("SELECT stato FROM chat_coda WHERE messaggio='pendente'") == [("errore",)])
     # allegati asincroni
     copione[:] = [fine("Letto")]
     r = c.post(f"/agenti/{marco}/chat-allegati", headers=H, data={"messaggio": "guarda", "fascia_dati": "interno", "asincrono": "true"}, files=[("file", ("a.txt", ("contenuto di prova per il test. " * 10).encode(), "text/plain"))])

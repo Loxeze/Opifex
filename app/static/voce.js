@@ -56,11 +56,23 @@ const Voce = (() => {
       rec.onerror = (ev) => { errore = true; quandoStato && quandoStato(spiega(ev.error) || "Non ho sentito nulla: parla vicino al microfono o prova «Trascrizione sul server»."); };
       rec.onend = () => {
         rec = null;
+        if (v._chiudendo) { v._chiudendo = false; quandoStato && quandoStato(null); return; }   // chiusa da chi sta inviando: non ripartire
         if (!ricevuto && !errore) quandoStato && quandoStato("Non ho trascritto nulla: il microfono non ha captato parole. Controlla il microfono scelto nel browser, oppure passa a «Trascrizione sul server».");
         quandoStato && quandoStato(null); quandoFinito && quandoFinito(campo.value.trim());
       };
       try { rec.start(); quandoStato && quandoStato("ascolto"); } catch (e) { rec = null; return false; }
       return true;
+    },
+    // chiude la dettatura del browser ASPETTANDO il testo finale (se si invia mentre si parla, il messaggio non parte tagliato)
+    chiudiEAttendi() {
+      if (!rec) return Promise.resolve();
+      return new Promise((risolvi) => {
+        const r = rec; v._chiudendo = true;
+        const fine = () => { v._chiudendo = false; risolvi(); };
+        const o = r.onend; r.onend = (e) => { try { o && o(e); } finally { fine(); } };
+        setTimeout(fine, 1500);
+        try { r.stop(); } catch (e) { fine(); }
+      });
     },
     inAscolto() { return !!rec || !!reg; },
     // chiude la dettatura: in modo server la registrazione fatta fin qui viene trascritta

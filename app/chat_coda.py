@@ -41,7 +41,8 @@ def _lavora(coda_id: int, agente_id: int, utente_id: int, messaggio: str, fascia
 
 def accoda(agente_id: int, utente_id: int, messaggio: str, fascia: str, allegati=None, extra: dict | None = None, sincrono: bool = False, canale: str = "web") -> int:
     with connessione() as conn:
-        cid = conn.execute("INSERT INTO chat_coda (agente_id, utente_id, messaggio, canale) VALUES (%s,%s,%s,%s) RETURNING id", (agente_id, utente_id, messaggio, canale)).fetchone()["id"]
+        cid = conn.execute("INSERT INTO chat_coda (agente_id, utente_id, messaggio, canale, fascia, con_allegati) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+                           (agente_id, utente_id, messaggio, canale, fascia, bool(allegati))).fetchone()["id"]
     args = (cid, agente_id, utente_id, messaggio, fascia, allegati, extra or {})
     if sincrono:
         _lavora(*args)
@@ -51,5 +52,14 @@ def accoda(agente_id: int, utente_id: int, messaggio: str, fascia: str, allegati
 
 
 def riavvio(conn):
-    """Al riavvio i lavori rimasti a meta' non ripartono da soli: si segnano come interrotti."""
-    conn.execute("UPDATE chat_coda SET stato='errore', errore='Interrotta da un riavvio del sistema: reinvia il messaggio', finito_il=NOW() WHERE stato IN ('in_coda','in_lavoro')")
+    """Al riavvio i messaggi rimasti a meta' ripartono da soli, una volta sola, se erano recenti e senza allegati (gli allegati non si conservano);
+    gli altri si segnano come interrotti con il motivo."""
+    ripartono = conn.execute(
+        """UPDATE chat_coda SET stato = 'in_coda', riprese = riprese + 1, errore = NULL
+           WHERE stato IN ('in_coda','in_lavoro') AND NOT con_allegati AND riprese < 1 AND canale IN ('web','voce') AND creato_il > NOW() - interval '3 hours'
+           RETURNING id, agente_id, utente_id, messaggio, fascia""").fetchall()
+    conn.execute("UPDATE chat_coda SET stato='errore', errore='Interrotta da un riavvio del sistema: reinvia il messaggio', finito_il=NOW() WHERE stato IN ('in_coda','in_lavoro') AND id <> ALL(%s)",
+                 ([r["id"] for r in ripartono] or [0],))
+    for r in ripartono:
+        threading.Thread(target=_lavora, args=(r["id"], r["agente_id"], r["utente_id"], r["messaggio"], r["fascia"], None, {}), daemon=True).start()
+    return len(ripartono)
