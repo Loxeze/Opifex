@@ -13,7 +13,7 @@ function apriAllineamento() {
     if (!file.length) { corpo.replaceChildren(h("p", { class: "sotto" }, "Nessun documento creato dagli agenti finora.")); return; }
     const per = {};
     for (const f of file) (per[f.agente || "Senza agente"] = per[f.agente || "Senza agente"] || []).push(f);
-    corpo.replaceChildren(...Object.entries(per).map(([ag, el]) => h("div", { class: "carta" }, h("div", { class: "nome" }, "📁 " + ag + " (" + el.length + ")"),
+    corpo.replaceChildren(...Object.entries(per).map(([ag, el]) => h("div", { class: "carta" }, h("div", { class: "nome" }, ag + " (" + el.length + ")"),
       ...el.map(f => h("div", { class: "sotto" }, f.link ? h("a", { href: f.link, target: "_blank", rel: "noopener" }, f.nome) : f.nome, " · " + f.tipo + " · " + (DOC_STATO[f.stato] || f.stato))))));
   };
   const carica = async () => {
@@ -37,7 +37,7 @@ function apriAllineamento() {
   carica();
 }
 
-const bottoneAllinea = () => h("button", { class: "s", type: "button", onclick: apriAllineamento }, "📁 Allinea documenti");
+const bottoneAllinea = () => h("button", { class: "s", type: "button", onclick: apriAllineamento }, "Allinea documenti");
 
 // ---------- Modalità demo ----------
 const SEZIONI_DEMO = {
@@ -101,4 +101,4 @@ function configuraDemo() {
       h("button", { class: "s", onclick: () => chiudi() }, "Annulla"))]);
 }
 
-const bottoneDemo = () => h("button", { class: "s", type: "button", onclick: configuraDemo }, "🎬 Demo");
+const bottoneDemo = () => h("button", { class: "s", type: "button", onclick: configuraDemo }, "Demo");

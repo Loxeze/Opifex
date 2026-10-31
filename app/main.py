@@ -37,6 +37,7 @@ from .rotte_utenti import router as router_utenti, gestione as gestione_utenti
 from .rotte_dialoghi import router as router_dialoghi
 from .rotte_richieste import router as router_richieste
 from .rotte_organizzazione import router as router_organizzazione
+from .plancia import router as router_plancia
 from .rotte_aggiornamenti import router as router_aggiornamenti
 from .rotte_canali import router as router_canali
 from .rotte_documenti import router as router_documenti
@@ -295,6 +296,7 @@ app.include_router(gestione_utenti)
 app.include_router(router_dialoghi)
 app.include_router(router_richieste)
 app.include_router(router_organizzazione)
+app.include_router(router_plancia)
 app.include_router(router_aggiornamenti)
 app.include_router(router_canali)
 app.include_router(router_task)

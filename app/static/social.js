@@ -15,7 +15,9 @@ function vistaSocial() {
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };
   carica();
-  return [h("h2", {}, "Social"), corpo];
+  const riepilogo = h("div", { class: "bt-plancia", style: "margin-bottom:18px" });
+  riassuntoSocial(riepilogo);
+  return [h("h2", {}, "Social"), riepilogo, corpo];
 }
 
 function boxCanali(ricarica) {
@@ -92,4 +94,27 @@ function listaPost(lista, ricarica) {
       modificabile ? h("div", { class: "azioni" }, h("button", { class: "s", onclick: () => azione("rifiuta") }, "Rifiuta"),
         h("button", { class: "p", onclick: () => azione("approva") }, "Approva e programma")) : null);
   });
+}
+
+// Riepilogo mese su mese: mese in corso fino a oggi contro lo stesso numero di giorni del mese scorso.
+async function riassuntoSocial(box) {
+  try {
+    const d = await api("GET", "/gestione/plancia/social");
+    const v = (a, b) => { const x = variazione(a, b); return x ? h("span", { class: "bt-var" }, " " + x.testo) : null; };
+    const T = d.totali;
+    const kpi = (tit, n, prima, nota) => h("article", { class: "bt-card bt-kpi" }, h("div", { class: "bt-cap" }, tit), h("div", { class: "bt-num" }, String(n)), h("div", { class: "bt-sotto" }, "scorso mese: " + prima, v(n, prima)), nota ? h("div", { class: "bt-sotto" }, nota) : null);
+    const mx = Math.max(1, ...d.canali.map(c => Math.max(c.creati, c.creati_prima)));
+    const righe = d.canali.length ? d.canali.map(c => h("div", { class: "bt-confronto" }, h("div", { class: "bt-bl" }, c.canale),
+      h("div", {}, h("div", { class: "bt-bt" }, h("i", { style: "width:" + (100 * c.creati / mx) + "%" })), h("div", { class: "bt-bt prima" }, h("i", { style: "width:" + (100 * c.creati_prima / mx) + "%" }))),
+      h("div", { class: "bt-bv" }, c.creati + " / " + c.creati_prima))) : h("p", { class: "bt-sotto" }, "Ancora nessun post: appena gli agenti ne preparano, il confronto compare qui.");
+    const prof = d.profili.length ? d.profili.map(p => h("tr", {}, h("td", {}, p.nome, h("span", { class: "bt-sotto" }, " · " + p.piattaforma)), h("td", {}, p.seguaci == null ? "—" : nIt(p.seguaci)),
+      h("td", {}, p.seguaci != null && p.seguaci_prima != null ? (p.seguaci - p.seguaci_prima >= 0 ? "+" : "") + nIt(p.seguaci - p.seguaci_prima) : "—"), h("td", {}, p.visualizzazioni == null ? "—" : compatto(p.visualizzazioni)))) : null;
+    riempi(box, [h("section", { class: "bt-griglia bt-kpis tre" }, kpi("Post preparati", T.creati, T.creati_prima), kpi("Post inviati", T.inviati, T.inviati_prima), h("article", { class: "bt-card bt-kpi" }, h("div", { class: "bt-cap" }, "Da approvare"), h("div", { class: "bt-num" }, String(d.da_approvare)), h("div", { class: "bt-sotto" }, "in attesa del tuo OK"))),
+      h("section", { class: "bt-griglia" }, h("article", { class: "bt-card bt-s6" }, h("div", { class: "bt-testa" }, h("h2", {}, "Post per canale")), righe,
+        h("div", { class: "bt-leg2" }, h("i", { style: "background:#1E8466" }), h("span", {}, "mese in corso"), h("i", { style: "background:#CFE3DA" }), h("span", {}, "stesso periodo del mese scorso"))),
+        h("article", { class: "bt-card bt-s6" }, h("div", { class: "bt-testa" }, h("h2", {}, "I tuoi profili")), prof ? h("table", { class: "bt-tab" }, h("thead", {}, h("tr", {}, h("th", {}, "Profilo"), h("th", {}, "Seguaci"), h("th", {}, "4 sett."), h("th", {}, "Visualizzazioni"))), h("tbody", {}, prof))
+          : h("p", { class: "bt-sotto" }, "Nessun profilo tuo monitorato. Aggiungilo in Impostazioni, Profili social monitorati, e qui vedrai seguaci e visualizzazioni a confronto.")),
+      ),
+      h("p", { class: "bt-nota" }, "Mi piace e commenti per singolo post non sono ancora disponibili: Buffer non li restituisce. Qui contano i post preparati dagli agenti e i dati dei profili monitorati.")]);
+  } catch (e) { box.replaceChildren(avviso(e.message, "no")); }
 }

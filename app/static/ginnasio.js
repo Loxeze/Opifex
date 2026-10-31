@@ -35,14 +35,14 @@ function bannerCasati() {
       const f = JSON.stringify(d); if (f === firma) return; firma = f;
       const c = d.in_corso;
       const coda = d.in_coda.length ? h("div", { class: "sotto", style: "margin-top:6px" }, "Poi: " + d.in_coda.map(x => x.competenza + " (liv. " + x.livello + ")").join(" · ") + (d.in_coda_totale > d.in_coda.length ? " · altre " + (d.in_coda_totale - d.in_coda.length) : "")) : null;
-      const attesa = d.appunti_pronti.length ? h("div", { class: "sotto", style: "margin-top:6px;font-weight:600" }, "⏸ In attesa del tuo via libera: " + d.appunti_pronti.map(x => x.competenza_nome).join(", ") + " (gli appunti sono pronti, vedi sotto)") : null;
+      const attesa = d.appunti_pronti.length ? h("div", { class: "sotto", style: "margin-top:6px;font-weight:600" }, "In attesa del tuo via libera: " + d.appunti_pronti.map(x => x.competenza_nome).join(", ") + " (gli appunti sono pronti, vedi sotto)") : null;
       if (!c) {
-        riempi(box, [h("div", { class: "nome" }, "🎓 Padre Casati · " + (d.attiva ? "nessuna formazione in corso" : "formazione in pausa")),
+        riempi(box, [h("div", { class: "nome" }, "Padre Casati · " + (d.attiva ? "nessuna formazione in corso" : "formazione in pausa")),
           h("div", { class: "sotto" }, d.attiva ? (d.in_coda_totale ? "La prossima parte appena possibile." : "Nulla in coda: aggiungi una richiesta qui sotto.") : "Attiva la formazione per farlo lavorare."), attesa, coda]);
         return;
       }
       riempi(box, [
-        h("div", { class: "nome" }, "🎓 Sta formando ora: " + c.competenza + " — livello " + c.livello + " (" + c.livello_nome + ")"),
+        h("div", { class: "nome" }, "Sta formando ora: " + c.competenza + " — livello " + c.livello + " (" + c.livello_nome + ")"),
         h("div", { class: "sotto" }, "Per: " + (c.per ? c.per + (c.per_ruolo ? " (" + c.per_ruolo + ")" : "") : "la libreria delle competenze") + (c.motivo ? " · Perché: " + c.motivo : "")),
         h("div", { style: "margin:8px 0 4px;height:8px;border-radius:99px;background:var(--bordo);overflow:hidden" }, h("div", { style: "height:100%;width:" + c.percentuale + "%;background:linear-gradient(90deg,#f3b54a,#e58bd0);transition:width .6s" })),
         h("div", { class: "sotto" }, "Tappa " + c.tappa + " di " + c.tappe + ": " + (NOMI_FASE[c.fase] || c.fase) + " · circa " + c.percentuale + "%"),

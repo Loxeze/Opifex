@@ -1,0 +1,188 @@
+/* Opifex 2.0 · «Bottega»: chiaro, caldo, editoriale. Carte avorio, verde foresta, ottone; titoli con serif di sistema.
+   Tutte le regole stanno sotto body.bottega (classe messa da vetro.js) e vincono su stile.css / vetro.css / ergonomia.css. */
+html{color-scheme:light}
+body.bottega{
+  --sfondo:#F5F2EB;--carta:#FBF9F4;--carta2:#ECE8DE;--testo:#1B2421;--tenue:#5E6863;--bordo:#E3DED1;
+  --primario:#1F4D43;--primario-t:#F5F2EB;--ok:#1F6B52;--ok-b:#DCE8E2;--no:#9A3A1F;--no-b:#F6E0D8;--avv:#7A5200;--avv-b:#F5E7C4;--viola:#6B4FA0;--rosa:#A8457F;
+  --muted:#5E6863;--serif:'Newsreader','Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;--sans:'Inter Tight','Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  background:#F5F2EB;background-image:none;color:var(--testo);font:14.5px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+body.bottega h2{font-family:var(--serif);font-weight:500;font-size:26px;letter-spacing:-.01em}
+body.bottega h3{color:var(--tenue);font-size:11px;letter-spacing:.12em;font-weight:700}
+body.bottega a{color:#1F4D43}body.bottega a:hover{color:#123329}
+body.bottega ::selection{background:#CFE3DA}
+body.bottega *:focus-visible{outline:2px solid #1F4D43;outline-offset:2px}
+
+/* ---- superfici ---- */
+body.bottega .carta,body.bottega .pan,body.bottega .tessera,body.bottega .colonna-task,body.bottega details.livello,body.bottega .chat-lista,body.bottega .chat-conv,body.bottega .metriche div,body.bottega .accesso .carta{
+  background:var(--carta);background-image:none;border:1px solid var(--bordo);border-radius:18px;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
+body.bottega .carta{padding:20px}
+body.bottega .voce,body.bottega .task-riga,body.bottega .task-scheda,body.bottega details.richiesta,body.bottega .bacheca-scheda{background:#fff;border:1px solid var(--bordo);border-radius:14px;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
+body.bottega .bacheca-col{background:#F0EDE4;border-color:var(--bordo)}
+body.bottega .bacheca-col.sopra{background:#DCE8E2;border-color:#1F4D43}
+body.bottega .pannello{background:var(--sfondo);background-image:none;border:0;border-left:1px solid var(--bordo);border-radius:22px 0 0 22px;box-shadow:-30px 0 60px -30px rgba(27,36,33,.25);-webkit-backdrop-filter:none;backdrop-filter:none}
+body.bottega .pannello-sfondo{background:rgba(27,36,33,.35)}
+body.bottega .pannello .azioni{background:var(--sfondo);border-top:1px solid var(--bordo)}
+body.bottega .scheda-barra{background:var(--sfondo);border-bottom:1px solid var(--bordo)}
+body.bottega .scheda-tab.attivo{background:#DCE8E2;border-color:#1F4D43;color:#123329}
+body.bottega .agente:hover,body.bottega .carta.cliccabile:hover,body.bottega .voce-clic:hover{border-color:#1F4D43}
+body.bottega .agente-extra{border-top-color:var(--bordo)}
+body.bottega .nome{font-weight:600}
+body.bottega .sotto,body.bottega .aiuto{color:var(--tenue)}
+
+/* ---- bottoni, campi, etichette ---- */
+body.bottega button.p{background:#1F4D43;background-image:none;color:#F5F2EB;border:0;border-radius:999px;font-weight:600;box-shadow:none;min-height:40px;padding:9px 18px}
+body.bottega button.p:hover{background:#123329}
+body.bottega button.s{background:transparent;color:var(--testo);border:1px solid #CFC9B8;border-radius:999px;font-weight:600;min-height:40px;padding:9px 16px}
+body.bottega button.s:hover{background:#ECE8DE}
+body.bottega button.r{background:var(--no-b);color:var(--no);border:1px solid #E8C9BC;border-radius:999px}
+body.bottega button:disabled{opacity:.5}
+body.bottega input[type=text],body.bottega input[type=email],body.bottega input[type=password],body.bottega input[type=number],body.bottega input[type=search],body.bottega input[type=tel],body.bottega input[type=url],body.bottega input[type=date],body.bottega input[type=datetime-local],body.bottega select,body.bottega textarea{
+  background:#fff;border:1px solid #CFC9B8;color:var(--testo);border-radius:12px}
+body.bottega input::placeholder,body.bottega textarea::placeholder{color:#7C857F}
+body.bottega input[type=color]{background:#fff;border-color:#CFC9B8}
+body.bottega .etichetta,body.bottega .chip{background:#ECE8DE;border:0;color:#4E5A55}
+body.bottega .etichetta.ok,body.bottega .chip.ok{background:var(--ok-b);color:var(--ok)}
+body.bottega .etichetta.no{background:var(--no-b);color:var(--no)}
+body.bottega .etichetta.avv{background:var(--avv-b);color:var(--avv)}
+body.bottega .messaggio{border-radius:14px;border:0;background:#ECE8DE;-webkit-backdrop-filter:none;backdrop-filter:none}
+body.bottega .messaggio.ok{background:var(--ok-b);color:var(--ok)}
+body.bottega .messaggio.no{background:var(--no-b);color:var(--no)}
+body.bottega .messaggio.avv{background:var(--avv-b);color:var(--avv)}
+body.bottega td,body.bottega th{border-bottom-color:var(--bordo)}
+body.bottega th{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--tenue)}
+body.bottega .tessera .valore{color:var(--primario);font-family:var(--serif)}
+body.bottega h3.scadute{color:var(--no)}
+body.bottega .interruttore input,body.bottega .spunta input{accent-color:#1F4D43}
+body.bottega .menu-imp button{background:transparent;border:0;border-radius:10px;color:#4E5A55;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
+body.bottega .menu-imp button:hover{background:#ECE8DE}
+body.bottega .menu-imp button.attivo,body.bottega .menu-imp button[aria-current]{background:#1F4D43;color:#F5F2EB;border:0}
+body.bottega .gruppo-imp>summary{color:var(--tenue)}body.bottega .gruppo-imp>summary:hover{background:#ECE8DE}
+body.bottega .barra{background:#E8E3D6}
+body.bottega .barra-c{background:#E8E3D6}
+body.bottega .msg-org{border-left-color:#1F4D43}
+body.bottega .puntino{box-shadow:none}
+
+/* ---- chat ---- */
+body.bottega .chat-sigla{background:#1F4D43;color:#F5F2EB}
+body.bottega .bolla{background:#fff;border:1px solid var(--bordo);color:var(--testo)}
+body.bottega .bolla.mia{background:#DCE8E2;border-color:#C2D8CE}
+body.bottega .chat-lista .attiva,body.bottega .chat-lista [aria-current]{background:#DCE8E2}
+
+/* ---- CRM, imbuto ---- */
+body.bottega .imbuto-barra{background:#EEEADD}
+body.bottega .imbuto-pieno{background:#2E8A6F;color:#fff}
+body.bottega .imbuto-pieno.stato-vinta{background:#0E5A45}
+
+/* ---- scena 3D: resta scura, e' una finestra sul modello ---- */
+body.bottega .scena{--carta:#1d2029;--carta2:#232733;--testo:#ece9e3;--tenue:#aab1c0;--muted:#aab1c0;--bordo:#2f3442;--primario:#f3b54a;color:#ece9e3;border:1px solid #2f3442;border-radius:18px;overflow:hidden}
+body.bottega .scena .scheda,body.bottega .scena .legenda{background:rgba(20,23,31,.92);color:#ece9e3;border:1px solid #2f3442;border-radius:14px}
+body.bottega .scena button.s{color:#ece9e3;border-color:rgba(255,255,255,.3)}body.bottega .scena button.s:hover{background:rgba(255,255,255,.1)}
+body.bottega .scena select,body.bottega .scena input{background:#171a22;color:#ece9e3;border-color:#2f3442}
+body.bottega .scena-intera{height:calc(100vh - 110px)}
+body.bottega .org-finestra{padding:10px}
+body.bottega .org-finestra .scena{height:calc(100vh - 20px)}
+body.bottega .bt-testa-pagina{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+body.bottega .bt-testa-pagina h2{margin:0}
+
+/* ---- struttura: menu laterale ---- */
+body.bottega main{max-width:1180px;margin:0 auto;padding:30px 36px 56px}
+body.bottega main.largo{max-width:none;padding:28px 36px 48px}
+body.bottega #radice>header{display:flex;align-items:center;gap:16px;background:#F0EDE4;border-bottom:1px solid var(--bordo);box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none;border-radius:0;padding:12px 16px}
+body.bottega #radice>header h1{margin:0 auto 0 0;font-family:var(--serif);font-weight:500;font-size:26px;letter-spacing:-.01em;text-transform:none;color:#1F4D43;line-height:1.1}
+body.bottega #radice>header h1 small{display:block;font-family:var(--sans);font-size:12px;color:var(--tenue);letter-spacing:0;margin-top:2px}
+body.bottega #radice>header nav{display:flex;flex-direction:column;gap:2px}
+body.bottega #radice>header nav button{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:transparent;border:0;border-radius:10px;padding:9px 12px;color:#4E5A55;font:inherit;font-size:14px;font-weight:500;cursor:pointer;position:relative}
+body.bottega #radice>header nav button:hover{background:#E4DFD2;color:var(--testo)}
+body.bottega #radice>header nav button.attivo{background:#1F4D43;background-image:none;color:#F5F2EB;font-weight:600}
+body.bottega .ico{width:18px;height:18px;flex:none}
+body.bottega .bt-gruppo{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--tenue);font-weight:700;padding:16px 12px 6px}
+body.bottega .badge-chat{margin-left:auto;background:#C4502A;color:#fff;border-radius:999px;font-size:11px;font-weight:700;padding:1px 7px;min-width:18px;text-align:center}
+body.bottega .bt-piede{display:flex;align-items:center;gap:10px}
+body.bottega .bt-ver{font-size:12px;color:var(--tenue)}
+@media (min-width:821px){
+  body.bottega #radice>header{position:fixed;left:0;top:0;bottom:0;width:244px;flex-direction:column;align-items:stretch;gap:20px;padding:26px 16px 20px;border-right:1px solid var(--bordo);border-bottom:0;overflow-y:auto;z-index:20}
+  body.bottega #radice>header h1{margin:0;padding:0 12px}
+  body.bottega #radice>header nav{flex:1 1 auto}
+  body.bottega #radice>header .bt-piede{justify-content:space-between;padding:0 4px}
+  body.bottega #radice>main{margin-left:244px}
+  body.bottega #radice>main:not(.largo){margin-left:max(244px,calc((100vw - 1180px) / 2 + 122px))}
+  body.bottega #radice>.accesso{margin-left:auto}
+}
+@media (max-width:820px){
+  body.bottega{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+  body.bottega #radice>header{padding:10px 14px;position:static}
+  body.bottega #radice>header nav{position:fixed;left:0;right:0;bottom:0;top:auto;width:auto;flex-direction:row;overflow-x:auto;gap:2px;padding:6px 6px calc(10px + env(safe-area-inset-bottom));background:rgba(245,242,235,.97);border-top:1px solid var(--bordo);z-index:40;-webkit-backdrop-filter:none;backdrop-filter:none}
+  body.bottega #radice>header nav button{flex:none;width:auto;flex-direction:column;gap:2px;min-width:64px;padding:6px 8px;border-radius:12px;font-size:11px;min-height:50px;justify-content:center}
+  body.bottega .bt-gruppo{display:none}
+  body.bottega main,body.bottega main.largo{padding:18px 14px 28px}
+  body.bottega .bt-ver{display:none}
+}
+
+/* ---- plancia ---- */
+.bt-plancia{display:flex;flex-direction:column;gap:18px;font-family:var(--sans)}
+.bt-intesta{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between;margin-bottom:4px}
+.bt-titolo{margin:6px 0 0;font-family:var(--serif);font-weight:400;font-size:clamp(28px,3vw,44px);line-height:1.08;letter-spacing:-.015em;text-wrap:balance}
+.bt-corsivo{font-style:italic;color:#1F4D43}
+.bt-azioni{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.bt-cap{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--tenue);font-weight:700}
+.bt-sotto{font-size:13px;color:var(--tenue)}
+.bt-nota{font-size:13px;color:var(--tenue);margin:12px 0 0}
+.bt-griglia{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:18px}
+.bt-card{background:var(--carta);border:1px solid var(--bordo);border-radius:18px;padding:22px;min-width:0}
+.bt-kpis>.bt-kpi{grid-column:span 2}
+.bt-s4{grid-column:span 4}.bt-s6{grid-column:span 6}
+.bt-griglia>.bt-col{grid-column:span 4}
+.bt-col{display:flex;flex-direction:column;gap:18px;min-width:0}
+.bt-kpi{display:flex;flex-direction:column;gap:2px}
+.bt-num{font-family:var(--serif);font-size:44px;line-height:1.05;margin:10px 0 4px;letter-spacing:-.01em}
+.bt-num.piccolo{font-size:32px;margin:6px 0 0}
+.bt-sp{margin-top:8px}
+.bt-su{color:#9A3A1F;font-weight:600}.bt-giu{color:#1F6B52;font-weight:600}
+.bt-testa{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;gap:12px;flex-wrap:wrap}
+.bt-testa h2{margin:0;font-family:var(--serif);font-weight:500;font-size:22px}
+.bt-grafico{display:block;overflow:visible}
+.bt-tab{width:100%;border-collapse:collapse;font-size:14px}
+.bt-tab th{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--tenue);text-align:left;font-weight:600;padding:0 0 8px;border:0}
+.bt-tab td{padding:10px 0;border:0;border-top:1px solid var(--bordo);font-variant-numeric:tabular-nums}
+.bt-tab td:not(:first-child),.bt-tab th:not(:first-child){text-align:right}
+.bt-chip{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px}
+.bt-riga-mov{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--bordo);font-size:14px}
+.bt-tag{font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:#ECE8DE;color:#4E5A55;white-space:nowrap}
+.bt-tag.rosso{background:#F6E0D8;color:#9A3A1F}.bt-tag.verde{background:#DCE8E2;color:#1F4D43}
+.bt-barra{display:grid;grid-template-columns:minmax(110px,190px) 1fr 74px;gap:12px;align-items:center;padding:7px 0;font-size:14px}
+.bt-bl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-bt{height:10px;background:#EEEADD;border-radius:5px;overflow:hidden}.bt-bt i{display:block;height:100%;background:#1E8466;border-radius:0 5px 5px 0}
+.bt-bt.prima{margin-top:3px}.bt-bt.prima i{background:#CFE3DA}
+.bt-bv{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.bt-confronto{display:grid;grid-template-columns:minmax(90px,150px) 1fr 70px;gap:12px;align-items:center;padding:9px 0}
+.bt-seg{display:flex;gap:2px;height:14px;border-radius:7px;overflow:hidden;margin:8px 0 10px}.bt-seg i{display:block}
+.bt-leg{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#4E5A55;margin-right:14px}.bt-leg b{width:10px;height:10px;border-radius:3px;display:inline-block}
+.bt-leg2{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tenue);margin-top:8px}.bt-leg2 i{width:22px;height:10px;border-radius:3px;display:inline-block}
+.bt-trio{display:flex;gap:28px;flex-wrap:wrap}
+.bt-decisione{padding:14px 0;border-top:1px solid var(--bordo)}.bt-decisione:first-of-type{border-top:0;padding-top:0}
+.bt-riga-tag{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.bt-domanda{font-family:var(--serif);font-size:20px;line-height:1.25;margin:10px 0 12px}
+.bt-invia{display:flex;gap:8px;flex-wrap:wrap}.bt-invia input{flex:1 1 160px;min-width:0;border-radius:999px;padding:10px 16px}
+.bt-decidere{background:#fff;border-color:#E8C9BC}
+.bt-lista{display:flex;flex-direction:column}
+.bt-riga-prog{display:flex;align-items:center;gap:10px;width:100%;background:transparent;border:0;border-top:1px solid var(--bordo);padding:12px 0;text-align:left;font:inherit;color:inherit;cursor:pointer;flex-wrap:wrap}
+.bt-riga-prog:hover b{text-decoration:underline}
+.bt-riga-prog .bt-sotto{margin-left:auto}
+.bt-fare .pan-testa h3{font-family:var(--serif);font-size:20px;text-transform:none;letter-spacing:0;color:var(--testo);font-weight:500}
+.bt-fare{padding:18px 20px}
+.bt-casati{margin:0!important}
+.bt-casati .nome{font-family:var(--serif);font-size:19px}
+@media (max-width:1900px){.bt-kpis>.bt-kpi{grid-column:span 4}.bt-s4{grid-column:span 6}.bt-griglia>.bt-col{grid-column:span 12;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start}.bt-griglia>.bt-s4:last-child{grid-column:span 12}}
+@media (max-width:1100px){.bt-s4,.bt-s6{grid-column:span 12}}
+@media (max-width:720px){.bt-kpis>.bt-kpi{grid-column:span 6}.bt-num{font-size:34px}.bt-barra{grid-template-columns:100px 1fr 64px}}
+@media (min-width:2200px){.bt-plancia{max-width:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.bt-kpis.tre>.bt-kpi{grid-column:span 4}
+.bt-var{font-weight:600;color:#4E5A55}
+body.bottega .org-finestra,body.bottega #radice>main.org-finestra{margin-left:0!important;max-width:none}
+body.bottega .scena{background-color:#0b0e14}
+body.bottega .spesa-linea{stroke:#1E8466}body.bottega .spesa-area{fill:rgba(30,132,102,.14)}body.bottega .spesa-punto{fill:#1E8466}
+body.bottega .spesa-base{stroke:#CFC9B8}body.bottega .spesa-budget{stroke:#9AA39E}
+body.bottega .pallini i{background:#E3DED1}body.bottega .pallini i.on{background:#1E8466;box-shadow:none}
+@media (max-width:720px){.bt-num{font-size:28px}.bt-card{overflow-x:auto}.bt-grafico{min-width:520px}}
+.bt-due{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px 28px}

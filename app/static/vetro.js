@@ -102,13 +102,13 @@ const Vetro = (() => {
   const GRANA = `<svg aria-hidden="true" style="mix-blend-mode:overlay;opacity:.5"><filter id="grana" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".8" numOctaves="2" seed="7"/><feColorMatrix type="matrix" values="0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 .9 -.25"/></filter><rect width="100%" height="100%" filter="url(#grana)"/></svg>`;
 
   function applica() {
-    let box = document.getElementById("vetro-sfondo");
-    if (!box) { box = document.createElement("div"); box.id = "vetro-sfondo"; box.setAttribute("aria-hidden", "true"); document.body.prepend(box); }
-    const attivo = true;   // il vetro e' l'unico stile: nessun ritorno al classico
-    document.body.classList.toggle("vetro", attivo);
+    // 2.0: l'aspetto e' «Bottega» (chiaro, caldo, editoriale). Sfondi e vetro restano nel codice ma non si usano piu'.
+    document.body.classList.remove("vetro");
+    document.body.classList.add("bottega");
     document.documentElement.style.setProperty("--g", String(pref.vetro));
-    if (attivo && attuale !== pref.sfondo) { box.innerHTML = costruisci[pref.sfondo]() + GRANA + '<div class="vignetta"></div>'; attuale = pref.sfondo; arte.slot = null; arte.url = null; arte.fronte = "a"; fermaArte(); }
-    if (attivo && pref.sfondo === "arte") { if (!arte.timer) aggiornaArte(); } else fermaArte();
+    const box = document.getElementById("vetro-sfondo"); if (box) box.remove();
+    const did = document.getElementById("vetro-didascalia"); if (did) did.hidden = true;
+    fermaArte();
   }
   async function carica() {
     try {
@@ -138,7 +138,7 @@ const Vetro = (() => {
     return corpo;
   }
   function sezioneAccount() {
-    return [h("h3", {}, "Aspetto"), h("div", { class: "carta" }, controlli(), h("p", { class: "aiuto" }, "Vale per tutta l'app e si ricorda su ogni dispositivo. Con «Classico» torni ai colori di prima."))];
+    return [h("h3", {}, "Aspetto"), h("div", { class: "carta" }, h("p", { class: "aiuto" }, "Dalla versione 2.0 Opifex ha un solo aspetto, chiaro e pulito, con il menu a sinistra. Gli sfondi fotografici non ci sono più."))];
   }
   return { carica, applica, imposta, controlli, sezioneAccount, pref, SCENE };
 })();

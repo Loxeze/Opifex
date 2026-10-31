@@ -73,7 +73,19 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Dashboard"], ["chat", "Chat"], ["task", "Task"], ["progetti", "Progetti"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["crm", "CRM"], ["documenti", "Documenti"], ["riunioni", "Riunioni"], ["briefing", "Briefing"], ["impostazioni", "Impostazioni"]];
+const VISTE = [["dashboard", "Plancia"], ["chat", "Chat"], ["task", "Task"], ["riunioni", "Riunioni"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["crm", "CRM"], ["social", "Social"], ["briefing", "Briefing"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["impostazioni", "Impostazioni"]];
+// il menu laterale: dopo queste voci comincia un nuovo gruppo con la sua intestazione
+const GRUPPO_MENU = { progetti: "Lavoro", agenti: "Laboratorio" };
+const ICONE = { dashboard: "M4 11l8-7 8 7v9H4z", chat: "M4 5h16v11H9l-5 4z", task: "M5 12l4 4 10-10", riunioni: "M12 3a3 3 0 013 3v5a3 3 0 01-6 0V6a3 3 0 013-3zM5 11a7 7 0 0014 0M12 18v3",
+  progetti: "M3 7h6l2 2h10v10H3z", documenti: "M7 3h8l4 4v14H7z", crm: "M9 4.5a3.5 3.5 0 110 7 3.5 3.5 0 010-7zM3 20c0-3.5 3-6 6-6s6 2.5 6 6M16 5a3.5 3.5 0 010 7", social: "M4 20V10M10 20V4M16 20v-7M22 20H2",
+  briefing: "M5 4h14v16H5zM9 8h6M9 12h6M9 16h3", agenti: "M12 4a4 4 0 110 8 4 4 0 010-8zM4 21c0-4.4 3.6-7 8-7s8 2.6 8 7", ginnasio: "M3 9l9-5 9 5-9 5zM7 11.5V16c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.5",
+  impostazioni: "M12 9a3 3 0 110 6 3 3 0 010-6zM12 3v3M12 18v3M3 12h3M18 12h3", iniziative: "M5 12l4 4 10-10", percorsi: "M3 7h6l2 2h10v10H3z", account: "M12 4a4 4 0 110 8 4 4 0 010-8zM4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" };
+function icona(id) {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("fill", "none"); s.setAttribute("stroke", "currentColor"); s.setAttribute("stroke-width", "1.7"); s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round"); s.setAttribute("aria-hidden", "true"); s.setAttribute("class", "ico");
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path"); p.setAttribute("d", ICONE[id] || ICONE.dashboard); s.append(p);
+  return s;
+}
 const GRUPPI_IMP = [["Io e account", ["profilo", "voce", "app"]], ["Organizzazione", ["struttura", "utenti", "reparti", "tavoli", "cerimoniere", "quando", "smistamento"]],
   ["Collegamenti", ["collegamenti", "connessioni", "siti", "canali", "social", "monitorsocial", "archivio", "percorsi"]], ["Conoscenza e formazione", ["biblioteca", "studi", "memoria", "imprese", "noteaurora", "miglioramenti", "dossier"]],
   ["Controllo e sicurezza", ["sicurezza", "registro", "sentinelle", "salute", "sandbox"]], ["Sistema", ["aggiornamenti", "misure", "spesareparti", "dipendenze", "diagnostica", "esempio", "memoriavett", "giro", "contenuti", "sistema"]]];
@@ -81,25 +93,35 @@ const VISTE_COLLABORATORE = [["task", "Task"], ["progetti", "Progetti"], ["inizi
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Collegamenti (Google, posta)"], ["connessioni", "Connessioni a siti e app"], ["siti", "Siti e hosting (chiavi)"],
   ["canali", "Canali (Telegram)"], ["social", "Social"], ["monitorsocial", "Profili social monitorati"], ["archivio", "Archivio NAS"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["imprese", "Schede d'impresa"], ["tavoli", "Tavoli di lavoro"], ["noteaurora", "Note di Aurora"], ["miglioramenti", "Miglioramento degli agenti"], ["spesareparti", "Spesa per reparto"], ["dipendenze", "Controllo delle librerie"], ["diagnostica", "Diagnostica (log scaricabile)"], ["esempio", "Impara da un esempio"], ["memoriavett", "Memoria condivisa (vettoriale)"], ["giro", "Giro di aggiornamento"], ["contenuti", "Contenuti: brief e stili di montaggio"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["misure", "Consumi (dove vanno i token)"], ["sistema", "Backup e costi"]];
 
-function vai(vista, sezione) { if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "social" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
+function vai(vista, sezione) { if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
 function cornice(contenuto) {
+  if (window.name === "opifex-organigramma" || location.hash === "#organigramma") {   // finestra a parte: solo l'organigramma
+    radice.replaceChildren(h("main", { class: "largo org-finestra" }, contenuto)); return;
+  }
+  const voci = (stato.ruolo === "titolare" ? VISTE : VISTE_COLLABORATORE);
+  const attiva = (id) => stato.vista === id || (id === "dashboard" && (stato.vista === "richieste" || stato.vista === "organigramma")) || (id === "progetti" && stato.vista === "progetto") || (id === "crm" && stato.vista === "contatto");
+  const nav = [];
+  for (const [id, nome] of voci) {
+    if (stato.ruolo === "titolare" && GRUPPO_MENU[id]) nav.push(h("div", { class: "bt-gruppo" }, GRUPPO_MENU[id]));
+    nav.push(h("button", { class: attiva(id) ? "attivo" : "", "aria-current": attiva(id) ? "page" : null, onclick: () => vai(id) },
+      icona(id), h("span", { class: "bt-et" }, nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : "")),
+      id === "chat" ? h("span", { id: "badge-chat", class: "badge-chat", style: stato.chatNonLetti ? "" : "display:none" }, stato.chatNonLetti ? String(stato.chatNonLetti) : "") : null));
+  }
   radice.replaceChildren(
-    h("header", {}, h("h1", {}, "Opifex ", h("small", {}, "// officina")),
-      h("nav", {}, (stato.ruolo === "titolare" ? VISTE : VISTE_COLLABORATORE).map(([id, nome]) =>
-        h("button", { class: stato.vista === id || (id === "dashboard" && stato.vista === "richieste") || (id === "progetti" && stato.vista === "progetto") || (id === "crm" && stato.vista === "contatto") ? "attivo" : "", onclick: () => vai(id) },
-          nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : ""),
-          id === "chat" ? h("span", { id: "badge-chat", class: "badge-chat", style: stato.chatNonLetti ? "" : "display:none" }, stato.chatNonLetti ? String(stato.chatNonLetti) : "") : null))),
-      h("button", { class: "s", onclick: esci }, "Esci")),
-    h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" ? "largo" : "" }, contenuto));
+    h("header", {}, h("h1", {}, "Opifex", h("small", {}, "la bottega degli agenti")),
+      h("nav", { "aria-label": "Menu principale" }, nav),
+      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("span", { class: "bt-ver" }, "2.0"))),
+    h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "organigramma" ? "largo" : "" }, contenuto));
 }
 
 async function avvia() {
   try {
     const io = await api("GET", "/io");
-    stato.ruolo = io.ruolo_globale;
+    stato.ruolo = io.ruolo_globale; stato.nome = io.nome || "";
     await Vetro.carica();
     ripristinaVista();
+    if (window.name === "opifex-organigramma" || location.hash === "#organigramma") stato.vista = "organigramma";
     avviaConteggioChat(); avviaUso();
     if (stato.ruolo !== "titolare") {   // il collaboratore vede solo la chat con gli agenti delle sue divisioni
       stato.agenti = await api("GET", "/agenti");
@@ -131,7 +153,7 @@ function disegna() {
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
   if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
   cornice(vista());
 }
 
