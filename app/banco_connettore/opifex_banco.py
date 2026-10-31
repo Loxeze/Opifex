@@ -23,7 +23,7 @@ except ImportError:
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "requests"], check=False)
     import requests
 
-VERSIONE = "1.0"
+VERSIONE = "1.1"
 URL = os.environ.get("OPIFEX_URL", "").rstrip("/")
 TOKEN = os.environ.get("OPIFEX_TOKEN", "")
 DATI = Path(os.environ.get("OPIFEX_CARTELLA", ".")).resolve()
@@ -266,7 +266,79 @@ def lavoro_xml(par: dict) -> tuple[str, list]:
             + ("Attenzione: " + "; ".join(avvisi) + " (l'ingrandimento e' dichiarato, non e' 4K nativo). " if avvisi else "") + "I file restano nei percorsi del PC."), []
 
 
-LAVORI = {"xml": lavoro_xml, "inventario": lavoro_inventario, "fotogrammi": lavoro_fotogrammi, "silenzi": lavoro_silenzi, "ffmpeg": lavoro_ffmpeg}
+def _resolve():
+    """Collegamento a DaVinci Resolve Studio (scripting esterno: Preferenze > Sistema > Generali > Uso dello scripting esterno = Locale)."""
+    cand = [os.environ.get("RESOLVE_SCRIPT_API", "")]
+    if sys.platform == "win32":
+        cand.append(os.path.expandvars(r"%PROGRAMDATA%\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting"))
+    elif sys.platform == "darwin":
+        cand.append("/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting")
+    else:
+        cand.append("/opt/resolve/Developer/Scripting")
+    for c in cand:
+        if c and os.path.isdir(os.path.join(c, "Modules")):
+            sys.path.append(os.path.join(c, "Modules"))
+    try:
+        import DaVinciResolveScript as bmd
+    except ImportError:
+        raise Rifiutato("modulo di scripting di DaVinci Resolve non trovato (serve Resolve Studio installato; in alternativa usa banco_xml)") from None
+    r = bmd.scriptapp("Resolve")
+    if not r:
+        raise Rifiutato("DaVinci Resolve non risponde: aprilo e attiva Preferenze > Sistema > Generali > Uso dello scripting esterno = Locale (serve la versione Studio)")
+    return r
+
+
+def lavoro_davinci(par: dict) -> tuple[str, list]:
+    fps = int(par.get("fps") or 25)
+    larg, alt = int(par.get("larghezza") or 2160), int(par.get("altezza") or 3840)
+    nome = re.sub(r"[^\w .\-]", "_", str(par.get("nome") or "Montaggio"))[:50] + time.strftime(" %d%m %H%M")
+    clip = par.get("clip") or []
+    percorsi = []
+    for c in clip:
+        p = sicuro(c["file"])
+        if str(p) not in percorsi:
+            percorsi.append(str(p))
+    resolve = _resolve()
+    gp = resolve.GetProjectManager()
+    pr = gp.CreateProject(nome)
+    if not pr:
+        raise Rifiutato(f"non riesco a creare il progetto «{nome}» in Resolve (chiudi eventuali finestre aperte)")
+    for k, v in (("timelineResolutionWidth", str(larg)), ("timelineResolutionHeight", str(alt)), ("timelineFrameRate", str(fps)),
+                 ("timelineOutputResolutionWidth", str(larg)), ("timelineOutputResolutionHeight", str(alt))):
+        pr.SetSetting(k, v)
+    mp = pr.GetMediaPool()
+    voci = mp.ImportMedia(percorsi) or []
+    per_nome = {}
+    for v in voci:
+        per_nome[v.GetClipProperty("File Path") or v.GetName()] = v
+    if len(voci) < len(percorsi):
+        raise Rifiutato(f"Resolve ha importato {len(voci)} file su {len(percorsi)}: formato non supportato o file in uso")
+    tl = mp.CreateEmptyTimeline(nome)
+    if not tl:
+        raise Rifiutato("timeline non creata")
+    pezzi, avvisi = [], []
+    for c in clip:
+        p = str(sicuro(c["file"]))
+        item = per_nome.get(p) or next((v for v in voci if os.path.basename(p) == v.GetName()), None)
+        if not item:
+            raise Rifiutato(f"file non trovato nel Media Pool: {c['file']}")
+        f_clip = float(item.GetClipProperty("FPS") or fps)
+        pezzi.append({"mediaPoolItem": item, "startFrame": int(round(float(c["da"]) * f_clip)), "endFrame": int(round(float(c["a"]) * f_clip)) - 1})
+    ok = mp.AppendToTimeline(pezzi)
+    if not ok:
+        raise Rifiutato("Resolve non ha accettato le clip nella timeline")
+    testo = f"Progetto «{nome}» creato in DaVinci Resolve con {len(pezzi)} clip, timeline {larg}x{alt} a {fps} fps. "
+    if par.get("esporta"):
+        uscita = sicuro("uscite", deve_esistere=False)
+        uscita.mkdir(parents=True, exist_ok=True)
+        pr.SetRenderSettings({"SelectAllFrames": True, "TargetDir": str(uscita), "CustomName": nome.replace(" ", "_"), "FormatWidth": larg, "FormatHeight": alt})
+        job = pr.AddRenderJob()
+        testo += ("Lavoro di render 4K preparato in uscite/ (avvialo da Deliver > Render Queue). " if job else "Non sono riuscito a preparare il render: impostalo da Deliver. ")
+    testo += "Le clip piu' piccole di 4K sono scalate da Resolve (non e' 4K nativo): controlla le riprese a schermo."
+    return testo, []
+
+
+LAVORI = {"davinci": lavoro_davinci, "xml": lavoro_xml, "inventario": lavoro_inventario, "fotogrammi": lavoro_fotogrammi, "silenzi": lavoro_silenzi, "ffmpeg": lavoro_ffmpeg}
 S = requests.Session()
 S.headers.update({"Authorization": "Bearer " + TOKEN, "X-Versione": VERSIONE})
 

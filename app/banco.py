@@ -160,7 +160,7 @@ def valida(tipo: str, d: dict) -> tuple[dict | None, str]:
         if not isinstance(args, list) or not args or len(args) > 80 or not all(isinstance(x, (str, int, float)) for x in args):
             return None, "argomenti: elenco di opzioni ffmpeg (senza la parola ffmpeg)"
         return {"argomenti": [str(x) for x in args], "descrizione": str(d.get("descrizione") or "")[:200]}, ""
-    if tipo == "xml":
+    if tipo in ("xml", "davinci"):
         clip = d.get("clip")
         if not isinstance(clip, list) or not clip or len(clip) > 60:
             return None, "clip: elenco da 1 a 60 elementi {file, da, a} (secondi)"
@@ -180,7 +180,7 @@ def valida(tipo: str, d: dict) -> tuple[dict | None, str]:
             return None, "fps, larghezza e altezza devono essere numeri"
         if not (1 <= fps <= 120 and 100 <= larg <= 8192 and 100 <= alt <= 8192):
             return None, "misure non valide"
-        return {"clip": out, "fps": fps, "larghezza": larg, "altezza": alt, "nome": str(d.get("nome") or "Montaggio")[:60], "ingrandisci": d.get("ingrandisci", True) is not False}, ""
+        return {"clip": out, "fps": fps, "larghezza": larg, "altezza": alt, "nome": str(d.get("nome") or "Montaggio")[:60], "ingrandisci": d.get("ingrandisci", True) is not False, "esporta": bool(d.get("esporta"))}, ""
     f = _rel(d.get("file"))
     if not f:
         return None, "file non valido (percorso relativo alla cartella di lavoro, es. RIPRESE/clip1.mp4)"
@@ -216,11 +216,17 @@ STRUMENTI = [
      "input_schema": {"type": "object", "properties": {"nome": {"type": "string"}, "larghezza": {"type": "integer"}, "altezza": {"type": "integer"}, "fps": {"type": "integer"},
                                                        "clip": {"type": "array", "items": {"type": "object", "properties": {"file": {"type": "string"}, "da": {"type": "number"}, "a": {"type": "number"}}, "required": ["file", "da", "a"]}}},
                       "required": ["clip"]}},
+    {"name": "banco_davinci",
+     "description": "Sul PC di montaggio: costruisce DIRETTAMENTE in DaVinci Resolve Studio un progetto nuovo con la timeline del reel (clip in fila con ingresso/uscita, sequenza 4K verticale 2160x3840 a 25 fps di default). "
+                    "Stessi parametri di banco_xml. Con esporta=true prepara anche il lavoro di render in 4K (resta da avviare dalla pagina Deliver). Richiede Resolve aperto e lo scripting esterno attivo; se non va, usa banco_xml.",
+     "input_schema": {"type": "object", "properties": {"nome": {"type": "string"}, "larghezza": {"type": "integer"}, "altezza": {"type": "integer"}, "fps": {"type": "integer"}, "esporta": {"type": "boolean"},
+                                                       "clip": {"type": "array", "items": {"type": "object", "properties": {"file": {"type": "string"}, "da": {"type": "number"}, "a": {"type": "number"}}, "required": ["file", "da", "a"]}}},
+                      "required": ["clip"]}},
     {"name": "banco_risultato", "description": "Legge il risultato di un lavoro del banco rimasto in corso (id restituito da un altro strumento banco_).",
      "input_schema": {"type": "object", "properties": {"lavoro_id": {"type": "integer"}}, "required": ["lavoro_id"]}},
 ]
 AVVISO = ("\n\nBANCO DI LAVORO: hai un PC di montaggio con ffmpeg (strumenti banco_*). Metodo: banco_inventario, trascrizione, banco_silenzi per scegliere i tagli nelle pause, "
-          "banco_ffmpeg per produrre in uscite/, poi banco_fotogrammi per RIGUARDARE il risultato prima di consegnarlo. Per Lorenzo (4K o progetto Premiere) usa banco_xml: scrive il progetto di montaggio importabile in Premiere Pro e DaVinci Resolve. Se un lavoro e' ancora in corso richiama banco_risultato con il suo id.")
+          "banco_ffmpeg per produrre in uscite/, poi banco_fotogrammi per RIGUARDARE il risultato prima di consegnarlo. Per Lorenzo (4K) usa banco_davinci per costruire la timeline direttamente in DaVinci Resolve (se non risponde, banco_xml); per Premiere usa banco_xml: scrive il progetto di montaggio importabile in Premiere Pro e DaVinci Resolve. Se un lavoro e' ancora in corso richiama banco_risultato con il suo id.")
 
 
 def _attendi(lid: int, secondi: int = ATTESA_S) -> dict:

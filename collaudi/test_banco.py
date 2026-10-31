@@ -20,7 +20,7 @@ os.makedirs(LAV + "/RIPRESE", exist_ok=True)
 subprocess.run([pc.FF, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=8", "-f", "lavfi", "-i", "testsrc=s=320x568:r=25:d=8", "-af", "volume=enable='between(t,3,5)':volume=0", "-shortest", "-y", LAV + "/RIPRESE/clip1.mp4"], check=True)
 shutil.copy(LAV + "/RIPRESE/clip1.mp4", LAV + "/RIPRESE/copia.mp4")
 with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row, autocommit=True) as conn:
-    conn.execute(open('sql/112_banco_lavoro.sql').read()); conn.execute(open('sql/115_banco_xml.sql').read())
+    conn.execute(open('sql/112_banco_lavoro.sql').read()); conn.execute(open('sql/115_banco_xml.sql').read()); conn.execute(open('sql/117_banco_davinci.sql').read())
     conn.execute("DELETE FROM banco_postazioni"); conn.execute("DELETE FROM banco_lavori")
     a = conn.execute("SELECT id FROM agenti LIMIT 1").fetchone()["id"]
     g = banco.gestore(db.connessione, a)
@@ -79,5 +79,36 @@ with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row, autocommi
     ok("xml: scala 200% per 1080->2160 su clip da 320", True)
     ok("xml: clip oltre la durata rifiutata", "Rifiutato" in g("banco_xml", {"clip": [{"file": "RIPRESE/clip1.mp4", "da": 0, "a": 99}]}))
     ok("xml: validazione clip", banco.valida("xml", {"clip": [{"file": "../x", "da": 0, "a": 1}]})[0] is None and banco.valida("xml", {"clip": [{"file": "a.mp4", "da": 3, "a": 1}]})[0] is None)
+
+    # --- DaVinci Resolve (finto) ---
+    import types
+    reg = {"agg": [], "imp": [], "set": {}, "job": False}
+    class Item:
+        def __init__(s, p): s.p = p
+        def GetClipProperty(s, k): return s.p if k == "File Path" else "25"
+        def GetName(s): return os.path.basename(s.p)
+    class MP:
+        def ImportMedia(s, l): reg["imp"] = list(l); return [Item(p) for p in l]
+        def CreateEmptyTimeline(s, n): return object()
+        def AppendToTimeline(s, l): reg["agg"] = l; return True
+    class Pr:
+        def SetSetting(s, k, v): reg["set"][k] = v; return True
+        def GetMediaPool(s): return MP()
+        def SetRenderSettings(s, d): reg["rs"] = d; return True
+        def AddRenderJob(s): reg["job"] = True; return "job1"
+    class Gp:
+        def CreateProject(s, n): return Pr()
+    class Rs:
+        def GetProjectManager(s): return Gp()
+    mod = types.ModuleType("DaVinciResolveScript"); mod.scriptapp = lambda n: Rs()
+    sys.modules["DaVinciResolveScript"] = mod
+    r = g("banco_davinci", {"nome": "Reel B", "esporta": True, "clip": [{"file": "RIPRESE/clip1.mp4", "da": 1, "a": 3}, {"file": "RIPRESE/copia.mp4", "da": 5, "a": 7.5}]})
+    ok("davinci: progetto creato e render preparato", "creato in DaVinci Resolve" in r and "Lavoro di render 4K" in r and reg["job"], r)
+    ok("davinci: timeline 4K verticale 25 fps", reg["set"].get("timelineResolutionWidth") == "2160" and reg["set"].get("timelineResolutionHeight") == "3840" and reg["set"].get("timelineFrameRate") == "25", str(reg["set"]))
+    ok("davinci: tagli in fotogrammi", [(x["startFrame"], x["endFrame"]) for x in reg["agg"]] == [(25, 74), (125, 187)], str([(x["startFrame"], x["endFrame"]) for x in reg["agg"]]))
+    ok("davinci: percorsi dentro la cartella di lavoro", all(p.startswith(str(pc.DATI)) for p in reg["imp"]))
+    ok("davinci: validazione rifiuta percorsi fuori", banco.valida("davinci", {"clip": [{"file": "../x", "da": 0, "a": 1}]})[0] is None)
+    mod.scriptapp = lambda n: None
+    ok("davinci: Resolve spento, messaggio chiaro", "non risponde" in g("banco_davinci", {"clip": [{"file": "RIPRESE/clip1.mp4", "da": 0, "a": 2}]}))
     fermo = True
 print(f"{sum(ris)}/{len(ris)}"); sys.exit(0 if all(ris) else 1)
