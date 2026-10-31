@@ -29,6 +29,9 @@ STRUMENTI = [
      "input_schema": {"type": "object", "properties": {"nome": {"type": "string"}, "dentro": {"type": "string"}}, "required": ["nome"]}},
     {"name": "google_leggi", "description": "Legge un file che sta dentro la cartella Opifex: foglio o documento Google, oppure un file caricato (PDF, Word, Excel, PowerPoint, immagine, testo).",
      "input_schema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
+    {"name": "google_trascrivi", "description": "Trascrive l'AUDIO di un video o di un file audio su Drive (anche nelle cartelle di lavoro autorizzate), con i tempi [mm:ss]. "
+     "Per file lunghi lavora a pezzi da 40 minuti: se in fondo c'e' «richiama con da_minuto=N» richiamalo. Salva poi la trascrizione in un documento nella cartella del progetto.",
+     "input_schema": {"type": "object", "properties": {"file_id": {"type": "string"}, "da_minuto": {"type": "integer"}}, "required": ["file_id"]}},
     {"name": "google_crea_foglio", "description": "Crea un nuovo foglio Google formattato (intestazione colorata, riga bloccata, righe alternate, colonne adattate). Numeri come numeri. 'righe' e' una lista di righe, ognuna lista di celle; la prima riga e' l'intestazione. "
      "'progetto' (facoltativo) e' il nome del progetto in cui salvarlo; senza, va nella cartella Opifex.",
      "input_schema": {"type": "object", "properties": {"titolo": {"type": "string"}, "righe": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
@@ -214,13 +217,23 @@ def _esegui(conn, agente_id: int, nome: str, d: dict) -> str:
                 tipo = {MIME_FOGLIO: "foglio", MIME_DOC: "documento", "application/vnd.google-apps.folder": "cartella"}.get(x["mimeType"], "altro")
                 out.append(f"{x['id']} | {x['name']} | {tipo}")
         return "\n".join(out) or "Nessun file trovato nella cartella Opifex"
+    if nome == "google_trascrivi":
+        fid = str(d.get("file_id", ""))
+        if not _nell_albero(tok, fid, radici):
+            return "ERRORE: il file non e' dentro Opifex ne' in una cartella di lavoro autorizzata (usa google_elenca_cartella per vedere cosa c'e')"
+        m = _richiesta("GET", f"{_DRIVE}/{fid}", tok, params={"fields": "name,mimeType,videoMediaMetadata(durationMillis)"}).json()
+        if not m["mimeType"].startswith(("video/", "audio/")):
+            return "ERRORE: non e' un file audio o video: per i documenti usa google_leggi"
+        from . import trascrizione_drive
+        dur = int(((m.get("videoMediaMetadata") or {}).get("durationMillis") or 0)) // 1000
+        return trascrizione_drive.trascrivi(tok, fid, m["name"], dur or None, d.get("da_minuto") or 0)
     if nome == "google_leggi":
         fid = str(d.get("file_id", ""))
         if not _nell_albero(tok, fid, radici):
             return "ERRORE: il file non e' dentro Opifex ne' in una cartella di lavoro autorizzata (usa google_elenca_cartella per vedere cosa c'e')"
         m = _richiesta("GET", f"{_DRIVE}/{fid}", tok, params={"fields": "name,mimeType"}).json()
         if m["mimeType"].startswith(("video/", "audio/")):
-            return (f"«{m['name']}» e' un file {m['mimeType'].split('/')[0]}: lo vedo (nome, dimensione, durata con google_elenca_cartella) ma non posso leggerne il contenuto ne' montarlo da qui. "
+            return (f"«{m['name']}» e' un file {m['mimeType'].split('/')[0]}: lo vedo (nome, dimensione, durata con google_elenca_cartella) ma non posso leggerne il contenuto ne' montarlo da qui: per l'audio usa google_trascrivi. "
                     "Il montaggio si fa su DaVinci/Premiere: prepara il piano di montaggio (tagli, ordine, musica, titoli) a partire dal brief e consegnalo.")
         if m["mimeType"] not in (MIME_FOGLIO, MIME_DOC):
             from .documenti import ESTENSIONI, FileNonLeggibile, estrai_testo, lettore_visivo
