@@ -3,6 +3,7 @@
 Chi puo' parlare con chi: vedi colleghi(). Ogni dialogo ha una fascia di riservatezza decisa da chi lo avvia.
 """
 import json
+import re
 
 from .db import connessione
 from .fornitori import ErroreFornitore, chiama_modello
@@ -74,6 +75,8 @@ def colleghi(conn, agente_id: int) -> list[dict]:
                  a.id = %(sup)s
               OR a.superiore_id = %(id)s
               OR a.ruolo_speciale IS NOT NULL
+              OR a.id IN (SELECT pa2.agente_id FROM progetti_agenti pa1 JOIN progetti_agenti pa2 ON pa2.progetto_id = pa1.progetto_id
+                          WHERE pa1.agente_id = %(id)s AND (SELECT count(*) FROM progetti_agenti x WHERE x.progetto_id = pa1.progetto_id) <= 12)
               OR (%(gest)s AND (a.id IN (SELECT id FROM sotto) OR a.livello IN ('manager', 'referente')))
               OR %(vigila)s)
            ORDER BY a.id""",
@@ -216,6 +219,24 @@ def _risposta_speciale(conn, dest: dict, da_id: int, conv_id: int, domanda: str,
     return r["risposta"]
 
 
+_RE_FILE = re.compile(r"\b(file|cartell|drive|video|grezz|clip|riprese|trascri|timecode|export|durata|fps|risoluzion|google|foglio|documento)", re.IGNORECASE)
+
+
+def _serve_esecuzione(conn, dest: dict, domanda: str) -> bool:
+    """Una domanda su file o cartelle richiede gli strumenti Drive: il collega risponde allora con l'esecuzione completa (chi risponde in
+    chiacchiera non ha strumenti e finiva per dire «non vedo la cartella»)."""
+    if dest.get("ruolo_speciale"):
+        return True
+    if not _RE_FILE.search(domanda or ""):
+        return False
+    from . import accessi_agenti
+    a = conn.execute("""SELECT a.id, a.fascia_dati_max, a.drive_attivo, m.nome AS modello_nome, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
+                               f.non_conservazione_attiva, f.dpa_firmato
+                        FROM agenti a LEFT JOIN modelli_ai m ON m.nome = a.modello LEFT JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE a.id = %s""",
+                     (dest["id"],)).fetchone()
+    return bool(a) and accessi_agenti.motivo_senza_drive(conn, a) is None
+
+
 def domanda_a_collega(da_id: int, nome_dest: str, domanda: str, conv_id: int | None, fascia: str,
                       utente_id: int | None) -> tuple[str, int]:
     """Un agente fa una domanda a un collega durante il suo lavoro. Restituisce (risposta, id conversazione)."""
@@ -239,7 +260,7 @@ def domanda_a_collega(da_id: int, nome_dest: str, domanda: str, conv_id: int | N
             _salva_messaggio(conn, conv_id, dest["id"], da_id, "#A")
             conn.commit()
             return "#A ricevuto", conv_id
-        if dest.get("ruolo_speciale"):
+        if _serve_esecuzione(conn, dest, domanda):
             return _risposta_speciale(conn, dest, da_id, conv_id, domanda, fascia, utente_id), conv_id
         risposta = _fai_parlare(conn, dest["id"], da_id, conv_id,
                                 (PRIORITA_AURORA if e_aurora(conn, da_id) else "") + "Rispondi al messaggio precedente. Se non e' chiaro, chiedi chiarimenti precisi.", fascia, utente_id)

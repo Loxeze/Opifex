@@ -99,7 +99,7 @@ ok("un passo che fallisce non ferma gli altri", fatti == [1])
 ok("il guasto genera una sola notifica al giorno", sql("SELECT count(*) FROM notifiche WHERE testo LIKE '%prova guasto%'")[0][0] == 1)
 # limiti
 imp = {k: v for k, v in sql("SELECT chiave, valore FROM impostazioni_sistema WHERE chiave LIKE 'dialoghi_%'")}
-ok("limiti dei dialoghi allargati (30 milioni di token/giorno, 12 messaggi, 5 domande)", imp["dialoghi_budget_token_giornaliero"] == "30000000" and imp["dialoghi_max_messaggi"] == "12" and imp["dialoghi_max_domande"] == "5", str(imp))
+ok("limiti dei dialoghi allargati (30 milioni di token/giorno, 12 messaggi, 12 domande)", imp["dialoghi_budget_token_giornaliero"] == "30000000" and imp["dialoghi_max_messaggi"] == "12" and imp["dialoghi_max_domande"] == "12", str(imp))
 ok("nuovi agenti: 16000 token di risposta di base; i dialoghi 16000", sql("SELECT column_default FROM information_schema.columns WHERE table_name='agenti' AND column_name='max_token_risposta'")[0][0] == "16000" and dialoghi.MAX_TOKEN_DIALOGO == 16000)
 ok("tutti gli agenti gia' al valore iniziale sono passati a 3000", sql("SELECT count(*) FROM agenti WHERE max_token_risposta=1500")[0][0] == 0)
 sql("UPDATE impostazioni_sistema SET valore='555555' WHERE chiave='dialoghi_budget_token_giornaliero'")
@@ -113,5 +113,5 @@ ok("e rispetta i tetti personalizzati dei singoli agenti", sql("SELECT max_token
 ok("riserva di connessioni al database per gli agenti al lavoro", modulo_db.pool.max_size >= 40 and modulo_db.pool.timeout >= 60)
 with TestClient(app) as c:
     H = {"Authorization": "Bearer " + accedi(c, "l@p.it", PW)}
-    ok("la schermata dei limiti mostra i nuovi valori", c.get("/gestione/dialoghi/limiti", headers=H).json()["dialoghi_max_domande"] in ("5", 5), c.get("/gestione/dialoghi/limiti", headers=H).text)
+    ok("la schermata dei limiti mostra i nuovi valori", c.get("/gestione/dialoghi/limiti", headers=H).json()["dialoghi_max_domande"] in ("12", 12), c.get("/gestione/dialoghi/limiti", headers=H).text)
 print("TOTALE", sum(ris), "/", len(ris))

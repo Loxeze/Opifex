@@ -61,13 +61,13 @@ def leggi_limiti(_: dict = Depends(solo_titolare)):
         return {k: dialoghi.impostazione(conn, k, d) for k, d in LIMITI.items()}
 
 
-LIMITI = {"dialoghi_max_messaggi": "12", "dialoghi_max_domande": "5",
+LIMITI = {"dialoghi_max_messaggi": "12", "dialoghi_max_domande": "12",
           "dialoghi_budget_token_giornaliero": "30000000", "modello_dialogo_predefinito": "claude-haiku-5-5"}
 
 
 class Limiti(BaseModel):
     dialoghi_max_messaggi: int = Field(ge=2, le=30)
-    dialoghi_max_domande: int = Field(ge=0, le=10)
+    dialoghi_max_domande: int = Field(ge=0, le=30)
     dialoghi_budget_token_giornaliero: int = Field(ge=1000, le=50_000_000)
     modello_dialogo_predefinito: str
 
