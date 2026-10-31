@@ -158,6 +158,32 @@ function diagnosiTrascrizione() {
   return box;
 }
 
+// Banco di lavoro: PC di montaggio che esegue ffmpeg, fotogrammi e silenzi per gli agenti.
+function bancoLavoro() {
+  const box = h("div", { class: "carta" }), msg = h("div");
+  const mostra = async () => {
+    try {
+      const d = await api("GET", "/gestione/banco");
+      const nome = h("input", { type: "text", maxlength: 60, placeholder: "Nome del PC (es. Montaggio studio)" });
+      const scarica = async (p) => {
+        try { const r = await _blobArchivio("/gestione/banco/postazioni/" + p.id + "/pacchetto", { method: "POST" }); _salvaBlob(await r.blob(), "opifex-banco.zip");
+          msg.replaceChildren(avviso("Pacchetto scaricato: decomprimilo sul PC di montaggio, scrivi la cartella di lavoro in avvia.bat / avvia.command e avvialo (istruzioni in LEGGIMI.txt).", "ok")); mostra(); }
+        catch (x) { msg.replaceChildren(avviso(x.message, "no")); } };
+      riempi(box, [h("div", { class: "nome" }, "Banco di lavoro (PC di montaggio)"),
+        h("p", { class: "aiuto" }, "Un programma sul PC di montaggio permette agli agenti di fare inventario dei file, guardare fotogrammi, trovare le pause e produrre video con ffmpeg, solo dentro la cartella di lavoro che indichi. Si collega in uscita: nessuna porta da aprire."),
+        d.postazioni.filter(p => p.attiva).map(p => h("div", { class: "sotto" }, h("b", {}, p.nome), " — " + (p.online ? "online" : p.ultimo_contatto ? "offline (ultimo contatto " + new Date(p.ultimo_contatto).toLocaleString("it-IT") + ")" : "mai collegato") + (p.versione ? " · v" + p.versione : ""), " ",
+          h("button", { class: "s", type: "button", onclick: () => scarica(p) }, "Scarica pacchetto (chiave nuova)"), " ",
+          h("button", { class: "r", type: "button", onclick: async () => { if (!confirm("Spegnere «" + p.nome + "»?")) return; await api("DELETE", "/gestione/banco/postazioni/" + p.id); mostra(); } }, "Spegni"))),
+        h("div", { class: "riga" }, nome, h("button", { class: "p", type: "button", onclick: async () => { if (nome.value.trim().length < 2) { msg.replaceChildren(avviso("Dai un nome al PC.", "avv")); return; }
+          try { const r = await api("POST", "/gestione/banco/postazioni", { nome: nome.value.trim() }); await scarica({ id: r.id }); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Aggiungi PC e scarica il pacchetto")),
+        msg,
+        d.lavori.length ? [h("div", { class: "sotto", style: "margin-top:8px" }, "Ultimi lavori:"), d.lavori.map(l => h("div", { class: "sotto" }, "#" + l.id + " " + l.tipo + " · " + l.stato + " · " + (l.agente || "—") + (l.risultato ? " — " + l.risultato : "")))] : null]);
+    } catch (x) { box.replaceChildren(avviso(x.message, "no")); }
+  };
+  mostra();
+  return box;
+}
+
 // Chi ha gli strumenti Drive e, per chi non li ha, il motivo preciso.
 function accessiDriveAgenti() {
   const box = h("div", { class: "carta" }, h("p", { class: "sotto" }, "Controllo in corso…"));
@@ -215,7 +241,7 @@ function vistaCollegamenti() {
             h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
               try { const r = await api("POST", "/gestione/google/autorizza", { etichetta: etic.value, servizi: serv.filter(x => x.c.checked).map(x => x.k) }); window.location.href = r.url; }
               catch (x) { mostra(x.message, "no"); } } }, "Collega con Google"))),
-          h("h3", {}, "Agenti e Drive"), accessiDriveAgenti(), diagnosiTrascrizione(),
+          h("h3", {}, "Agenti e Drive"), accessiDriveAgenti(), diagnosiTrascrizione(), h("h3", {}, "Banco di lavoro"), bancoLavoro(),
           h("h3", {}, "Drive per i progetti"),
           h("div", { class: "carta" }, h("label", {}, "Account che crea le cartelle", sceltaDrive),
             h("label", {}, "ID della cartella «Opifex» su Drive", radice),

@@ -41,6 +41,7 @@ from .plancia import router as router_plancia
 from .accessi_agenti import router as router_accessi_agenti
 from .squadra_progetto import router as router_squadra_progetto
 from .rotte_best_practice import router as router_best_practice
+from .banco import router as router_banco_gestione, router_banco
 from .rotte_aggiornamenti import router as router_aggiornamenti
 from .rotte_canali import router as router_canali
 from .rotte_documenti import router as router_documenti
@@ -303,6 +304,8 @@ app.include_router(router_plancia)
 app.include_router(router_accessi_agenti)
 app.include_router(router_squadra_progetto)
 app.include_router(router_best_practice)
+app.include_router(router_banco_gestione)
+app.include_router(router_banco)
 app.include_router(router_aggiornamenti)
 app.include_router(router_canali)
 app.include_router(router_task)

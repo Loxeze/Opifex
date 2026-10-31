@@ -1,0 +1,24 @@
+OPIFEX - BANCO DI LAVORO (PC di montaggio)
+==========================================
+
+Cosa fa
+-------
+Un piccolo programma che gira sul PC di montaggio e si collega SOLO in uscita a Opifex (nessuna porta da aprire). Esegue per gli agenti:
+inventario dei file video/audio, estrazione di fotogrammi, ricerca delle pause di silenzio e comandi ffmpeg limitati.
+Lavora SOLO dentro la cartella di lavoro che scegli tu: non legge e non scrive altrove. I risultati di ffmpeg finiscono nella sottocartella "uscite".
+A Opifex tornano soltanto testi e piccoli mosaici di fotogrammi; i video restano sul PC.
+
+Installazione
+-------------
+1. Installa Python 3.10 o piu' recente (python.org) se non c'e' gia'. ffmpeg: se non e' installato lo scarica da solo.
+2. Decomprimi questa cartella dove vuoi.
+3. Apri "avvia.bat" (Windows) o "avvia.command" (Mac/Linux) con un editor di testo e scrivi, al posto di CARTELLA_DI_LAVORO, il percorso della cartella
+   con le riprese (di solito la cartella sincronizzata di Google Drive, es. "RIPRESE GREZZE" o la cartella del progetto).
+4. Fai doppio clic su avvia.bat / avvia.command. In Opifex (Impostazioni -> Banco di lavoro) la postazione compare "online" entro un minuto.
+5. Lascia il programma aperto mentre gli agenti lavorano. Per aggiornarlo basta riavviarlo: scarica da solo l'ultima versione da Opifex.
+
+Sicurezza
+---------
+- La chiave nel file avvia e' segreta. Se sospetti qualcosa, in Opifex genera un pacchetto nuovo: la chiave vecchia smette di valere subito.
+- ffmpeg puo' leggere solo file della cartella di lavoro e scrivere solo in "uscite". Indirizzi web, percorsi assoluti e '..' sono rifiutati.
+- Ogni lavoro e' registrato in Opifex (Banco di lavoro), con l'agente che lo ha richiesto.
