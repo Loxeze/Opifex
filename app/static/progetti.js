@@ -151,7 +151,10 @@ function diagnosiTrascrizione() {
     e.currentTarget.disabled = false;
   };
   riempi(box, [h("div", { class: "nome" }, "Trascrizione dei video"), h("p", { class: "aiuto" }, "Controlla ciò che serve agli agenti per ascoltare l'audio dei video su Drive."), idf,
-    h("div", { class: "azioni" }, h("button", { class: "p", onclick: vai_ }, "Controlla / prova")), esito]);
+    h("div", { class: "azioni" }, h("button", { class: "p", onclick: vai_ }, "Controlla / prova"),
+      h("button", { class: "s", onclick: async (e) => { e.currentTarget.disabled = true; esito.replaceChildren(h("p", { class: "sotto" }, "Scarico ffmpeg (può volerci un minuto)…"));
+        try { const r = await api("POST", "/gestione/trascrizione/installa-ffmpeg"); esito.replaceChildren(avviso(r.messaggio, r.ok ? "ok" : "no")); } catch (x) { esito.replaceChildren(avviso(x.message, "no")); }
+        e.currentTarget.disabled = false; } }, "Installa ffmpeg ora")), esito]);
   return box;
 }
 

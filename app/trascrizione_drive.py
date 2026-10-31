@@ -13,16 +13,82 @@ BLOCCHI_PER_CHIAMATA = 8
 MAX_MINUTI = 240
 
 
+ULTIMO_ERRORE_FFMPEG = ""
+
+
+def _prova(p: str) -> bool:
+    global ULTIMO_ERRORE_FFMPEG
+    try:
+        if not os.access(p, os.X_OK):
+            os.chmod(p, 0o755)
+        r = subprocess.run([p, "-version"], capture_output=True, timeout=15)
+        if r.returncode == 0:
+            return True
+        ULTIMO_ERRORE_FFMPEG = f"{p}: codice {r.returncode} {r.stderr.decode(errors='replace')[:120]}"
+    except Exception as e:  # noqa: BLE001
+        ULTIMO_ERRORE_FFMPEG = f"{p}: {type(e).__name__}: {str(e)[:120]}"
+    return False
+
+
+def cartelle_ffmpeg() -> list[str]:
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return [os.path.join(base, "ffmpeg_incluso"), os.path.join(tempfile.gettempdir(), "opifex_ffmpeg_incluso")]
+
+
+def installa_ffmpeg() -> str:
+    """Scarica ffmpeg (pacchetto Python imageio-ffmpeg) in una cartella accanto all'app, senza permessi di amministratore. Ritorna '' se riuscito, altrimenti l'errore."""
+    import sys
+    errore = ""
+    for cart in cartelle_ffmpeg():
+        try:
+            os.makedirs(cart, exist_ok=True)
+            r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-input", "--target", cart, "imageio-ffmpeg==0.7.0"],
+                               capture_output=True, text=True, timeout=300)
+        except Exception as e:  # noqa: BLE001
+            errore = f"{cart}: {type(e).__name__}: {str(e)[:150]}"
+            continue
+        if r.returncode == 0 and _cerca_in(cart):
+            return ""
+        errore = f"{cart}: pip codice {r.returncode}: {(r.stderr or r.stdout).strip()[-250:]}"
+    return errore
+
+
+def _cerca_in(cart: str) -> str | None:
+    for radice, _, files in os.walk(os.path.join(cart, "imageio_ffmpeg", "binaries")):
+        for x in sorted(files):
+            if x.startswith("ffmpeg") and _prova(os.path.join(radice, x)):
+                return os.path.join(radice, x)
+    return None
+
+
 def _ffmpeg() -> str | None:
     """ffmpeg di sistema se c'e'; altrimenti quello incluso nel pacchetto Python imageio-ffmpeg (nessuna installazione a mano)."""
+    global ULTIMO_ERRORE_FFMPEG
     p = shutil.which("ffmpeg")
-    if p:
+    if p and _prova(p):
         return p
+    for cart in cartelle_ffmpeg():
+        p = _cerca_in(cart) if os.path.isdir(cart) else None
+        if p:
+            return p
     try:
         import imageio_ffmpeg
-        return imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        ULTIMO_ERRORE_FFMPEG = f"libreria imageio-ffmpeg non installata nell'ambiente di Opifex ({type(e).__name__}): usa «Installa ffmpeg ora» in Impostazioni → Collegamenti"
         return None
+    try:
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as e:  # noqa: BLE001
+        exe = ""
+        ULTIMO_ERRORE_FFMPEG = f"imageio-ffmpeg senza programma ({type(e).__name__}: {str(e)[:100]})"
+    cand = [exe] if exe else []
+    cartella = os.path.join(os.path.dirname(imageio_ffmpeg.__file__), "binaries")
+    if os.path.isdir(cartella):
+        cand += [os.path.join(cartella, x) for x in sorted(os.listdir(cartella)) if x.startswith("ffmpeg")]
+    for c in cand:
+        if _prova(c):
+            return c
+    return None
 
 
 def _mmss(s: int) -> str:

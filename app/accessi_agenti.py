@@ -68,7 +68,7 @@ def diagnosi_trascrizione(file_id: str = "", _: dict = Depends(solo_titolare)):
             versione = subprocess.run([ff, "-version"], capture_output=True, text=True, timeout=15).stdout.splitlines()[0][:60]
         except Exception as e:  # noqa: BLE001
             ff, versione = None, f"non eseguibile ({type(e).__name__})"
-    passi.append({"voce": "ffmpeg", "ok": bool(ff), "dettaglio": versione or "non trovato (ne' di sistema ne' incluso nel pacchetto)"})
+    passi.append({"voce": "ffmpeg", "ok": bool(ff), "dettaglio": versione or ("non trovato: " + (td.ULTIMO_ERRORE_FFMPEG or "ne' di sistema ne' incluso nel pacchetto"))})
     with connessione() as conn:
         f = conn.execute("SELECT fascia_dati_max, non_conservazione_attiva, dpa_firmato FROM fornitori_ai WHERE nome = 'openai'").fetchone()
         passi.append({"voce": "Chiave OpenAI", "ok": bool(fornitori.chiave("openai")), "dettaglio": "inserita" if fornitori.chiave("openai") else "manca: Impostazioni → Sicurezza e garanzie"})
@@ -86,3 +86,13 @@ def diagnosi_trascrizione(file_id: str = "", _: dict = Depends(solo_titolare)):
             except Exception as e:  # noqa: BLE001
                 prova = f"ERRORE: {type(e).__name__}: {e}"[:600]
     return {"passi": passi, "pronto": all(p["ok"] for p in passi), "prova": prova}
+
+
+@router.post("/trascrizione/installa-ffmpeg")
+def installa_ffmpeg(_: dict = Depends(solo_titolare)):
+    """Scarica ffmpeg accanto all'app quando l'aggiornamento non l'ha portato (nessun permesso di amministratore)."""
+    from . import trascrizione_drive as td
+    if td._ffmpeg():
+        return {"ok": True, "messaggio": "ffmpeg c'e' gia'"}
+    err = td.installa_ffmpeg()
+    return {"ok": not err and bool(td._ffmpeg()), "messaggio": err or "ffmpeg installato"}
