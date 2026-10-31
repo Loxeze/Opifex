@@ -14,10 +14,10 @@ from .permessi import solo_titolare
 router = APIRouter(prefix="/gestione", tags=["riunioni"])
 SINCRONO = False
 MAX_PARTECIPANTI = 8
-MAX_TOKEN_RISPOSTA = 700
+MAX_TOKEN_RISPOSTA = 400
 NIENTE = "niente da aggiungere"
-MODELLO_RIUNIONI = "claude-opus-5-5"
-SFORZO_RIUNIONI = "medium"   # Opus con ragionamento medio: intelligente ma risponde in pochi secondi
+MODELLO_RIUNIONI = "claude-sonnet-5-5"   # Sonnet: abbastanza intelligente per parlare e molto piu' rapido
+SFORZO_RIUNIONI = "medium"
 REGOLE_STILE_BREVE = "diretto, tra colleghi; mai dire di aver registrato, annotato o preso nota."
 
 STILE = ("si parla come in una conversazione vocale tra colleghi che si capiscono al volo: dritti al punto, sulla sostanza, nel tono di chi sa gia' cosa fare. "
@@ -30,7 +30,7 @@ REGOLE_RIUNIONE = (
     "1. Lorenzo guida: i manager rispondono solo a cio' che chiede e non propongono argomenti propri; le loro richieste restano in coda.\n"
     "2. Quando Lorenzo da' un'indicazione, una decisione o un'informazione, nessuno la ripete, la riassume o la conferma a parole. Se riguarda il lavoro di qualcuno, quel qualcuno agisce e dice solo il risultato che serve.\n"
     "3. Si risponde a voce: poche frasi, senza elenchi, senza ripetere cio' che hanno gia' detto gli altri.\n"
-    "4. Chi non ha nulla da aggiungere tace.\n"
+    "4. Risponde chi e' interpellato per nome: gli altri tacciono, salvo che abbiano un elemento davvero diverso. Il moderatore non ribatte mai a cio' che ha gia' detto un collega.\n"
     "5. Stile: " + STILE)
 
 DOMANDA = re.compile(r"\?|\b(cosa|che cosa|come|perch[eé]|quando|quanto|quanti|quante|chi|dove|quale|quali|puoi|potete|potresti|dimmi|dimmelo|dicci|spiega\w*|raccontami|aggiorna\w*|riepilog\w*|riassum\w*|fammi|fatemi|dammi|datemi|mostra\w*|elenca\w*|voglio sapere|vorrei sapere|cosa ne pensi|che ne pensi|parere|opinione|richieste|in coda|stato|punto della situazione)\b", re.I)
@@ -157,11 +157,14 @@ def crea(conn, utente_id: int, titolo: str, odg: str, partecipanti: list[str], p
     return tid
 
 
-def interpellati(testo: str, partecipanti: list[dict]) -> list[dict]:
-    """Chi è nominato nella frase; se nessuno, tutti."""
+def interpellati(testo: str, partecipanti: list[dict], moderatore_id: int | None = None) -> list[dict]:
+    """Chi è nominato nella frase; se nessuno, tutti tranne il moderatore (che risponde solo se lo nomini, o se e' l'unico presente)."""
     t = testo.lower()
     nominati = [p for p in partecipanti if re.search(r"(?<!\w)" + re.escape(p["nome"].lower()) + r"(?!\w)", t)]
-    return nominati or partecipanti
+    if nominati:
+        return nominati
+    senza_mod = [p for p in partecipanti if moderatore_id is None or p.get("id") != moderatore_id]
+    return senza_mod or partecipanti
 
 
 def nominati_espliciti(testo: str, partecipanti: list[dict]) -> bool:
@@ -261,7 +264,7 @@ def _rispondi(tid: int, ids: list[int]):
                       "- Il ragionamento lo fai dentro di te: a voce porti solo la conclusione, precisa e puntuale, con al massimo il perche' in una frase. Mai raccontare i passaggi, i dubbi o cio' che stai valutando. Prendi posizione e dai la tua raccomandazione. Se vedi un rischio, un'alternativa migliore o un errore nel ragionamento di Lorenzo, diglielo con franchezza e rispetto.\n"
                       "- Usa quello che sai: documenti, progetti e fatti dell'organizzazione, e i tuoi strumenti (cerca davvero prima di dire che non sai). Cifre, nomi e date concreti; mai inventare: se manca un dato, di' quale e dove lo prenderesti.\n"
                       "- Capisci il contesto prima di rispondere: cosa sta cercando di ottenere Lorenzo, a che punto e' il progetto, cosa e' gia' stato deciso. Se ti manca qualcosa di decisivo, fai UNA domanda giusta e specifica (quella che sblocca la decisione, mai una domanda generica o ovvia) invece di indovinare.\n"
-                      "- Lunghezza naturale: una o due frasi per le cose semplici, al massimo cinque o sei frasi parlate per quelle complesse. Italiano parlato e scorrevole, senza elenchi e senza markdown.\n"
+                      "- Lunghezza: BREVE. Una frase per le cose semplici, mai oltre tre frasi brevi (circa 40 parole) salvo che Lorenzo chieda di approfondire. Italiano parlato e scorrevole, senza elenchi e senza markdown.\n"
                       "- Non ripetere cio' che hanno gia' detto gli altri: se concordi aggiungi solo cio' che manca. Dai un parere dalla tua competenza, non dalla loro.\n"
                       f"- Se davvero non hai nulla di utile da aggiungere rispondi esattamente «{NIENTE.capitalize()}».\n"
                       "Se hai una segnalazione importante ma fuori dal tema del momento, scrivila in una riga finale che inizia con «CODA:» (al massimo due frasi): Lorenzo la sentira' quando chiedera' le richieste in coda.")
@@ -344,7 +347,8 @@ def turno(conn, tid: int, testo: str) -> int:
         consegna_coda(conn, tid)    # «avete richieste?»: parlano le richieste messe in coda, senza altre risposte
         conn.commit()
         return iid
-    ids = [p["id"] for p in interpellati(testo, part)]
+    mod_id = (conn.execute("SELECT moderatore_id FROM tavoli WHERE id = %s", (tid,)).fetchone() or {}).get("moderatore_id")
+    ids = [p["id"] for p in interpellati(testo, part, mod_id)]
     if e_lavoro(testo):
         assegna_incarico(conn, tid, ids, testo)    # un incarico: parte il lavoro vero, la conversazione resta libera
         return iid

@@ -83,25 +83,28 @@ with TestClient(app) as c:
     d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
     ok("risposta di tutti e due, in ordine", [(i["da_utente"], i["agente_id"]) for i in d["interventi"]][1:] == [(True, None), (False, marco), (False, dario)] and "Che cosa vuoi sapere" in d["interventi"][0]["testo"] and d["interventi"][0]["agente_id"] == aur, str(d["interventi"]))
     ok("il secondo ha visto la risposta del primo", "servono eventi serali" in ultimi_msg[1])
-    ok("in riunione i manager usano il modello scelto per le riunioni, non quello dell'agente", modelli_visti and set(modelli_visti) == {"claude-opus-5-5"}, str(set(modelli_visti)))
+    ok("in riunione i manager usano il modello scelto per le riunioni, non quello dell'agente", modelli_visti and set(modelli_visti) == {"claude-sonnet-5-5"}, str(set(modelli_visti)))
     ok("il prompt vieta le conferme tipo «ho preso nota»", "VIETATO dire o far capire di aver registrato" in ultimi_msg[1] and "COME RISPONDI" in ultimi_msg[1] and "UNA domanda giusta" in ultimi_msg[1] and "Il ragionamento lo fai dentro di te" in ultimi_msg[1])
     q = c.get("/gestione/riunioni-call/qualita", headers=H).json()
-    ok("qualita' riunioni: di default il modello migliore col ragionamento medio", q["modello"] == "claude-opus-5-5" and q["sforzo"] == "medium" and "claude-opus-5-5" in q["modelli"], str(q))
+    ok("qualita' riunioni: di default il modello migliore col ragionamento medio", q["modello"] == "claude-sonnet-5-5" and q["sforzo"] == "medium" and "claude-opus-5-5" in q["modelli"], str(q))
     ok("qualita' riunioni: modifica e controlli", c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-sonnet-5-5", "sforzo": "medium"}).status_code == 200
        and c.get("/gestione/riunioni-call/qualita", headers=H).json()["modello"] == "claude-sonnet-5-5"
        and c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "inventato"}).status_code == 422
        and c.put("/gestione/riunioni-call/qualita", headers=H, json={"sforzo": "enorme"}).status_code == 422
        and c.get("/gestione/riunioni-call/qualita", headers=HC).status_code == 403)
-    c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-opus-5-5", "sforzo": "medium"})
+    c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-sonnet-5-5", "sforzo": "medium"})
     sql("UPDATE agenti SET modello_riunione='claude-haiku-5-5' WHERE id=%s", (dario,))
     copione[:] = [fine("Uno."), fine("Due.")]; modelli_visti.clear()
     c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Che programma facciamo per l'estate?"})
-    ok("un agente con modello_riunione proprio lo usa, gli altri il globale", modelli_visti[:2] == ["claude-opus-5-5", "claude-haiku-5-5"], str(modelli_visti))
+    ok("un agente con modello_riunione proprio lo usa, gli altri il globale", modelli_visti[:2] == ["claude-sonnet-5-5", "claude-haiku-5-5"], str(modelli_visti))
     sql("UPDATE agenti SET modello_riunione=NULL WHERE id=%s", (dario,))
     ok("voce veloce nelle riunioni: modello turbo e parti spezzate", "veloce: true" in c.get("/app/riunioni_call.js").text and "spezza(testo)" in c.get("/app/riunioni_call.js").text and ve.MODELLO_VELOCE == "eleven_turbo_v2_5")
     vj = c.get("/app/voce.js").text
     ok("dettatura: il testo si ricostruisce dai risultati (niente frase ripetuta 7-8 volte su Android)", "senzaRipetizioni" in vj and "for (let i = 0; i < ev.results.length; i++)" in vj and "finale +=" not in vj)
     ok("riunioni: i risultati finali ripetuti dal browser non vengono reinviati", "ultimoBrowser" in c.get("/app/riunioni_call.js").text)
+    pp = [{"id": 1, "nome": "Aurora"}, {"id": 2, "nome": "Elena"}, {"id": 3, "nome": "Marco"}]
+    ok("senza nomi il moderatore non risponde, se nominata si", [p["id"] for p in call_riunioni.interpellati("Che ne pensate?", pp, 1)] == [2, 3] and [p["id"] for p in call_riunioni.interpellati("Aurora, tu?", pp, 1)] == [1] and [p["id"] for p in call_riunioni.interpellati("Elena, tu?", pp, 1)] == [2])
+    ok("il moderatore da solo risponde comunque", [p["id"] for p in call_riunioni.interpellati("Ciao", pp[:1], 1)] == [1])
     ok("sql/103 Aurora/Elena su Sonnet", all(r[0] == "claude-sonnet-5-5" for r in sql("SELECT modello FROM agenti WHERE lower(nome) IN ('aurora','elena')")))
     ok("un'indicazione che nomina un manager lo interpella", call_riunioni.nominati_espliciti("Marco segui il sito", [{"nome": "Marco"}]) and not call_riunioni.nominati_espliciti("Il budget e' alto", [{"nome": "Marco"}]))
     ok("non e' piu' occupato", d["occupato"] is False)

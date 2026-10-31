@@ -119,7 +119,7 @@ function pannelloQualita() {
       sf.value = d.sforzo || "";
       const salva = async () => { try { await api("PUT", "/gestione/riunioni-call/qualita", { modello: mod.value, sforzo: sf.value }); msg.replaceChildren(avviso("Salvato: vale dalla prossima risposta.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } };
       mod.addEventListener("change", salva); sf.addEventListener("change", salva);
-      riempi(box, [h("p", { class: "aiuto" }, "Qui i manager rispondono col modello più capace e ragionano a fondo (consigliato: claude-opus-5-5, ragionamento medio: intelligente e veloce). «Alto» ragiona di più ma risponde più lentamente; fuori dalle riunioni ogni agente usa il suo modello."),
+      riempi(box, [h("p", { class: "aiuto" }, "Qui i manager rispondono col modello più capace e ragionano a fondo (consigliato: claude-sonnet-5-5, ragionamento medio: intelligente e veloce). Opus è più profondo ma più lento e costoso, «alto» ragiona di più ma risponde più lentamente; fuori dalle riunioni ogni agente usa il suo modello."),
         h("div", { class: "riga", style: "align-items:center;gap:8px;flex-wrap:wrap" }, h("span", { style: "min-width:150px" }, "Modello"), mod), h("div", { class: "riga", style: "align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px" }, h("span", { style: "min-width:150px" }, "Ragionamento"), sf)]);
     } catch (e) { box.replaceChildren(avviso(e.message, "no")); }
   })();
