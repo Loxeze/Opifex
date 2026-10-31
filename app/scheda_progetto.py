@@ -214,6 +214,13 @@ STRUMENTI = [
     {"name": "progetto_decisione",
      "description": "Registra nella scheda una decisione presa (una frase, con il perche' se serve) o segna come superata una decisione precedente (superata_id).",
      "input_schema": {"type": "object", "properties": {"progetto": {"type": "string"}, "testo": {"type": "string"}, "superata_id": {"type": "integer"}}}},
+    {"name": "consegna_verifica",
+     "description": "Registra il controllo finale prima di consegnare: per ogni punto della checklist indica esito (ok, no, non_verificabile) e la prova (file, tempo, numero). "
+                    "Se qualche punto e' «no» ti risponde BLOCCATO: correggi e rifai il controllo. I punti non_verificabili vanno dichiarati nella consegna.",
+     "input_schema": {"type": "object", "properties": {"progetto": {"type": "string"}, "lavoro": {"type": "string"},
+                                                       "voci": {"type": "array", "items": {"type": "object", "properties": {
+                                                           "punto": {"type": "string"}, "esito": {"type": "string", "enum": ["ok", "no", "non_verificabile"]},
+                                                           "prova": {"type": "string"}}, "required": ["punto", "esito"]}}}, "required": ["voci"]}},
     {"name": "best_practice_cerca",
      "description": "Cerca nella memoria condivisa delle buone pratiche (maturate nei progetti conclusi) quelle utili al lavoro che stai per fare: cosa ha funzionato, cosa evitare, "
                     "checklist. Usalo a inizio lavoro con 2-5 parole chiave (es. «reel montaggio verticale»).",
@@ -237,6 +244,13 @@ def gestore(connessione, agente_id: int):
             with connessione() as conn:
                 if nome == "progetto_crea":
                     return crea_progetto(conn, agente_id, dati)
+                if nome == "consegna_verifica":
+                    from . import verifica_consegna
+                    try:
+                        pid = trova(conn, agente_id, dati.get("progetto"))["id"]
+                    except SchedaNonValida:
+                        pid = None
+                    return verifica_consegna.registra(conn, agente_id, pid, dati)
                 if nome == "best_practice_cerca":
                     from . import best_practice
                     return best_practice.esegui(conn, dati)
