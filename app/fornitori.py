@@ -49,11 +49,45 @@ SFORZO_FORZATO = contextvars.ContextVar("sforzo_forzato", default=None)
 SFORZO = contextvars.ContextVar("sforzo_agente", default=None)   # 'low' | 'medium' | 'high': sforzo di ragionamento dell'agente in esecuzione (solo modelli Anthropic)
 
 
+CACHE_LETTA = contextvars.ContextVar("cache_letta", default=None)   # token riletti dalla cache nella risposta in corso (per le misure)
+
+
+def _con_cache(corpo: dict) -> dict:
+    """Cache dei prompt di Anthropic: istruzioni+strumenti e la coda della conversazione vengono riletti al 10% del prezzo
+    a ogni giro di strumenti. Due punti di taglio: fine di 'system' (copre anche gli strumenti) e ultimo blocco dei messaggi."""
+    c = dict(corpo)
+    sistema = c.get("system")
+    if isinstance(sistema, str) and sistema.strip():
+        c["system"] = [{"type": "text", "text": sistema, "cache_control": {"type": "ephemeral"}}]
+    elif isinstance(sistema, list) and sistema and isinstance(sistema[-1], dict) and "cache_control" not in sistema[-1]:
+        c["system"] = sistema[:-1] + [{**sistema[-1], "cache_control": {"type": "ephemeral"}}]
+    mess = c.get("messages")
+    if isinstance(mess, list) and mess and isinstance(mess[-1], dict):
+        ultimo = mess[-1]
+        cont = ultimo.get("content")
+        if isinstance(cont, str) and cont.strip():
+            cont = [{"type": "text", "text": cont}]
+        if isinstance(cont, list) and cont and isinstance(cont[-1], dict) and cont[-1].get("type") in ("text", "tool_result", "tool_use", "image") \
+                and "cache_control" not in cont[-1]:
+            c["messages"] = mess[:-1] + [{**ultimo, "content": cont[:-1] + [{**cont[-1], "cache_control": {"type": "ephemeral"}}]}]
+    return c
+
+
+def token_ingresso(uso: dict) -> int:
+    """Token di ingresso equivalenti al prezzo pieno: i nuovi in cache costano 1,25, quelli riletti 0,1 (cosi' il costo stimato resta giusto)."""
+    letti = int(uso.get("cache_read_input_tokens") or 0)
+    scritti = int(uso.get("cache_creation_input_tokens") or 0)
+    return int(uso.get("input_tokens") or 0) + round(scritti * 1.25) + round(letti * 0.1)
+
+
 def invia(url: str, intestazioni: dict, corpo: dict, timeout: int = 180):
     """POST al fornitore con nuovi tentativi per gli errori momentanei (sovraccarico, limite di richieste, rete lenta).
     Senza questo un singolo 529 o un timeout fermava l'agente. Gli errori definitivi (chiave, richiesta sbagliata) passano subito."""
     ultimo = ""
     sforzo = SFORZO.get()
+    anthropic = "api.anthropic.com/v1/messages" in url
+    if anthropic:
+        corpo = _con_cache(corpo)
     if sforzo and "api.anthropic.com/v1/messages" in url and "output_config" not in corpo:
         corpo = {**corpo, "output_config": {"effort": sforzo}}
     for n in range(len(PAUSE_RIPROVA) + 1):
@@ -66,6 +100,12 @@ def invia(url: str, intestazioni: dict, corpo: dict, timeout: int = 180):
             ultimo = type(e).__name__
             r = None
         if r is not None and r.status_code not in CODICI_TRANSITORI:
+            if anthropic and r.status_code == 200:
+                try:
+                    letti = int((r.json().get("usage") or {}).get("cache_read_input_tokens") or 0)
+                    CACHE_LETTA.set((CACHE_LETTA.get() or 0) + letti)
+                except (ValueError, TypeError):
+                    pass
             return r
         if r is not None:
             ultimo = f"{r.status_code} {r.text[:120]}"
@@ -109,7 +149,7 @@ def _chiama_anthropic(modello: str, istruzioni: str, messaggio: str, max_token: 
         raise ErroreFornitore(f"Anthropic: {r.status_code} {r.text[:200]}")
     d = r.json()
     testo = "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text")
-    t_in, t_out, giri = d["usage"]["input_tokens"], d["usage"]["output_tokens"], 0
+    t_in, t_out, giri = token_ingresso(d["usage"]), d["usage"]["output_tokens"], 0
     while d.get("stop_reason") == "max_tokens" and testo.strip() and not web and giri < 2:
         # risposta tagliata dal limite: si fa continuare dallo stesso punto e si ricuce il testo
         giri += 1
@@ -120,7 +160,7 @@ def _chiama_anthropic(modello: str, istruzioni: str, messaggio: str, max_token: 
             break
         d = r.json()
         testo += "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text")
-        t_in += d["usage"]["input_tokens"]; t_out += d["usage"]["output_tokens"]
+        t_in += token_ingresso(d["usage"]); t_out += d["usage"]["output_tokens"]
     return Risposta(testo, t_in, t_out, {"stop": d.get("stop_reason") or ""})
 
 

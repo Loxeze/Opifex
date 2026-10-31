@@ -78,7 +78,7 @@ def leggi(immagini: list[tuple[str, bytes]], fascia: str = "interno") -> str:
     try:
         with connessione() as conn:
             pr = conn.execute("SELECT costo_input_per_milione AS ci, costo_output_per_milione AS co FROM modelli_ai WHERE nome=%s", (modello,)).fetchone()
-            ti, to = d["usage"]["input_tokens"], d["usage"]["output_tokens"]
+            ti, to = fornitori.token_ingresso(d["usage"]), d["usage"]["output_tokens"]
             costo = (float(pr["ci"] or 0) * ti + float(pr["co"] or 0) * to) / 1_000_000 if pr else 0
             conn.execute("INSERT INTO costi_api (agente_id, modello, token_input, token_output, costo_stimato) VALUES (NULL,%s,%s,%s,%s)",
                          (modello, ti, to, costo))
@@ -119,7 +119,7 @@ def chiedi(immagini: list[tuple[str, bytes]], istruzione: str, richiesta: str, f
     try:
         with connessione() as conn:
             pr = conn.execute("SELECT costo_input_per_milione AS ci, costo_output_per_milione AS co FROM modelli_ai WHERE nome=%s", (modello,)).fetchone()
-            ti, to = d["usage"]["input_tokens"], d["usage"]["output_tokens"]
+            ti, to = fornitori.token_ingresso(d["usage"]), d["usage"]["output_tokens"]
             costo = (float(pr["ci"] or 0) * ti + float(pr["co"] or 0) * to) / 1_000_000 if pr else 0
             conn.execute("INSERT INTO costi_api (agente_id, modello, token_input, token_output, costo_stimato) VALUES (NULL,%s,%s,%s,%s)", (modello, ti, to, costo))
     except Exception:

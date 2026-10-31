@@ -540,6 +540,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     nav = nav_cm.__enter__()
                 else:
                     nav = None
+                fornitori.CACHE_LETTA.set(0)
                 try:
                     if a["fornitore"] == "anthropic":
                         ris = agente_browser.esegui_con_strumenti(a["modello_nome"], a["istruzioni"], testo_uscente,
@@ -556,6 +557,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                         "INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s, 'navigazione_siti', %s::jsonb, %s)",
                         (agente_id, json.dumps({"pagine": visitati[:40]}), utente_id))
             else:
+                fornitori.CACHE_LETTA.set(0)
                 ris = chiama_modello(a["fornitore"], a["modello_nome"], a["istruzioni"], testo_uscente,
                                      a["max_token_risposta"], web)
         except (ErroreFornitore, cassaforte.CassaforteNonConfigurata, ErroreNavigazione) as e:
@@ -594,7 +596,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         )
         misure.registra(conn, agente_id, a["modello_nome"], origine_misura, ris.token_input, ris.token_output,
                         _costo(a, ris.token_input, ris.token_output), (getattr(ris, "diag", None) or {}).get("passi", 1),
-                        round(time.monotonic() - t_mono, 2), n_strumenti, bool(web), len(a["istruzioni"]), car_strumenti, car_richiesta, dim)
+                        round(time.monotonic() - t_mono, 2), n_strumenti, bool(web), len(a["istruzioni"]), car_strumenti, car_richiesta, dim, cache_letti=(fornitori.CACHE_LETTA.get() or 0))
         conn.execute(
             "INSERT INTO registro_azioni (agente_id, azione, utente_id) VALUES (%s, 'risposta_generata', %s)",
             (agente_id, utente_id),

@@ -32,14 +32,14 @@ def origine_da_chiamante(salti: int = 2) -> str:
 
 
 def registra(conn, agente_id, modello, origine, token_in, token_out, costo, passi=1, secondi=None,
-             n_strumenti=0, web=False, car_istruzioni=0, car_strumenti=0, car_richiesta=0, blocchi=None):
+             n_strumenti=0, web=False, car_istruzioni=0, car_strumenti=0, car_richiesta=0, blocchi=None, cache_letti=0):
     try:
         conn.execute(
             """INSERT INTO misure_chiamate (agente_id, modello, origine, token_input, token_output, costo, passi, secondi,
-                                            n_strumenti, web, car_istruzioni, car_strumenti, car_richiesta, car_blocchi)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)""",
+                                            n_strumenti, web, car_istruzioni, car_strumenti, car_richiesta, car_blocchi, cache_letti)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
             (agente_id, modello, origine[:60], token_in, token_out, costo, max(1, int(passi or 1)), secondi, n_strumenti, bool(web),
-             car_istruzioni, car_strumenti, car_richiesta, json.dumps(blocchi or {})))
+             car_istruzioni, car_strumenti, car_richiesta, json.dumps(blocchi or {}), int(cache_letti or 0)))
     except Exception:
         pass   # la misura non deve mai rompere una risposta
 

@@ -7,7 +7,7 @@ import httpx
 
 from . import eventi
 from .config import impostazioni
-from .fornitori import ErroreFornitore, Risposta, chiave as fornitori_chiave, invia
+from .fornitori import ErroreFornitore, Risposta, chiave as fornitori_chiave, invia, token_ingresso as fornitori_token_ingresso
 from .navigatore import ErroreNavigazione, Navigatore
 
 MAX_PASSI = 14
@@ -100,7 +100,7 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
         passi += 1
         d = _chiama_api({"model": modello, "max_tokens": max_token, "system": sistema,
                          "messages": messaggi, "tools": strumenti})
-        t_in += d["usage"]["input_tokens"]; t_out += d["usage"]["output_tokens"]
+        t_in += fornitori_token_ingresso(d["usage"]); t_out += d["usage"]["output_tokens"]
         testo_finale = "".join(b.get("text", "") for b in d["content"] if b.get("type") == "text")
         if testo_finale.strip():
             testi.append(testo_finale.strip())
@@ -143,7 +143,7 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
             diag["max_token_ritentativo"] = tetto
             d = _chiama_api({"model": modello, "max_tokens": tetto, "system": sistema,
                              "messages": _con_richiesta_finale(_ripulisci(messaggi)), "tools": strumenti, "tool_choice": {"type": "none"}})
-            t_in += d["usage"]["input_tokens"]; t_out += d["usage"]["output_tokens"]
+            t_in += fornitori_token_ingresso(d["usage"]); t_out += d["usage"]["output_tokens"]
             extra_t = "".join(b.get("text", "") for b in d["content"] if b.get("type") == "text").strip()
             diag["ritentativo"] = True; diag["stop_ritentativo"] = d.get("stop_reason") or ""
             if extra_t:
