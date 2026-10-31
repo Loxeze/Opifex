@@ -22,6 +22,39 @@ function riempiConservando(el, contenuto) {
   window.scrollTo(x, y);
 }
 
+// Riquadro «Ora sta formando»: titolo, per chi, tappa, ultima azione e cosa c'e' dopo; si aggiorna da solo
+function bannerCasati() {
+  const box = h("div", { class: "carta", style: "margin-bottom:12px" }, h("div", { class: "sotto" }, "Padre Casati: carico lo stato…"));
+  let timer = null, firma = null;
+  const NOMI_FASE = { ricerca: "Ricerca del materiale", studio: "Studio e appunti", stesura: "Stesura della competenza" };
+  const quando = (iso) => { if (!iso) return ""; const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000)); return s < 90 ? "pochi secondi fa" : Math.round(s / 60) + " minuti fa"; };
+  const carica = async () => {
+    if (!document.body.contains(box)) { clearInterval(timer); return; }
+    try {
+      const d = await api("GET", "/gestione/ginnasio/adesso");
+      const f = JSON.stringify(d); if (f === firma) return; firma = f;
+      const c = d.in_corso;
+      const coda = d.in_coda.length ? h("div", { class: "sotto", style: "margin-top:6px" }, "Poi: " + d.in_coda.map(x => x.competenza + " (liv. " + x.livello + ")").join(" · ") + (d.in_coda_totale > d.in_coda.length ? " · altre " + (d.in_coda_totale - d.in_coda.length) : "")) : null;
+      const attesa = d.appunti_pronti.length ? h("div", { class: "sotto", style: "margin-top:6px;font-weight:600" }, "⏸ In attesa del tuo via libera: " + d.appunti_pronti.map(x => x.competenza_nome).join(", ") + " (gli appunti sono pronti, vedi sotto)") : null;
+      if (!c) {
+        riempi(box, [h("div", { class: "nome" }, "🎓 Padre Casati · " + (d.attiva ? "nessuna formazione in corso" : "formazione in pausa")),
+          h("div", { class: "sotto" }, d.attiva ? (d.in_coda_totale ? "La prossima parte appena possibile." : "Nulla in coda: aggiungi una richiesta qui sotto.") : "Attiva la formazione per farlo lavorare."), attesa, coda]);
+        return;
+      }
+      riempi(box, [
+        h("div", { class: "nome" }, "🎓 Sta formando ora: " + c.competenza + " — livello " + c.livello + " (" + c.livello_nome + ")"),
+        h("div", { class: "sotto" }, "Per: " + (c.per ? c.per + (c.per_ruolo ? " (" + c.per_ruolo + ")" : "") : "la libreria delle competenze") + (c.motivo ? " · Perché: " + c.motivo : "")),
+        h("div", { style: "margin:8px 0 4px;height:8px;border-radius:99px;background:var(--bordo);overflow:hidden" }, h("div", { style: "height:100%;width:" + c.percentuale + "%;background:linear-gradient(90deg,#f3b54a,#e58bd0);transition:width .6s" })),
+        h("div", { class: "sotto" }, "Tappa " + c.tappa + " di " + c.tappe + ": " + (NOMI_FASE[c.fase] || c.fase) + " · circa " + c.percentuale + "%"),
+        h("div", { style: "margin-top:6px" }, h("b", {}, "Ora: "), c.azione + (c.ultima_azione_il ? " (" + quando(c.ultima_azione_il) + ")" : "")),
+        h("div", { class: "sotto" }, c.pdf + " documenti scaricati · " + c.video + " video lezioni (trascrizioni) · " + c.passi + " passaggi · " + c.token.toLocaleString("it-IT") + " token · in corso da " + (c.minuti < 1 ? "meno di un minuto" : c.minuti + " min")),
+        attesa, coda]);
+    } catch (e) { box.replaceChildren(h("div", { class: "sotto" }, e.message)); }
+  };
+  carica(); timer = setInterval(carica, 4000);
+  return box;
+}
+
 function vistaGinnasio() {
   const msg = h("div"), destra = h("div");
   const cacheAvanz = new Map();   // le schede di avanzamento restano le stesse tra un aggiornamento e l'altro
@@ -107,6 +140,7 @@ function vistaGinnasio() {
   carica();
   return [h("h2", {}, "Ginnasio"),
     h("p", { class: "aiuto" }, "A sinistra Padre Casati studia e custodisce la biblioteca; a destra forma gli agenti: ogni competenza ha cinque livelli (Junior, Medium, Senior, Expert, Master) e arriva a un agente solo dopo la tua approvazione. Si procede piano, nei limiti del budget giornaliero."),
+    bannerCasati(),
     h("div", { class: "ginnasio" }, h("section", {}, sinistra), h("section", {}, destra))];
 }
 

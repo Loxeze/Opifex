@@ -266,6 +266,51 @@ def avanzamento(conn, rid: int) -> dict:
             "bozza": bozza["corpo"] if bozza else None}
 
 
+_AZIONI = {"cerca_fonti": "Cerca fonti", "scarica_materiale": "Scarica il documento", "proponi_download": "Scarica il documento", "biblioteca_cerca": "Consulta la biblioteca",
+           "biblioteca_leggi": "Legge", "cerca_video": "Cerca video lezioni su YouTube", "scarica_trascrizione_video": "Salva la trascrizione del video"}
+
+
+def _azione_umana(tipo: str, dettaglio: str) -> str:
+    if tipo == "fase":
+        return {"ricerca": "Inizia la ricerca del materiale", "studio": "Studia i documenti e scrive gli appunti", "stesura": "Scrive la competenza"}.get(dettaglio, dettaglio)
+    nome, _, resto = (dettaglio or "").partition(": ")
+    base = _AZIONI.get(nome, nome)
+    return (base + (": " + resto[:110] if resto else "")).strip()
+
+
+def adesso(conn) -> dict:
+    """Cosa sta facendo Padre Casati in questo momento: titolo, per chi, tappa, ultima azione, quanto manca, cosa c'e' in coda."""
+    s = stato_generale(conn)
+    r = conn.execute("""SELECT f.*, a.nome AS agente, a.ruolo AS agente_ruolo FROM richieste_formazione f LEFT JOIN agenti a ON a.id = f.agente_id
+                        WHERE f.stato = 'in_corso' ORDER BY f.avviata_il DESC NULLS LAST LIMIT 1""").fetchone()
+    attesa = conn.execute("SELECT id, competenza_nome, livello FROM richieste_formazione WHERE stato = 'appunti_pronti' ORDER BY id").fetchall()
+    out = {"attiva": s["attivo"], "in_corso": None, "appunti_pronti": attesa,
+           "in_coda": [{"id": x["id"], "competenza": x["competenza_nome"], "livello": x["livello"]} for x in coda(conn)[:3]], "in_coda_totale": len(coda(conn))}
+    if r is None:
+        return out
+    ev = conn.execute("SELECT tipo, dettaglio, creato_il FROM eventi_lavoro WHERE richiesta_id = %s ORDER BY id", (r["id"],)).fetchall()
+    fasi = ("ricerca", "studio", "stesura")
+    finite = [e["dettaglio"] for e in ev if e["tipo"] == "fase_fine"]
+    saltate = 2 if (r["appunti"] or "").strip() else 0
+    fatte = len(set(finite) & set(fasi)) + (saltate if not finite else 0)
+    corrente = r["fase"] if r["fase"] in fasi else (fasi[min(fatte, 2)])
+    n_passi = sum(1 for e in ev if e["tipo"] == "strumento")
+    ultimo = next((e for e in reversed(ev) if e["tipo"] in ("strumento", "fase")), None)
+    # tappa: ogni fase pesa un terzo; dentro la fase si avanza con i passi fatti (con un tetto, perche' non si sa quanti ne serviranno)
+    passi_fase = sum(1 for e in ev[[i for i, e in enumerate(ev) if e["tipo"] == "fase" and e["dettaglio"] == corrente][-1]:] if e["tipo"] == "strumento") if any(e["tipo"] == "fase" and e["dettaglio"] == corrente for e in ev) else 0
+    dentro = min(0.9, passi_fase / 14) if corrente != "stesura" else 0.5
+    pct = int(min(97, 100 * (fatte + dentro) / 3))
+    mat = conn.execute("""SELECT count(*) FILTER (WHERE d.fonte_url NOT ILIKE '%%youtube.com%%') AS pdf, count(*) FILTER (WHERE d.fonte_url ILIKE '%%youtube.com%%') AS video
+                          FROM formazione_materiale m JOIN documenti d ON d.id = m.documento_id WHERE m.richiesta_id = %s""", (r["id"],)).fetchone()
+    minuti = int((conn.execute("SELECT EXTRACT(EPOCH FROM NOW() - %s) AS s", (r["avviata_il"],)).fetchone()["s"] or 0) // 60) if r["avviata_il"] else 0
+    out["in_corso"] = {"id": r["id"], "competenza": r["competenza_nome"], "livello": r["livello"], "livello_nome": LIVELLI[r["livello"]], "per": r["agente"], "per_ruolo": r["agente_ruolo"],
+                       "motivo": (r["motivo"] or "")[:300], "fase": corrente, "tappa": fatte + 1, "tappe": 3, "percentuale": pct,
+                       "azione": _azione_umana(ultimo["tipo"], ultimo["dettaglio"]) if ultimo else "Si prepara",
+                       "ultima_azione_il": ultimo["creato_il"] if ultimo else None, "pdf": mat["pdf"], "video": mat["video"], "passi": n_passi,
+                       "token": int(r["token_usati"] or 0), "minuti": minuti}
+    return out
+
+
 def avvia(rid: int):
     if SINCRONO:
         _lavora(rid)
@@ -300,7 +345,9 @@ def _prompt_ricerca(conn, r: dict) -> str:
     return (_contesto_richiesta(conn, r) + "\nFASE 1 di 3 — RICERCA DEL MATERIALE. Non scrivere ancora la competenza.\n"
             "1) biblioteca_cerca: guarda cosa c'e' gia'. 2) cerca_fonti con poche ricerche mirate (archivi diversi: openalex, arxiv, wikipedia, semanticscholar), senza dati riservati. "
             f"3) scarica con scarica_materiale i PDF ad accesso aperto davvero utili (quanti ne servono, senza limiti: preferisci manuali, rassegne e linee guida a post e opinioni). "
-            "Chiudi con una lista breve: cosa hai scaricato, cosa gia' c'era, cosa non hai trovato.")
+            "4) cerca_video: cerca su YouTube una o due video lezioni o conferenze serie (corsi universitari, esperti riconosciuti, durata di almeno 15 minuti) e salvane la trascrizione con scarica_trascrizione_video: "
+            "sono spesso piu' concrete e aggiornate dei PDF. Se YouTube non risponde o il video non ha sottotitoli, vai avanti senza. "
+            "Chiudi con una lista breve: cosa hai scaricato (PDF e video), cosa gia' c'era, cosa non hai trovato.")
 
 
 def _prompt_studio(conn, r: dict, ricerca: str) -> str:

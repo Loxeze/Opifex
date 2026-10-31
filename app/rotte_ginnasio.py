@@ -13,6 +13,12 @@ def _err(e: Exception):
     raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 
 
+@router.get("/adesso")
+def adesso(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return g.adesso(conn)
+
+
 @router.get("")
 def stato(_: dict = Depends(solo_titolare)):
     with connessione() as conn:

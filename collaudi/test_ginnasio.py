@@ -220,6 +220,46 @@ with TestClient(app) as c:
     ok("stesura fatta senza rifare ricerca e studio", f == ("da_approvare", "stesura") and [x["stato"] for x in av["fasi"]] == ["finita", "finita", "finita"] and "APPUNTI DI STUDIO" in ultimi_msg[0], str(av["fasi"]))
     at = c.get(f"/agenti/{casati_id}/attivita", headers=H).json()
     ok("scheda attivita': eventi, riposo, nessun errore", at["adesso"]["al_lavoro"] is False and len(at["eventi"]) >= 5 and any(e["tipo"] == "strumento" for e in at["eventi"]) and at["agente"]["nome"] == "Padre Casati", str(at["adesso"]))
+    ad = c.get("/gestione/ginnasio/adesso", headers=H).json()
+    ok("adesso: senza formazioni in corso lo dice", ad["in_corso"] is None and "in_coda_totale" in ad)
+    pagina = '<html><script>var ytInitialData = ' + json.dumps({"c": [{"videoRenderer": {"videoId": "ZZZZZZZZZZZ", "title": {"runs": [{"text": "Corso di prova"}]}, "ownerText": {"runs": [{"text": "Canale"}]}, "lengthText": {"simpleText": "1:02:03"}}}, {"videoRenderer": {"videoId": "LIVE0000000", "title": {"runs": [{"text": "Diretta"}]}}}]}) + ';</script></html>'
+    class RH:
+        status_code = 200; text = pagina
+    _g = casati.httpx.get; casati.httpx.get = lambda *a, **k: RH()
+    rr = casati._cerca_youtube("corso")
+    casati.httpx.get = _g
+    ok("la pagina dei risultati di YouTube viene letta (le dirette senza durata sono scartate)", rr == [{"id": "ZZZZZZZZZZZ", "titolo": "Corso di prova", "canale": "Canale", "durata": "1:02:03", "quando": "", "viste": ""}], str(rr))
+    from app import youtube_stile as yt_
+    casati._cerca_youtube = lambda t, l="it": [{"id": "abcdefghijk", "titolo": "Lezione di storytelling", "canale": "Universita' X", "durata": "52:10", "quando": "1 anno fa", "viste": "10 visualizzazioni"}]
+    yt_._trascrizione = lambda v: [{"text": f"parola{i} di lezione sul metodo", "start": i * 10.0, "duration": 9.0} for i in range(60)]
+    yt_._titolo = lambda u: {"title": "Lezione di storytelling", "author_name": "Universita' X"}
+    ok("cerca_video elenca titolo, canale, durata e indirizzo", "Lezione di storytelling" in casati.cerca_video("storytelling") and "watch?v=abcdefghijk" in casati.cerca_video("storytelling"))
+    rv = sql("INSERT INTO richieste_formazione (competenza_nome, livello, stato, agente_id, motivo, avviata_il, fase) VALUES ('Storytelling', 2, 'in_corso', %s, 'Per il podcast', NOW() - interval '3 minutes', 'ricerca') RETURNING id", (leo,))[0][0]
+    tk = casati.FORMAZIONE.set({"richiesta": rv, "n": 0, "byte": 0})
+    with connessione() as cn:
+        esito = casati.trascrizione_per_formazione(cn, casati_id, {"url": "https://youtu.be/abcdefghijk"})
+        esito2 = casati.trascrizione_per_formazione(cn, casati_id, {"url": "https://www.youtube.com/watch?v=abcdefghijk"})
+    casati.FORMAZIONE.reset(tk)
+    ok("la trascrizione di un video entra in biblioteca", "Salvata la trascrizione" in esito and sql("SELECT count(*) FROM documenti WHERE fonte_url='https://www.youtube.com/watch?v=abcdefghijk' AND biblioteca")[0][0] == 1, esito)
+    ok("lo stesso video non si salva due volte", "gia' in biblioteca" in esito2 and sql("SELECT count(*) FROM formazione_materiale WHERE richiesta_id=%s", (rv,))[0][0] == 1)
+    ok("le trascrizioni hanno i tempi e si possono cercare", "[0:30]" in sql("SELECT string_agg(testo, ' ') FROM pezzi_documenti p JOIN documenti d ON d.id=p.documento_id WHERE d.fonte_url LIKE '%%abcdefghijk'")[0][0])
+    tk = casati.FORMAZIONE.set(None)
+    with connessione() as cn:
+        try:
+            casati.trascrizione_per_formazione(cn, casati_id, {"url": "https://youtu.be/abcdefghijk"}); fuori = False
+        except casati.ErroreCasati:
+            fuori = True
+    casati.FORMAZIONE.reset(tk)
+    ok("fuori da una formazione non si salvano video", fuori)
+    ok("i video non sono tra gli strumenti di Casati fuori formazione", "cerca_video" not in [t["name"] for t in casati.STRUMENTI] and {"cerca_video", "scarica_trascrizione_video"} == {t["name"] for t in casati.STRUMENTI_VIDEO})
+    sql("INSERT INTO eventi_lavoro (agente_id, tipo, dettaglio, richiesta_id) VALUES (%s,'fase','ricerca',%s)", (casati_id, rv))
+    sql("INSERT INTO eventi_lavoro (agente_id, tipo, dettaglio, richiesta_id) VALUES (%s,'strumento','cerca_fonti: tecniche di storytelling',%s)", (casati_id, rv))
+    sql("INSERT INTO eventi_lavoro (agente_id, tipo, dettaglio, richiesta_id) VALUES (%s,'strumento','cerca_video: lezione storytelling',%s)", (casati_id, rv))
+    ad = c.get("/gestione/ginnasio/adesso", headers=H).json()["in_corso"]
+    ok("adesso: titolo, per chi, tappa, ultima azione e materiali", ad and ad["competenza"] == "Storytelling" and ad["per"] == "Leo" and ad["tappa"] == 1 and ad["fase"] == "ricerca" and "Cerca video lezioni su YouTube" in ad["azione"] and ad["video"] == 1 and ad["minuti"] >= 3 and 0 < ad["percentuale"] < 100, str(ad))
+    ok("adesso: solo il titolare", c.get("/gestione/ginnasio/adesso", headers=HC).status_code == 403)
+    ok("riquadro presente nella pagina", "bannerCasati" in c.get("/app/ginnasio.js").text)
+    sql("UPDATE richieste_formazione SET stato='annullata' WHERE id=%s", (rv,))
     sql("INSERT INTO eventi_lavoro (agente_id, tipo, dettaglio) VALUES (%s,'inizio','Analizza il bando')", (scout,))
     at = c.get(f"/agenti/{scout}/attivita", headers=H).json()
     ok("agente con lavoro iniziato e non finito risulta al lavoro", at["adesso"]["al_lavoro"] is True and at["adesso"]["attivita"] == "Analizza il bando")

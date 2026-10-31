@@ -383,7 +383,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     avviso_extra += crm.AVVISO
                     gestori["crm_conta"] = crm.gestore(connessione, agente_id)
                 if spec_tool == "formatore":
-                    st_cas = casati.STRUMENTI + ([casati.STRUMENTO_SCARICA] if casati.FORMAZIONE.get() else [])
+                    st_cas = casati.STRUMENTI + ([casati.STRUMENTO_SCARICA] + casati.STRUMENTI_VIDEO if casati.FORMAZIONE.get() else [])
                     extra.extend(st_cas)
                     avviso_extra += casati.AVVISO + "\n\nBIBLIOTECA ORA: " + _elenco_biblioteca(a_f)
                     gc = casati.gestore(a_f, agente_id, connessione)
