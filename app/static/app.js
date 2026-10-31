@@ -208,6 +208,22 @@ function carta(a) {
     h("div", { class: "agente-extra-posto", "data-id": String(a.id) }));
 }
 
+function sezioneProfiloAlto(a) {
+  const esito = h("div");
+  const b = h("button", { class: "s", type: "button", onclick: async () => {
+    b.disabled = true; esito.replaceChildren();
+    try {
+      const r = await api("POST", "/gestione/agenti/" + a.id + "/profilo-alto");
+      esito.replaceChildren(avviso("Profilo alto attivo: modello " + r.modello + ", fino a " + r.passi + " passaggi, ragionamento alto, metodo di lavoro aggiunto." + (r.avviso ? " " + r.avviso : ""), r.avviso ? "avv" : "ok"));
+    } catch (e) { esito.replaceChildren(avviso(e.message, "no")); }
+    b.disabled = false;
+  } }, "Attiva profilo alto");
+  const r0 = h("button", { class: "s", type: "button", onclick: async () => {
+    try { await api("DELETE", "/gestione/agenti/" + a.id + "/profilo-alto"); esito.replaceChildren(avviso("Ripristinato come prima.", "ok")); } catch (e) { esito.replaceChildren(avviso(e.message, "no")); }
+  } }, "Ripristina");
+  return h("div", {}, h("h3", {}, "Profilo alto"), h("p", { class: "aiuto" }, "Per i lavori difficili (montaggio, consegne): usa il modello migliore, fino a 40 passaggi con gli strumenti, ragionamento alto e un metodo scritto (piano, verifica, nuovi tentativi). Costa di più in token: usalo solo dove serve."), b, " ", r0, esito);
+}
+
 function sezioneProva(a) {
   const esito = h("div");
   const b = h("button", { class: "s", type: "button", onclick: async () => {
@@ -402,7 +418,7 @@ function modulo(a) {
             h("label", {}, "Lunghezza massima risposta (token)", tetto),
             h("label", {}, "Sforzo di ragionamento (modelli Claude)", sforzo),
             h("label", {}, "Budget mensile (token)", budget)),
-          nuovo ? null : sezioneProva(a)]],
+          nuovo ? null : sezioneProva(a), nuovo ? null : sezioneProfiloAlto(a)]],
         ["Strumenti", [      h("h3", {}, "Dialoghi con gli altri agenti"),
       h("div", { class: "interruttore" }, dialoga, h("span", {}, "Può fare domande a superiore, subordinati e altri manager mentre lavora")),
       h("div", { class: "interruttore" }, vedeTutto, h("span", {}, "Vede cosa fai e cosa ti dicono gli altri agenti (sintesi recente, nei limiti di riservatezza)")),

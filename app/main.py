@@ -305,6 +305,8 @@ app.include_router(router_plancia)
 app.include_router(router_accessi_agenti)
 app.include_router(router_squadra_progetto)
 app.include_router(router_best_practice)
+from .profilo_alto import router as router_profilo_alto
+app.include_router(router_profilo_alto)
 app.include_router(router_banco_gestione)
 app.include_router(router_banco)
 app.include_router(router_prove)

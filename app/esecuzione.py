@@ -92,12 +92,14 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
     eventi.registra(agente_id, "inizio", " ".join(str(messaggio or "").split())[:150], richiesta_id=richiesta)
     try:
         with connessione() as _c:
-            _r = _c.execute("SELECT sforzo FROM agenti WHERE id = %s", (agente_id,)).fetchone()
+            _r = _c.execute("SELECT sforzo, passi_max FROM agenti WHERE id = %s", (agente_id,)).fetchone()
+        tk_p = agente_browser.PASSI_AGENTE.set(_r["passi_max"] if _r else None)
         tk_s = fornitori.SFORZO.set(fornitori.SFORZO_FORZATO.get() or (_r["sforzo"] if _r else None))
         try:
             out = _esegui_agente_interno(agente_id, messaggio, fascia_dati, utente_id, memorizza, max_token, allegati)
         finally:
             fornitori.SFORZO.reset(tk_s)
+            agente_browser.PASSI_AGENTE.reset(tk_p)
     except Exception as e:  # noqa: BLE001 - si registra e si rilancia: il comportamento non cambia
         eventi.registra(agente_id, "errore", f"{type(e).__name__}: {str(e)[:200]}", richiesta_id=richiesta, durata_ms=int((time.monotonic() - t0) * 1000))
         raise

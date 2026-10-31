@@ -11,6 +11,11 @@ from .fornitori import ErroreFornitore, Risposta, chiave as fornitori_chiave, in
 from .navigatore import ErroreNavigazione, Navigatore
 
 MAX_PASSI = 14
+PASSI_AGENTE = __import__('contextvars').ContextVar('passi_agente', default=None)   # profilo alto: piu' passaggi per questo agente
+
+
+def _passi() -> int:
+    return int(PASSI_AGENTE.get() or MAX_PASSI)
 
 STRUMENTI = [
     {"name": "apri_pagina", "description": "Apre una pagina di uno dei siti collegati (con accesso gia' effettuato se serve) e ne restituisce testo e link.",
@@ -96,7 +101,7 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
     testo_finale = ""
     stop = ""
     passi = 0
-    for _ in range(MAX_PASSI):
+    for _ in range(_passi()):
         passi += 1
         d = _chiama_api({"model": modello, "max_tokens": max_token, "system": sistema,
                          "messages": messaggi, "tools": strumenti})
@@ -234,7 +239,7 @@ def esegui_con_strumenti_compatibile(fornitore: str, modello: str, istruzioni: s
     testo = ""
     testi: list[str] = []
     max_token = max(max_token, TETTO_CON_STRUMENTI)
-    for _ in range(MAX_PASSI):
+    for _ in range(_passi()):
         d = _chiama_compat(fornitore, {"model": modello, "max_tokens": max_token, "messages": messaggi, "tools": funzioni})
         t_in += d["usage"]["prompt_tokens"]; t_out += d["usage"]["completion_tokens"]
         m = d["choices"][0]["message"]
