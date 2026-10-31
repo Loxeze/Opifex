@@ -316,3 +316,6 @@ table.anteprima{border-collapse:collapse;font-size:12px}table.anteprima th,table
 .scena .legenda .rep.on{font-weight:600}
 .scena .comandi input[type=search]{width:100%}
 @media (max-width:760px){.scena .schede-reparti{padding:150px 10px 16px 10px}}
+
+.chat-fondo{align-self:center;margin:-44px 0 8px;position:relative;z-index:2;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+.chat-fondo[hidden]{display:none}

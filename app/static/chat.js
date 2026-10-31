@@ -130,6 +130,8 @@ function conversazioniChat() {
     }
     return out;
   };
+  const vaiFondo = h("button", { class: "s chat-fondo", type: "button", "aria-label": "Vai all'ultimo messaggio", hidden: true, onclick: () => { messaggiEl.scrollTop = messaggiEl.scrollHeight; } }, "↓ Ultimo messaggio");
+  messaggiEl.addEventListener("scroll", () => { vaiFondo.hidden = messaggiEl.scrollHeight - messaggiEl.scrollTop - messaggiEl.clientHeight < 200; }, { passive: true });
   const disegnaMessaggi = (scendi) => {
     const vicino = messaggiEl.scrollHeight - messaggiEl.scrollTop - messaggiEl.clientHeight < 80;
     const el = [];
@@ -217,7 +219,9 @@ function conversazioniChat() {
     await aggiornaConversazione(true);
     try { await api("POST", "/chat/conversazioni/" + id + "/letto"); } catch (e) { /* ignora */ }
     aggiornaElenco();
-    testo.focus();
+    const fondo = () => { messaggiEl.scrollTop = messaggiEl.scrollHeight; };   // si apre sull'ultimo messaggio, anche dopo il ridisegno del telefono
+    fondo(); requestAnimationFrame(fondo); setTimeout(fondo, 150); setTimeout(fondo, 600);
+    if (!(window.matchMedia && matchMedia("(pointer:coarse)").matches)) testo.focus();   // sul telefono la tastiera non si apre da sola: copriva i messaggi
   };
 
   // ----- nuova conversazione: ricerca tra gli agenti attivi -----
@@ -296,7 +300,7 @@ function conversazioniChat() {
         h("button", { class: "s", type: "button", onclick: () => { Voce.fermaTutto(); viva.checked = false; stile(false); } }, "⏹ Silenzio")) : null));
   return [h("div", { class: "chat-app" },
     h("div", { class: "chat-lista" }, h("div", { class: "chat-lista-testa" }, h("strong", {}, "Conversazioni"), bNuova), pannelloNuova, lista),
-    h("div", { class: "chat-conv" }, testata, messaggiEl, compositore))];
+    h("div", { class: "chat-conv" }, testata, messaggiEl, vaiFondo, compositore))];
 }
 
 // ---------- ripartire da dove si era: ultima pagina aperta ----------
