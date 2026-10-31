@@ -87,6 +87,24 @@ function modificaProgetto(p, ricarica, msgEsterno, aziende) {
       h("button", { class: "s", onclick: () => chiudi() }, "Annulla"))]);
 }
 
+// Chi ha gli strumenti Drive e, per chi non li ha, il motivo preciso.
+function accessiDriveAgenti() {
+  const box = h("div", { class: "carta" }, h("p", { class: "sotto" }, "Controllo in corso…"));
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/accessi-agenti");
+      const senza = d.agenti.filter(a => a.motivo);
+      riempi(box, [h("div", { class: "nome" }, "Accesso a Drive degli agenti"),
+        senza.length ? [h("p", { class: "sotto" }, senza.length + " agenti su " + d.agenti.length + " non hanno gli strumenti Drive:"),
+          senza.map(a => h("div", { class: "sotto" }, h("b", {}, a.nome), " — " + a.motivo)),
+          h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { const r = await api("PUT", "/gestione/accessi-agenti/drive"); await carica(); box.append(avviso("Drive acceso a " + r.accesi + " agenti.", "ok")); } catch (e) { box.append(avviso(e.message, "no")); } } }, "Accendi Drive a chi lo ha spento"))]
+          : h("p", { class: "sotto" }, "Tutti i " + d.agenti.length + " agenti hanno gli strumenti Drive.")]);
+    } catch (e) { box.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return box;
+}
+
 function vistaCollegamenti() {
   const corpo = h("div");
   const msg = h("div");
@@ -126,6 +144,7 @@ function vistaCollegamenti() {
             h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
               try { const r = await api("POST", "/gestione/google/autorizza", { etichetta: etic.value, servizi: serv.filter(x => x.c.checked).map(x => x.k) }); window.location.href = r.url; }
               catch (x) { mostra(x.message, "no"); } } }, "Collega con Google"))),
+          h("h3", {}, "Agenti e Drive"), accessiDriveAgenti(),
           h("h3", {}, "Drive per i progetti"),
           h("div", { class: "carta" }, h("label", {}, "Account che crea le cartelle", sceltaDrive),
             h("label", {}, "ID della cartella «Opifex» su Drive", radice),

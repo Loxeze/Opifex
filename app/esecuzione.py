@@ -279,6 +279,11 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                                                                    a["non_conservazione_attiva"], a["dpa_firmato"])[0]
             doc_tool = bool(ok_int and memoria.documenti_visibili(conn, agente_id))
             drive_tool = bool(ok_int and a["drive_attivo"] and strumenti_google.collegato(conn))
+            if not drive_tool:
+                from . import accessi_agenti
+                _m = accessi_agenti.motivo_senza_drive(conn, a)
+                if _m:
+                    a["istruzioni"] = a["istruzioni"] + accessi_agenti.istruzione_senza_drive(_m)
             # la posta contiene dati personali: l'agente la riceve solo se puo' ricevere dati riservati
             gmail_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and strumenti_gmail.account_valido(conn, a["gmail_account_id"])
                               and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
