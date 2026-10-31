@@ -19,6 +19,9 @@ with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row, autocommi
     ok("profilo attivo: passi, sforzo, metodo", n["profilo_alto"] and n["passi_max"] == 40 and n["sforzo"] == "high" and pa.MARCA in n["istruzioni"], str(r))
     ok("modello avanzato scelto se disponibile", (not r["modello_cambiato"]) or "opus" in r["modello"] or "fable" in r["modello"] or "mythos" in r["modello"], r["modello"])
     ok("token di risposta almeno 32000 e strumenti attivi", n["max_token_risposta"] >= 32000 and n["usa_biblioteca"] and n["sandbox_attivo"] and n["drive_attivo"])
+    from app import modello_economico as me
+    ok("risparmio: il cambio di massa non tocca l'agente in profilo alto", a["id"] not in [x["id"] for x in me.piano(conn)])
+    ok("stile asciutto nel metodo", "Vietati ringraziamenti" in n["istruzioni"] and "RISPARMIO" in n["istruzioni"] and n["modello_dialogo"] is None)
     pa.applica(conn, a["id"])
     n2 = conn.execute("SELECT istruzioni, profilo_prima FROM agenti WHERE id=%s", (a["id"],)).fetchone()
     ok("secondo clic: metodo non duplicato e stato di prima conservato", n2["istruzioni"].count(pa.MARCA) == 1 and n2["profilo_prima"]["istruzioni"] == a["istruzioni"])

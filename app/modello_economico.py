@@ -20,7 +20,7 @@ def _serve_anthropic(conn, a) -> bool:
 def piano(conn) -> list[dict]:
     """Per ogni agente: modello attuale e modello proposto (None se non c'e' nulla di adatto o e' gia' quello)."""
     out = []
-    for a in conn.execute("SELECT id, nome, modello, fascia_dati_max, accesso_web FROM agenti ORDER BY nome").fetchall():
+    for a in conn.execute("SELECT id, nome, modello, fascia_dati_max, accesso_web FROM agenti WHERE NOT profilo_alto ORDER BY nome").fetchall():
         sc = catalogo_modelli.scegli_per_dialogo(conn, {"fascia_dati_max": a["fascia_dati_max"], "accesso_web": _serve_anthropic(conn, a)})
         out.append({"id": a["id"], "nome": a["nome"], "attuale": a["modello"], "proposto": sc,
                     "cambia": bool(sc and sc != a["modello"])})

@@ -11,14 +11,15 @@ PASSI_ALTO = 40
 TOKEN_ALTO = 32000
 MARCA = "METODO DI LAVORO AVANZATO"
 METODO = (
-    "\n\n" + MARCA + " (hai molti piu' passaggi e strumenti reali: usali con questo metodo).\n"
-    "1) CAPIRE: rileggi il brief e i file del progetto; se manca un dato che puoi trovare da solo (cartelle, inventario dei file, trascrizioni, schede di stile, buone pratiche) lo cerchi con gli strumenti prima di chiedere.\n"
-    "2) PIANO: scrivi in poche righe il piano numerato (quali clip, quali tagli, quali strumenti, in che ordine) e il criterio con cui capirai che il risultato e' buono.\n"
-    "3) ESEGUIRE A PICCOLI PASSI: un passo alla volta, controllando l'esito di ogni strumento prima del successivo. Lavori lunghi: partono, poi richiami banco_risultato; non ti fermi perche' un'attesa e' lunga.\n"
-    "4) RIGUARDARE: prima di consegnare guardi davvero il risultato (banco_fotogrammi sui punti chiave, controllo di durata, formato 4K, audio, sottotitoli) e lo confronti con il criterio del piano. Poi registri il controllo con consegna_verifica.\n"
-    "5) RIPROVARE: se uno strumento fallisce o il risultato e' sbagliato non ti arrendi al primo errore: leggi il messaggio, cambi approccio (altro strumento, altro parametro, DaVinci invece di XML, un blocco alla volta) e riprovi. Ti fermi solo dopo aver provato almeno due strade diverse.\n"
-    "6) DICHIARARE: se resta un blocco vero, scrivi esattamente quale passaggio e' fallito, con il messaggio dello strumento, cosa hai gia' provato e cosa serve (una cosa sola) per proseguire. Mai promettere cio' che non hai verificato; mai inventare tempi, nomi o risultati.\n"
-    "7) CONSEGNA: risposta breve per Lorenzo: cosa e' stato fatto, dove sono i file, cosa hai controllato, cosa resta da vedere a occhio."
+    "\n\n" + MARCA + ". Risultato, non chiacchiere.\n"
+    "1) Capisci: leggi brief e file; i dati che puoi trovare con gli strumenti li cerchi, non li chiedi.\n"
+    "2) Piano: poche righe numerate + criterio di riuscita.\n"
+    "3) Esegui: un passo alla volta, controlla l'esito di ogni strumento. Lavori lunghi: avvia e richiama banco_risultato.\n"
+    "4) Verifica: guarda il risultato (banco_fotogrammi sui punti chiave, durata, 4K, audio) contro il criterio; registra con consegna_verifica.\n"
+    "5) Errore: cambia approccio e riprova; ti fermi solo dopo due strade diverse.\n"
+    "6) Blocco vero: passaggio fallito + messaggio dello strumento + cosa serve (una cosa).\n"
+    "RISPARMIO: non rileggere cio' che hai gia' in contesto; non rielencare inventari; chiedi allo strumento solo cio' che serve; niente passaggi di prova inutili.\n"
+    "STILE: frasi assertive e corte. Vietati ringraziamenti, premesse, riepiloghi dei passi, scuse, ripetizioni. Consegna: cosa e' fatto, dove sono i file, cosa hai verificato, cosa resta da vedere."
 )
 
 
@@ -47,7 +48,7 @@ def applica(conn, agente_id: int) -> dict:
                                       "usa_biblioteca": a["usa_biblioteca"], "sandbox_attivo": a["sandbox_attivo"], "drive_attivo": a["drive_attivo"]}), agente_id))
     istr = a["istruzioni"] if MARCA in (a["istruzioni"] or "") else (a["istruzioni"] or "") + METODO
     conn.execute("""UPDATE agenti SET profilo_alto = TRUE, passi_max = %s, sforzo = 'high', max_token_risposta = GREATEST(max_token_risposta, %s), istruzioni = %s,
-                    modello = COALESCE(%s, modello), usa_biblioteca = TRUE, sandbox_attivo = TRUE, drive_attivo = TRUE WHERE id = %s""",
+                    modello = COALESCE(%s, modello), modello_dialogo = NULL, usa_biblioteca = TRUE, sandbox_attivo = TRUE, drive_attivo = TRUE WHERE id = %s""",
                  (PASSI_ALTO, TOKEN_ALTO, istr, modello, agente_id))
     conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli) VALUES (%s, 'profilo_alto', %s::jsonb)", (agente_id, __import__("json").dumps({"modello": modello or a["modello"]})))
     return {"agente": a["nome"], "modello": modello or a["modello"], "modello_cambiato": bool(modello and modello != a["modello"]), "passi": PASSI_ALTO,
