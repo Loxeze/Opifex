@@ -22,7 +22,7 @@ def elenco(_: dict = Depends(solo_titolare)):
             r["dettaglio_rami"] = conn.execute(
                 """SELECT t.id, t.titolo, t.stato, ag.nome AS agente FROM task t LEFT JOIN agenti ag ON ag.id = t.assegnato_agente_id
                    WHERE t.padre_id = %s ORDER BY t.id""", (r["task_id"],)).fetchall()
-        return {"iniziative": righe, "soglia_token": iniziative._imp(conn, "iniziative_soglia_token", 40000),
+        return {"iniziative": righe, "soglia_token": iniziative._imp(conn, "iniziative_soglia_token", 150000),
                 "max_rami": iniziative._imp(conn, "iniziative_max_rami", 6)}
 
 

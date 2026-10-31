@@ -100,6 +100,7 @@ function vistaCollegamenti() {
       const serv = Object.entries(s.servizi).map(([k, t]) => ({ k, c: h("input", { type: "checkbox" }), t }));
       serv.forEach(x => { x.c.checked = true; });
       const radice = h("input", { type: "text", value: s.drive_radice_id || "", maxlength: 200 });
+      const extra = h("textarea", { rows: 3, maxlength: 2000, placeholder: "Incolla il link o l'ID di una cartella, uno per riga" }); extra.value = s.drive_cartelle_extra || "";
       const conDrive = s.account.filter(a => a.servizi.includes("drive"));
       const sceltaDrive = h("select", {}, h("option", { value: "" }, "— nessuno —"), conDrive.map(a => h("option", { value: a.id }, a.etichetta + " (" + a.email + ")")));
       sceltaDrive.value = s.drive_account_id || "";
@@ -128,8 +129,10 @@ function vistaCollegamenti() {
           h("h3", {}, "Drive per i progetti"),
           h("div", { class: "carta" }, h("label", {}, "Account che crea le cartelle", sceltaDrive),
             h("label", {}, "ID della cartella «Opifex» su Drive", radice),
+            h("label", {}, "Cartelle di lavoro autorizzate (fuori da Opifex)", extra),
+            h("p", { class: "aiuto" }, "Gli agenti possono vedere ed elencare queste cartelle oltre a Opifex (es. le riprese grezze). Le cartelle dentro Opifex sono già visibili."),
             h("p", { class: "aiuto" }, "L'ID è la parte finale dell'indirizzo della cartella su Drive. Opifex vi crea dentro una cartella per ogni progetto."),
-            h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("PUT", "/gestione/google/drive", { account_id: Number(sceltaDrive.value) || 0, radice_id: radice.value.trim() }); mostra("Salvato.", "ok"); } catch (x) { mostra(x.message, "no"); } } }, "Salva")))] : null,
+            h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("PUT", "/gestione/google/drive", { account_id: Number(sceltaDrive.value) || 0, radice_id: radice.value.trim(), cartelle_extra: extra.value }); mostra("Salvato.", "ok"); } catch (x) { mostra(x.message, "no"); } } }, "Salva")))] : null,
         h("h3", {}, s.client_configurato ? "Credenziali Google (già inserite)" : "Prima configurazione (una volta sola)"),
         h("div", { class: "carta" },
           h("p", { class: "aiuto" }, "1. Su console.cloud.google.com crea un progetto e abilita le API Google Drive, Gmail e Google Calendar. 2. Schermata consenso OAuth: tipo «Esterno», aggiungi le tue email come utenti di test, poi pubblica l'app («In produzione»): in modalità test Google fa scadere il collegamento ogni 7 giorni. 3. Credenziali → ID client OAuth → «Applicazione web», con questo URI di reindirizzamento autorizzato: " + s.redirect + " 4. Incolla qui ID e segreto: il segreto viene cifrato e nessuno lo rivede."),

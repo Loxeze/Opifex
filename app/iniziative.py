@@ -56,8 +56,8 @@ def apri(conn, manager_id: int, dati: dict) -> str:
         budget = int(dati.get("budget_token") or 0)
     except (TypeError, ValueError):
         budget = 0
-    soglia = _imp(conn, "iniziative_soglia_token", 40000)
-    automatica = 0 < budget <= soglia
+    soglia = _imp(conn, "iniziative_soglia_token", 150000)
+    automatica = budget <= soglia  # stima mancante = lavoro interno: parte da sola
     stato = "in_corso" if automatica else "da_approvare"
     ini = conn.execute("INSERT INTO iniziative (titolo, descrizione, stato, aperta_da_agente_id, budget_token) VALUES (%s,%s,%s,%s,%s) RETURNING id",
                        (titolo, str(dati.get("descrizione") or "")[:3000] or None, stato, manager_id, budget or None)).fetchone()["id"]

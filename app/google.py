@@ -69,7 +69,7 @@ def stato(conn) -> dict:
     return {"client_configurato": bool(_leggi(conn, "google_client_id") and _leggi(conn, "google_client_secret_cifrato")),
             "client_id": _leggi(conn, "google_client_id"), "redirect": _leggi(conn, "google_redirect"),
             "account": account, "drive_account_id": int(_leggi(conn, "drive_account_id") or 0) or None,
-            "drive_radice_id": _leggi(conn, "drive_radice_id"), "servizi": ETICHETTE_SERVIZI}
+            "drive_radice_id": _leggi(conn, "drive_radice_id"), "drive_cartelle_extra": _leggi(conn, "drive_cartelle_extra"), "servizi": ETICHETTE_SERVIZI}
 
 
 def url_autorizzazione(conn, etichetta: str, servizi: list[str]) -> str:

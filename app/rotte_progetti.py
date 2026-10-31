@@ -1,4 +1,5 @@
 """Progetti (cartelle su Drive) e account Google collegati. Solo titolare, tranne il ritorno di Google."""
+import re
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -85,6 +86,7 @@ def prova(aid: int, _: dict = Depends(solo_titolare)):
 class ScelteDrive(BaseModel):
     account_id: int | None = None
     radice_id: str | None = Field(default=None, max_length=200, pattern=r"^[A-Za-z0-9_-]*$")
+    cartelle_extra: str | None = Field(default=None, max_length=2000)
 
 
 @router.put("/gestione/google/drive")
@@ -96,6 +98,14 @@ def scelte_drive(d: ScelteDrive, _: dict = Depends(solo_titolare)):
             google._scrivi(conn, "drive_account_id", str(d.account_id or ""))
         if d.radice_id is not None:
             google._scrivi(conn, "drive_radice_id", d.radice_id)
+        if d.cartelle_extra is not None:
+            # accetta ID o link di cartelle Drive, uno per riga o separati da virgola
+            ids = []
+            for pezzo in re.split(r"[\s,;]+", d.cartelle_extra):
+                m = re.search(r"/folders/([A-Za-z0-9_-]+)", pezzo) or re.fullmatch(r"([A-Za-z0-9_-]{10,200})", pezzo)
+                if m and m.group(1) not in ids:
+                    ids.append(m.group(1))
+            google._scrivi(conn, "drive_cartelle_extra", "\n".join(ids[:20]))
     return {"ok": True}
 
 

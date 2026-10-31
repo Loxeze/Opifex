@@ -16,7 +16,8 @@ def elenco(conn) -> list[dict]:
 
 
 def allinea(conn) -> dict:
-    tok, radice = sg._contesto(conn)
+    tok, radici = sg._contesto(conn)
+    radice = radici[0]
     esito = {"controllati": 0, "gia_a_posto": 0, "spostati": 0, "assenti": 0, "errori": []}
     for f in conn.execute("SELECT file_id, agente_id FROM file_google_agenti WHERE stato <> 'assente' OR stato IS NULL").fetchall():
         esito["controllati"] += 1

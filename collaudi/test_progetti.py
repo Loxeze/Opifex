@@ -19,6 +19,10 @@ def ok(n, c, d=""):
 def sql(q, p=None):
     with psycopg.connect(DSN, autocommit=True) as c:
         cur = c.execute(q, p); return cur.fetchall() if cur.description else None
+AZ0 = None
+def _az0():
+    r = sql("SELECT id FROM aziende ORDER BY id LIMIT 1")
+    return r[0][0] if r else sql("INSERT INTO aziende (nome) VALUES ('Impresa di prova') RETURNING id")[0][0]
 sql("INSERT INTO utenti (nome,email,password_hash,ruolo_globale) VALUES ('L','l@p.it',%s,'titolare')", (cifra_password("PasswordLunga!2026"),))
 sql("INSERT INTO utenti (nome,email,password_hash) VALUES ('S','s@p.it',%s)", (cifra_password("PasswordSara!2026"),))
 
@@ -56,7 +60,7 @@ with TestClient(app) as c:
     H = {"Authorization": "Bearer " + accedi(c, "l@p.it", "PasswordLunga!2026")}
     HS = {"Authorization": "Bearer " + accedi(c, "s@p.it", "PasswordSara!2026")}
     for m, u, b in [("get", "/gestione/progetti", None), ("get", "/gestione/google", None), ("put", "/gestione/google/client", {"client_id": "x" * 12}),
-                    ("post", "/gestione/progetti", {"nome": "X"}), ("put", "/gestione/google/drive", {"account_id": 1})]:
+                    ("post", "/gestione/progetti", {"nome": "X", "azienda_id": 1}), ("put", "/gestione/google/drive", {"account_id": 1})]:
         r = getattr(c, m)(u, headers=HS, **({"json": b} if b else {}))
         if m == "get" or True: ok(f"collaboratore: {m} {u} -> 403", r.status_code == 403)
     ok("senza accesso: 401", c.get("/gestione/progetti").status_code == 401)
@@ -102,7 +106,8 @@ with TestClient(app) as c:
     # --- progetti e cartelle
     cartelle["ROOT"] = {"name": "Opifex", "parents": [], "trashed": False}
     c.put("/gestione/google/drive", headers=H, json={"account_id": ida, "radice_id": "ROOT"})
-    r = c.post("/gestione/progetti", headers=H, json={"nome": "Bando Prova", "descrizione": "x", "agenti": None})
+    tutti_ag = [x["id"] for x in c.get("/gestione/progetti", headers=H).json()["agenti"]]
+    r = c.post("/gestione/progetti", headers=H, json={"azienda_id": _az0(), "nome": "Bando Prova", "descrizione": "x", "agenti": tutti_ag})
     ok("progetto creato con cartelle", r.status_code == 201 and r.json()["drive"]["ok"], r.text)
     agenti_n = len(c.get("/gestione/progetti", headers=H).json()["agenti"])
     pr = trova("Bando Prova", "ROOT")
@@ -113,10 +118,10 @@ with TestClient(app) as c:
     n0 = len(cartelle)
     ok("risincronizzare non crea doppioni", c.post(f"/gestione/progetti/{pr and sql('SELECT id FROM progetti WHERE nome=%s', ('Bando Prova',))[0][0]}/sincronizza", headers=H).json()["ok"] and len(cartelle) == n0)
     ok("stato progetto: ok", [x for x in c.get("/gestione/progetti", headers=H).json()["progetti"] if x["nome"] == "Bando Prova"][0]["drive_stato"] == "ok")
-    ok("nome doppio (anche in maiuscolo) -> 409", c.post("/gestione/progetti", headers=H, json={"nome": "bando  PROVA"}).status_code == 409)
-    ok("nome con / -> 422", c.post("/gestione/progetti", headers=H, json={"nome": "a/b"}).status_code == 422)
-    ok("agente inesistente -> 422", c.post("/gestione/progetti", headers=H, json={"nome": "Z", "agenti": [99999]}).status_code == 422)
-    r = c.post("/gestione/progetti", headers=H, json={"nome": "Nome con l'apostrofo", "agenti": [1]})
+    ok("nome doppio (anche in maiuscolo) -> 409", c.post("/gestione/progetti", headers=H, json={"azienda_id": _az0(), "nome": "bando  PROVA"}).status_code == 409)
+    ok("nome con / -> 422", c.post("/gestione/progetti", headers=H, json={"azienda_id": _az0(), "nome": "a/b"}).status_code == 422)
+    ok("agente inesistente -> 422", c.post("/gestione/progetti", headers=H, json={"azienda_id": _az0(), "nome": "Z", "agenti": [99999]}).status_code == 422)
+    r = c.post("/gestione/progetti", headers=H, json={"azienda_id": _az0(), "nome": "Nome con l'apostrofo", "agenti": [1]})
     ok("apostrofo nel nome gestito", r.status_code == 201 and r.json()["drive"]["ok"] and len(trova("Nome con l'apostrofo", "ROOT")) == 1)
     ok("solo gli agenti scelti hanno la cartella", len(figli(trova("agent", trova("Nome con l'apostrofo", "ROOT")[0])[0])) == 1)
 
@@ -148,6 +153,6 @@ with TestClient(app) as c:
     ok("radice Drive inesistente per l'account (404): ne crea una Opifex nel suo Drive e sincronizza", r["ok"] is True and nuova != "RADICE-DI-UN-ALTRO-ACCOUNT"
        and cartelle[nuova]["name"] == "Opifex" and cartelle[nuova]["parents"] == ["root"], str(r))
     ok("scollegare l'account Drive azzera la scelta", c.delete(f"/gestione/google/account/{ida}", headers=H).status_code == 200 and c.get("/gestione/google", headers=H).json()["drive_account_id"] is None)
-    r = c.post("/gestione/progetti", headers=H, json={"nome": "Senza Drive"})
+    r = c.post("/gestione/progetti", headers=H, json={"azienda_id": _az0(), "nome": "Senza Drive"})
     ok("senza account Drive il progetto nasce comunque, con avviso", r.status_code == 201 and r.json()["drive"]["ok"] is False and sql("SELECT drive_stato FROM progetti WHERE nome='Senza Drive'")[0][0] == "da_sincronizzare")
 print(f"TOTALE: {sum(ris)}/{len(ris)} controlli superati")
