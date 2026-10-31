@@ -11,6 +11,8 @@ function vistaCrm() {
     if (importa.firstChild) { importa.replaceChildren(); return; }
     importa.replaceChildren(importazioneGuidata(() => importa.replaceChildren()));
   } }, "⬆ Importa contatti");
+  tabs.append(h("button", { class: "p", style: "margin-left:auto", onclick: () => crmNuovoContatto() }, "+ Nuovo contatto"));
+  pulsanteImporta.style.marginLeft = "0";
   tabs.append(pulsanteImporta);
   if (stato.crmTab === "cruscotto") corpo.append(...[].concat(crmCruscotto()));
   else if (stato.crmTab === "schede") corpo.append(...[].concat(crmContatti()));

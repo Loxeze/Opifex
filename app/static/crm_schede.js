@@ -7,6 +7,38 @@ const STATI_OPP = { nuova: "Nuova", contattato: "Contattato", in_trattativa: "In
 const TIPI_OPP = { bando: "Bando", cliente: "Cliente", partnership: "Partnership", sponsor: "Sponsor", consulenza: "Consulenza", altro: "Altro" };
 const dataIt = (d) => d ? new Date(d).toLocaleDateString("it-IT") : "—";
 
+// Finestra «Nuovo contatto»: si apre da ogni zona del CRM (cruscotto, contatti, opportunita'). dopo(id, dati) riceve il contatto creato;
+// senza dopo si apre la sua scheda.
+function crmNuovoContatto(dopo) {
+  const msg = h("div");
+  const nome = h("input", { type: "text", maxlength: 200, placeholder: "Nome e cognome" }), ente = h("input", { type: "text", maxlength: 200, placeholder: "Ente / azienda" });
+  const email = h("input", { type: "email", maxlength: 200 }), tel = h("input", { type: "text", maxlength: 60 });
+  const tipo = h("input", { type: "text", maxlength: 40, list: "tipi-crm", placeholder: "Es. comune, albergo, università" });
+  const note = h("textarea", { style: "min-height:56px", maxlength: 5000 });
+  const chiudi = () => velo.remove();
+  const crea = async () => {
+    const dati = { nome: nome.value.trim(), ente: ente.value.trim(), email: email.value.trim(), telefono: tel.value.trim(), tipo: tipo.value.trim() || null, note: note.value };
+    if (!dati.nome && !dati.ente && !dati.email) { msg.replaceChildren(avviso("Scrivi almeno un nome, un ente o un'email.", "avv")); return; }
+    try {
+      const r = await api("POST", "/gestione/crm/contatti", dati);
+      chiudi();
+      if (dopo) dopo(r.id, dati); else { stato.contattoAperto = r.id; vai("contatto"); }
+    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+  };
+  const velo = h("div", { class: "crm-modale", role: "dialog", "aria-modal": "true", "aria-label": "Nuovo contatto", onclick: (e) => { if (e.target === velo) chiudi(); }, onkeydown: (e) => { if (e.key === "Escape") chiudi(); } },
+    h("div", { class: "carta crm-modale-corpo" }, h("h3", { style: "margin-top:0" }, "Nuovo contatto"),
+      h("div", { class: "riga" }, h("label", {}, "Nome", nome), h("label", {}, "Ente", ente)),
+      h("div", { class: "riga" }, h("label", {}, "Email", email), h("label", {}, "Telefono", tel)),
+      h("label", {}, "Tipo", tipo), h("label", {}, "Note", note), msg,
+      h("div", { class: "azioni" }, h("button", { class: "p", onclick: crea }, dopo ? "Crea e usa" : "Crea e apri la scheda"), h("button", { class: "s", onclick: chiudi }, "Annulla"))));
+  document.body.append(velo);
+  nome.focus();
+}
+
+function crmBottoneNuovoContatto(dopo, testo) {
+  return h("button", { class: "p", onclick: () => crmNuovoContatto(dopo) }, testo || "+ Nuovo contatto");
+}
+
 function crmSchede(filtro) {
   const corpo = h("div"), msg = h("div");
   const q = h("input", { type: "search", placeholder: "Cerca per nome, ente, email o telefono", maxlength: 100 });
@@ -26,7 +58,8 @@ function crmSchede(filtro) {
           h("div", { class: "sotto" }, [x.nome && x.ente ? x.ente : "", x.email, x.tipo !== "altro" ? x.tipo : "", x.provincia, "ultimo contatto: " + dataIt(x.ultimo_contatto), x.opp_aperte ? x.opp_aperte + " opportunità aperte" : ""].filter(Boolean).join(" · ")),
           x.prossimo_passo ? h("div", { class: "sotto", style: "color:" + (x.prossimo_passo_il && x.prossimo_passo_il <= new Date().toISOString().slice(0, 10) ? "var(--avv)" : "var(--tenue)") }, "➜ " + x.prossimo_passo + (x.prossimo_passo_il ? " (entro " + dataIt(x.prossimo_passo_il) + ")" : "")) : null))
           : h("p", { class: "sotto" }, filtro ? "Nessun contatto da ricontattare." : "Nessun contatto."),
-        filtro ? null : h("details", { class: "carta" }, h("summary", {}, "+ Nuovo contatto"),
+        filtro ? null : h("div", { class: "azioni" }, crmBottoneNuovoContatto()),
+        filtro ? null : h("details", { class: "carta" }, h("summary", {}, "+ Nuovo contatto (modulo rapido)"),
           h("div", { class: "riga" }, h("label", {}, "Nome", nome), h("label", {}, "Ente", ente)), h("div", { class: "riga" }, h("label", {}, "Email", email), h("label", {}, "Telefono", tel)), h("label", {}, "Note", note),
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
             try { const r = await api("POST", "/gestione/crm/contatti", { nome: nome.value, ente: ente.value, email: email.value, telefono: tel.value, note: note.value }); stato.contattoAperto = r.id; vai("contatto"); }

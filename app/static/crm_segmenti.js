@@ -101,12 +101,13 @@ function nuovaOpportunitaDaBacheca(ricarica) {
     try {
       const d = await api("POST", "/gestione/crm/contatti/cerca", { filtri: { q: q.value.trim() }, per_pagina: 8 });
       riempi(trovati, d.contatti.map(x => h("div", { class: "sotto riga-clic", onclick: () => { scelto = x; etichetta.textContent = "Contatto: " + (x.nome || x.ente || x.email); trovati.replaceChildren(); } }, (x.nome || x.ente || x.email) + (x.nome && x.ente ? " · " + x.ente : ""))));
-      if (!d.contatti.length) trovati.replaceChildren(h("p", { class: "sotto" }, "Nessun contatto trovato: crealo prima in Contatti."));
+      if (!d.contatti.length) trovati.replaceChildren(h("p", { class: "sotto" }, "Nessun contatto trovato."));
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
   q.addEventListener("keydown", (e) => { if (e.key === "Enter") cerca(); });
   return h("details", { class: "carta" }, h("summary", {}, "+ Nuova opportunità"),
-    h("label", {}, "Contatto", q), h("div", { class: "azioni" }, h("button", { class: "s", onclick: cerca }, "Cerca")), trovati, etichetta,
+    h("label", {}, "Contatto", q), h("div", { class: "azioni" }, h("button", { class: "s", onclick: cerca }, "Cerca"),
+      crmBottoneNuovoContatto((id, dati) => { scelto = { id, nome: dati.nome, ente: dati.ente, email: dati.email }; etichetta.textContent = "Contatto: " + (dati.nome || dati.ente || dati.email) + " (nuovo)"; trovati.replaceChildren(); }, "+ Crea un nuovo contatto")), trovati, etichetta,
     h("label", {}, "Titolo", titolo), h("div", { class: "riga" }, h("label", {}, "Tipo", tipo), h("label", {}, "Fase", fase)), h("div", { class: "riga" }, h("label", {}, "Valore", valore), h("label", {}, "Scadenza", scad)), msg,
     h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
       if (!scelto) { msg.replaceChildren(avviso("Cerca e scegli il contatto.", "avv")); return; }

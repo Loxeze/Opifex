@@ -186,3 +186,7 @@ body.bottega .spesa-base{stroke:#CFC9B8}body.bottega .spesa-budget{stroke:#9AA39
 body.bottega .pallini i{background:#E3DED1}body.bottega .pallini i.on{background:#1E8466;box-shadow:none}
 @media (max-width:720px){.bt-num{font-size:28px}.bt-card{overflow-x:auto}.bt-grafico{min-width:520px}}
 .bt-due{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px 28px}
+
+/* Finestra «Nuovo contatto» del CRM */
+.crm-modale{position:fixed;inset:0;z-index:300;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(27,36,33,.45)}
+.crm-modale-corpo{width:min(560px,100%);max-height:calc(100vh - 32px);overflow:auto;margin:0;box-shadow:0 18px 50px rgba(27,36,33,.28)}

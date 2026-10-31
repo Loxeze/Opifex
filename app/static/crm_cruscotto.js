@@ -21,6 +21,7 @@ function crmCruscotto() {
         h("div", { class: "sotto imbuto-dati" }, eurCrm(f.valore)))),
       d.per_tipo.length ? h("div", { class: "sotto", style: "margin-top:8px" }, "Aperte per tipo: " + d.per_tipo.map(t => (TIPI_OPP[t.tipo] || t.tipo) + " " + t.n + (t.valore ? " (" + eurCrm(t.valore) + ")" : "")).join(" · ")) : null);
     riempi(corpo, [
+      h("div", { class: "azioni" }, crmBottoneNuovoContatto(), h("button", { class: "s", onclick: () => { stato.crmTab = "pipeline"; vai("crm"); } }, "+ Nuova opportunità")),
       h("div", { class: "tessere" },
         tessera("Contatti", c.totale.toLocaleString("it-IT"), c.persone + " persone · " + c.organizzazioni + " enti", () => { stato.crmTab = "schede"; disegna(); }),
         tessera("Nuovi (30 giorni)", String(c.nuovi_30g)),
