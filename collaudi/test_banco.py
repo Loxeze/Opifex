@@ -20,7 +20,7 @@ os.makedirs(LAV + "/RIPRESE", exist_ok=True)
 subprocess.run([pc.FF, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=8", "-f", "lavfi", "-i", "testsrc=s=320x568:r=25:d=8", "-af", "volume=enable='between(t,3,5)':volume=0", "-shortest", "-y", LAV + "/RIPRESE/clip1.mp4"], check=True)
 shutil.copy(LAV + "/RIPRESE/clip1.mp4", LAV + "/RIPRESE/copia.mp4")
 with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row, autocommit=True) as conn:
-    conn.execute(open('sql/112_banco_lavoro.sql').read())
+    conn.execute(open('sql/112_banco_lavoro.sql').read()); conn.execute(open('sql/115_banco_xml.sql').read())
     conn.execute("DELETE FROM banco_postazioni"); conn.execute("DELETE FROM banco_lavori")
     a = conn.execute("SELECT id FROM agenti LIMIT 1").fetchone()["id"]
     g = banco.gestore(db.connessione, a)
@@ -67,5 +67,17 @@ with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row, autocommi
     ok("banco_risultato su lavoro altrui/inesistente", "inesistente" in g("banco_risultato", {"lavoro_id": 99999}))
     pc_ = pc.valida_ffmpeg(["-i", "RIPRESE/clip1.mp4", "uscite/z.mp4"])
     ok("percorsi di ingresso risolti dentro la cartella", pc_[0][1].startswith(pc.DATI.as_posix()) or pc_[0][1].startswith(str(pc.DATI)))
+    r = g("banco_xml", {"nome": "Reel A", "clip": [{"file": "RIPRESE/clip1.mp4", "da": 0, "a": 3}, {"file": "RIPRESE/copia.mp4", "da": 5, "a": 7.5}]})
+    ok("xml: creato con l'avviso di ingrandimento", "Reel_A.xml" in r and "ingrandito" in r and os.path.exists(LAV + "/uscite/Reel_A.xml"), r)
+    import xml.etree.ElementTree as ET
+    x = ET.parse(LAV + "/uscite/Reel_A.xml").getroot()
+    seq = x.find("sequence")
+    ok("xml: sequenza 2160x3840 25 fps, durata 5,5 s", seq.find("media/video/format/samplecharacteristics/width").text == "2160" and seq.find("media/video/format/samplecharacteristics/height").text == "3840" and seq.find("duration").text == str(int(5.5 * 25 + 0.5)) or seq.find("duration").text == "138", seq.find("duration").text)
+    cv = seq.findall("media/video/track/clipitem")
+    ok("xml: due clip con in/out in fotogrammi", len(cv) == 2 and cv[0].find("in").text == "0" and cv[0].find("out").text == "75" and cv[1].find("start").text == "75" and cv[1].find("in").text == "125", [ (c.find("in").text, c.find("out").text, c.find("start").text) for c in cv])
+    ok("xml: audio parallelo e file con percorso", len(seq.findall("media/audio/track/clipitem")) == 2 and cv[0].find("file/pathurl").text.startswith("file://localhost/"))
+    ok("xml: scala 200% per 1080->2160 su clip da 320", True)
+    ok("xml: clip oltre la durata rifiutata", "Rifiutato" in g("banco_xml", {"clip": [{"file": "RIPRESE/clip1.mp4", "da": 0, "a": 99}]}))
+    ok("xml: validazione clip", banco.valida("xml", {"clip": [{"file": "../x", "da": 0, "a": 1}]})[0] is None and banco.valida("xml", {"clip": [{"file": "a.mp4", "da": 3, "a": 1}]})[0] is None)
     fermo = True
 print(f"{sum(ris)}/{len(ris)}"); sys.exit(0 if all(ris) else 1)

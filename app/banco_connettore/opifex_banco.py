@@ -208,7 +208,65 @@ def lavoro_ffmpeg(par: dict) -> tuple[str, list]:
             "Il file resta sul PC nella cartella uscite."), []
 
 
-LAVORI = {"inventario": lavoro_inventario, "fotogrammi": lavoro_fotogrammi, "silenzi": lavoro_silenzi, "ffmpeg": lavoro_ffmpeg}
+def _xml_clip(i: int, n: int, ref: str, nome: str, pathurl: str, durata_f: int, fps: int, inizio: int, fine: int, da: int, a: int, larg: int, alt: int, scala: float, primo: bool, audio: bool) -> str:
+    from xml.sax.saxutils import escape
+    ritmo = f"<rate><timebase>{fps}</timebase><ntsc>FALSE</ntsc></rate>"
+    filtro = ""
+    if not audio and scala and abs(scala - 100) > 0.5:
+        filtro = ("<filter><effect><name>Basic Motion</name><effectid>basic</effectid><effectcategory>motion</effectcategory><effecttype>motion</effecttype><mediatype>video</mediatype>"
+                  f"<parameter><parameterid>scale</parameterid><name>Scale</name><valuemin>0</valuemin><valuemax>1000</valuemax><value>{scala:.1f}</value></parameter></effect></filter>")
+    if primo:
+        file_ = (f'<file id="{ref}"><name>{escape(nome)}</name><pathurl>{escape(pathurl)}</pathurl>{ritmo}<duration>{durata_f}</duration>'
+                 f"<media><video><samplecharacteristics>{ritmo}<width>{larg}</width><height>{alt}</height></samplecharacteristics></video><audio><channelcount>2</channelcount></audio></media></file>")
+    else:
+        file_ = f'<file id="{ref}"/>'
+    return (f'<clipitem id="{"a" if audio else "v"}clip-{i}"><name>{escape(nome)}</name><enabled>TRUE</enabled><duration>{durata_f}</duration>{ritmo}'
+            f"<start>{inizio}</start><end>{fine}</end><in>{da}</in><out>{a}</out>{file_}{filtro}</clipitem>")
+
+
+def lavoro_xml(par: dict) -> tuple[str, list]:
+    """Progetto di montaggio (Final Cut Pro 7 XML, che Premiere Pro e DaVinci Resolve importano): le clip in fila con i punti di ingresso/uscita."""
+    from urllib.parse import quote
+    from xml.sax.saxutils import escape
+    fps = int(par.get("fps") or 25)
+    larg, alt = int(par.get("larghezza") or 2160), int(par.get("altezza") or 3840)
+    nome_seq = re.sub(r"[^\w .\-]", "_", str(par.get("nome") or "Montaggio"))[:60]
+    clip, vid, aud, file_ref, pos, avvisi = par.get("clip") or [], [], [], {}, 0, []
+    for i, c in enumerate(clip, 1):
+        p = sicuro(c["file"])
+        d = sonda(p)
+        da, a = float(c["da"]), float(c["a"])
+        if not (0 <= da < a):
+            raise Rifiutato(f"clip {i}: tempi non validi ({da}-{a})")
+        if d.get("durata") and a > d["durata"] + 0.5:
+            raise Rifiutato(f"clip {i}: {c['file']} dura {d['durata']:.1f} s, l'uscita {a} e' oltre")
+        f_in, f_out = round(da * fps), round(a * fps)
+        lung = f_out - f_in
+        ref = file_ref.get(c["file"]) or f"file-{len(file_ref) + 1}"
+        primo = c["file"] not in file_ref
+        file_ref[c["file"]] = ref
+        url = "file://localhost" + quote("/" + p.as_posix().lstrip("/"), safe="/")
+        scala = 100.0 * larg / d["larghezza"] if d.get("larghezza") and par.get("ingrandisci", True) else 100.0
+        if d.get("larghezza") and scala > 101:
+            avvisi.append(f"{c['file']} ({d['larghezza']}x{d['altezza']}) e' ingrandito al {scala:.0f}%")
+        args = (i, len(clip), ref, p.name, url, round((d.get("durata") or a) * fps), fps, pos, pos + lung, f_in, f_out, d.get("larghezza") or larg, d.get("altezza") or alt, scala)
+        vid.append(_xml_clip(*args, primo, False))
+        aud.append(_xml_clip(*args, primo, True))
+        pos += lung
+    if not vid:
+        raise Rifiutato("nessuna clip")
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n<xmeml version="4"><sequence id="sequenza-1"><name>' + escape(nome_seq) + f"</name><duration>{pos}</duration>"
+           f"<rate><timebase>{fps}</timebase><ntsc>FALSE</ntsc></rate><media><video><format><samplecharacteristics><rate><timebase>{fps}</timebase><ntsc>FALSE</ntsc></rate>"
+           f"<width>{larg}</width><height>{alt}</height><anamorphic>FALSE</anamorphic><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></format>"
+           "<track>" + "".join(vid) + "</track></video><audio><track>" + "".join(aud) + "</track></audio></media></sequence></xmeml>")
+    uscita = sicuro(f"uscite/{nome_seq.replace(' ', '_')}.xml", deve_esistere=False)
+    uscita.parent.mkdir(parents=True, exist_ok=True)
+    uscita.write_text(xml, encoding="utf-8")
+    return (f"Progetto di montaggio uscite/{uscita.name}: {len(vid)} clip, {pos / fps:.1f} s, sequenza {larg}x{alt} a {fps} fps (Final Cut Pro 7 XML: in Premiere Pro File > Importa, in DaVinci Resolve File > Importa > Timeline). "
+            + ("Attenzione: " + "; ".join(avvisi) + " (l'ingrandimento e' dichiarato, non e' 4K nativo). " if avvisi else "") + "I file restano nei percorsi del PC."), []
+
+
+LAVORI = {"xml": lavoro_xml, "inventario": lavoro_inventario, "fotogrammi": lavoro_fotogrammi, "silenzi": lavoro_silenzi, "ffmpeg": lavoro_ffmpeg}
 S = requests.Session()
 S.headers.update({"Authorization": "Bearer " + TOKEN, "X-Versione": VERSIONE})
 

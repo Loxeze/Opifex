@@ -160,6 +160,27 @@ def valida(tipo: str, d: dict) -> tuple[dict | None, str]:
         if not isinstance(args, list) or not args or len(args) > 80 or not all(isinstance(x, (str, int, float)) for x in args):
             return None, "argomenti: elenco di opzioni ffmpeg (senza la parola ffmpeg)"
         return {"argomenti": [str(x) for x in args], "descrizione": str(d.get("descrizione") or "")[:200]}, ""
+    if tipo == "xml":
+        clip = d.get("clip")
+        if not isinstance(clip, list) or not clip or len(clip) > 60:
+            return None, "clip: elenco da 1 a 60 elementi {file, da, a} (secondi)"
+        out = []
+        for c in clip:
+            try:
+                f_, da, a = _rel(c.get("file")), float(c.get("da")), float(c.get("a"))
+            except (AttributeError, TypeError, ValueError):
+                return None, "ogni clip vuole file, da, a (secondi)"
+            if not f_ or not (0 <= da < a):
+                return None, "clip non valida: file relativo e 0 <= da < a"
+            out.append({"file": f_, "da": da, "a": a})
+        try:
+            fps = int(d.get("fps") or 25)
+            larg, alt = int(d.get("larghezza") or 2160), int(d.get("altezza") or 3840)
+        except (TypeError, ValueError):
+            return None, "fps, larghezza e altezza devono essere numeri"
+        if not (1 <= fps <= 120 and 100 <= larg <= 8192 and 100 <= alt <= 8192):
+            return None, "misure non valide"
+        return {"clip": out, "fps": fps, "larghezza": larg, "altezza": alt, "nome": str(d.get("nome") or "Montaggio")[:60], "ingrandisci": d.get("ingrandisci", True) is not False}, ""
     f = _rel(d.get("file"))
     if not f:
         return None, "file non valido (percorso relativo alla cartella di lavoro, es. RIPRESE/clip1.mp4)"
@@ -189,11 +210,17 @@ STRUMENTI = [
     {"name": "banco_ffmpeg", "description": "Sul PC di montaggio: esegue ffmpeg con le opzioni indicate (senza la parola ffmpeg). I file in ingresso sono quelli della cartella di lavoro (con -i), l'uscita DEVE stare in 'uscite/' (es. uscite/reel_a.mp4). "
      "Per ingrandire a 4K, tagliare, concatenare, normalizzare l'audio. Restituisce l'esito e dimensione/durata del file prodotto.",
      "input_schema": {"type": "object", "properties": {"argomenti": {"type": "array", "items": {"type": "string"}}, "descrizione": {"type": "string"}}, "required": ["argomenti"]}},
+    {"name": "banco_xml",
+     "description": "Sul PC di montaggio: scrive il progetto di montaggio (XML importabile in Premiere Pro e DaVinci Resolve) con le clip in fila: per ognuna file, da e a (secondi). "
+                    "Default sequenza 2160x3840 (4K verticale) a 25 fps; le clip piu' piccole vengono ingrandite e lo dichiara (non e' 4K nativo). Il file sta in uscite/.",
+     "input_schema": {"type": "object", "properties": {"nome": {"type": "string"}, "larghezza": {"type": "integer"}, "altezza": {"type": "integer"}, "fps": {"type": "integer"},
+                                                       "clip": {"type": "array", "items": {"type": "object", "properties": {"file": {"type": "string"}, "da": {"type": "number"}, "a": {"type": "number"}}, "required": ["file", "da", "a"]}}},
+                      "required": ["clip"]}},
     {"name": "banco_risultato", "description": "Legge il risultato di un lavoro del banco rimasto in corso (id restituito da un altro strumento banco_).",
      "input_schema": {"type": "object", "properties": {"lavoro_id": {"type": "integer"}}, "required": ["lavoro_id"]}},
 ]
 AVVISO = ("\n\nBANCO DI LAVORO: hai un PC di montaggio con ffmpeg (strumenti banco_*). Metodo: banco_inventario, trascrizione, banco_silenzi per scegliere i tagli nelle pause, "
-          "banco_ffmpeg per produrre in uscite/, poi banco_fotogrammi per RIGUARDARE il risultato prima di consegnarlo. Se un lavoro e' ancora in corso richiama banco_risultato con il suo id.")
+          "banco_ffmpeg per produrre in uscite/, poi banco_fotogrammi per RIGUARDARE il risultato prima di consegnarlo. Per Lorenzo (4K o progetto Premiere) usa banco_xml: scrive il progetto di montaggio importabile in Premiere Pro e DaVinci Resolve. Se un lavoro e' ancora in corso richiama banco_risultato con il suo id.")
 
 
 def _attendi(lid: int, secondi: int = ATTESA_S) -> dict:
