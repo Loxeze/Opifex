@@ -36,5 +36,32 @@ function vistaMiglioramenti() {
   carica();
   return h("div", {}, h("h2", {}, "Miglioramento degli agenti"),
     h("p", { class: "aiuto" }, "Quando un agente riceve molti «giù», Padre Casati legge i motivi e propone istruzioni migliori. Non cambia nulla finché non le applichi; le vecchie restano nello storico."),
-    msg, cand, corpo);
+    msg, cand, corpo, h("h3", {}, "Prove di qualità (dopo ogni aggiornamento)"), proveRegressione());
+}
+
+// Compiti di esempio con criteri, rieseguiti quando vuoi: il punteggio per versione mostra se la qualità sale o scende.
+function proveRegressione() {
+  const box = h("div", { class: "carta" }), msg = h("div");
+  const mostra = async () => {
+    try {
+      const d = await api("GET", "/gestione/prove");
+      const nome = h("input", { type: "text", maxlength: 80, placeholder: "Nome della prova" });
+      const ag = h("select", {}, d.agenti.map(a => h("option", { value: a.id }, a.nome)));
+      const comp = h("textarea", { rows: 3, placeholder: "Il compito da dare all'agente" });
+      const cri = h("textarea", { rows: 3, placeholder: "Un criterio per riga: «Cita la fonte dei dati», «Chiude con i prossimi passi»…" });
+      riempi(box, [h("p", { class: "aiuto" }, "Ogni prova fa lavorare davvero l'agente (costa token) e controlla la risposta sui criteri. Rilanciala dopo un aggiornamento per vedere l'andamento."),
+        d.prove.map(p => h("div", { class: "carta", style: "margin:8px 0" }, h("div", { class: "nome" }, p.nome + " — " + (p.agente || "")),
+          h("div", { class: "sotto" }, "Andamento (dal più recente): " + (p.esiti.length ? p.esiti.map(e => "v" + e.versione + " " + Math.round(e.punteggio) + "%" + (e.errore ? " (errore)" : "")).join(" · ") : "mai eseguita")),
+          h("div", { class: "azioni" },
+            h("button", { class: "p", type: "button", onclick: async (e) => { e.currentTarget.disabled = true; msg.replaceChildren(h("p", { class: "sotto" }, "Prova in corso…"));
+              try { const r = await api("POST", "/gestione/prove/" + p.id + "/esegui"); msg.replaceChildren(avviso("Punteggio " + Math.round(r.punteggio) + "% (giudice: " + r.giudice + ")" + (r.errore ? " — " + r.errore : ""), r.errore ? "no" : "ok")); mostra(); }
+              catch (x) { msg.replaceChildren(avviso(x.message, "no")); e.currentTarget.disabled = false; } } }, "Esegui ora"),
+            h("button", { class: "r", type: "button", onclick: async () => { await api("DELETE", "/gestione/prove/" + p.id); mostra(); } }, "Elimina")))),
+        h("div", { class: "nome" }, "Nuova prova"), nome, ag, comp, cri,
+        h("div", { class: "azioni" }, h("button", { class: "p", type: "button", onclick: async () => { try { await api("POST", "/gestione/prove", { nome: nome.value, agente_id: Number(ag.value), compito: comp.value, criteri: cri.value }); mostra(); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Aggiungi la prova")),
+        msg]);
+    } catch (x) { box.replaceChildren(avviso(x.message, "no")); }
+  };
+  mostra();
+  return box;
 }
