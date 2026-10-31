@@ -53,3 +53,36 @@ def accendi_drive(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         n = conn.execute("UPDATE agenti SET drive_attivo = TRUE WHERE attivo AND NOT COALESCE(sentinella, FALSE) AND NOT drive_attivo").rowcount
     return {"accesi": n}
+
+
+@router.get("/trascrizione/diagnosi")
+def diagnosi_trascrizione(file_id: str = "", _: dict = Depends(solo_titolare)):
+    """Cosa serve alla trascrizione dell'audio dei video e se c'e': ffmpeg, chiave OpenAI, garanzie, Drive. Con file_id prova anche i primi 5 minuti di quel file."""
+    import subprocess
+    from . import fornitori, trascrizione_drive as td
+    passi = []
+    ff = td._ffmpeg()
+    versione = ""
+    if ff:
+        try:
+            versione = subprocess.run([ff, "-version"], capture_output=True, text=True, timeout=15).stdout.splitlines()[0][:60]
+        except Exception as e:  # noqa: BLE001
+            ff, versione = None, f"non eseguibile ({type(e).__name__})"
+    passi.append({"voce": "ffmpeg", "ok": bool(ff), "dettaglio": versione or "non trovato (ne' di sistema ne' incluso nel pacchetto)"})
+    with connessione() as conn:
+        f = conn.execute("SELECT fascia_dati_max, non_conservazione_attiva, dpa_firmato FROM fornitori_ai WHERE nome = 'openai'").fetchone()
+        passi.append({"voce": "Chiave OpenAI", "ok": bool(fornitori.chiave("openai")), "dettaglio": "inserita" if fornitori.chiave("openai") else "manca: Impostazioni → Sicurezza e garanzie"})
+        if f:
+            ok, motivo = puo_uscire("interno", "riservato", f["fascia_dati_max"], f["non_conservazione_attiva"], f["dpa_firmato"])
+            passi.append({"voce": "Garanzie OpenAI per dati interni", "ok": bool(ok), "dettaglio": "dichiarate" if ok else f"{motivo}: dichiara non conservazione e DPA di OpenAI e fascia dati «interno» in Sicurezza e garanzie"})
+        else:
+            passi.append({"voce": "Garanzie OpenAI per dati interni", "ok": False, "dettaglio": "fornitore OpenAI non registrato"})
+        passi.append({"voce": "Google Drive collegato", "ok": strumenti_google.collegato(conn), "dettaglio": ""})
+        prova = None
+        if file_id.strip() and all(p["ok"] for p in passi):
+            try:
+                tok, radici = strumenti_google._contesto(conn)
+                prova = td.trascrivi(tok, file_id.strip(), "prova", 300, 0)[:1500]
+            except Exception as e:  # noqa: BLE001
+                prova = f"ERRORE: {type(e).__name__}: {e}"[:600]
+    return {"passi": passi, "pronto": all(p["ok"] for p in passi), "prova": prova}

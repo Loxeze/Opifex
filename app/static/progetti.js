@@ -136,6 +136,25 @@ async function squadraProgetto(p, msg) {
   mostra();
 }
 
+// Controllo della trascrizione dei video: ffmpeg, chiave e garanzie OpenAI, Drive; con l'id di un file prova i primi 5 minuti.
+function diagnosiTrascrizione() {
+  const box = h("div", { class: "carta" }), esito = h("div");
+  const idf = h("input", { type: "text", placeholder: "ID di un file video su Drive (facoltativo, per una prova vera)" });
+  const vai_ = async (e) => {
+    e.currentTarget.disabled = true; esito.replaceChildren(h("p", { class: "sotto" }, "Controllo in corso (con un file può volerci qualche minuto)…"));
+    try {
+      const d = await api("GET", "/gestione/trascrizione/diagnosi" + (idf.value.trim() ? "?file_id=" + encodeURIComponent(idf.value.trim()) : ""));
+      riempi(esito, [d.passi.map(p => h("div", { class: "sotto" }, (p.ok ? "✔ " : "✖ ") + p.voce + (p.dettaglio ? " — " + p.dettaglio : ""))),
+        avviso(d.pronto ? "Tutto pronto per trascrivere." : "Manca qualcosa: sistemalo come indicato.", d.pronto ? "ok" : "no"),
+        d.prova ? h("pre", { class: "sotto", style: "white-space:pre-wrap" }, d.prova) : null]);
+    } catch (x) { esito.replaceChildren(avviso(x.message, "no")); }
+    e.currentTarget.disabled = false;
+  };
+  riempi(box, [h("div", { class: "nome" }, "Trascrizione dei video"), h("p", { class: "aiuto" }, "Controlla ciò che serve agli agenti per ascoltare l'audio dei video su Drive."), idf,
+    h("div", { class: "azioni" }, h("button", { class: "p", onclick: vai_ }, "Controlla / prova")), esito]);
+  return box;
+}
+
 // Chi ha gli strumenti Drive e, per chi non li ha, il motivo preciso.
 function accessiDriveAgenti() {
   const box = h("div", { class: "carta" }, h("p", { class: "sotto" }, "Controllo in corso…"));
@@ -193,7 +212,7 @@ function vistaCollegamenti() {
             h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
               try { const r = await api("POST", "/gestione/google/autorizza", { etichetta: etic.value, servizi: serv.filter(x => x.c.checked).map(x => x.k) }); window.location.href = r.url; }
               catch (x) { mostra(x.message, "no"); } } }, "Collega con Google"))),
-          h("h3", {}, "Agenti e Drive"), accessiDriveAgenti(),
+          h("h3", {}, "Agenti e Drive"), accessiDriveAgenti(), diagnosiTrascrizione(),
           h("h3", {}, "Drive per i progetti"),
           h("div", { class: "carta" }, h("label", {}, "Account che crea le cartelle", sceltaDrive),
             h("label", {}, "ID della cartella «Opifex» su Drive", radice),
