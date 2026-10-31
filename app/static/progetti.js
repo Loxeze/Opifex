@@ -28,6 +28,7 @@ function vistaProgetti() {
           h("button", { class: "p", onclick: () => { stato.progettoAperto = p.id; vai("progetto"); } }, "Dashboard"),
           h("button", { class: "s", onclick: () => modificaProgetto(p, carica, msg, d.aziende) }, "Modifica"),
           h("button", { class: "s", onclick: () => squadraProgetto(p, msg) }, "Squadra allineata?"),
+          h("button", { class: "s", onclick: async (e) => { e.currentTarget.disabled = true; try { await api("POST", "/gestione/progetti/" + p.id + "/best-practice"); msg.replaceChildren(avviso("Buona pratica ricavata: la trovi in «Buone pratiche condivise».", "ok")); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); } e.currentTarget.disabled = false; } }, "Ricava buona pratica"),
           p.drive_url ? h("a", { href: p.drive_url, target: "_blank", rel: "noopener noreferrer" }, h("button", { class: "s", type: "button" }, "Apri su Drive")) : null,
           h("button", { class: "s", onclick: async (e) => { e.currentTarget.disabled = true; msg.replaceChildren();
             try { const r = await api("POST", "/gestione/progetti/" + p.id + "/sincronizza"); msg.replaceChildren(r.ok ? avviso("Cartelle aggiornate su Drive.", "ok") : avviso(r.errore, "no")); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); }
@@ -45,6 +46,7 @@ function vistaProgetti() {
         d.drive_pronto ? null : avviso("Per creare le cartelle su Drive collega prima un account Google con Drive nella scheda Collegamenti: i progetti si creano comunque e le cartelle si generano dopo.", "avv"),
         attivi.length ? perImpresa(attivi) : h("p", { class: "sotto" }, "Nessun progetto."),
         archiviati.length ? [h("h3", {}, "Archiviati"), archiviati.map(scheda)] : null,
+        h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer;margin-top:12px" }, "Buone pratiche condivise"), buonePratiche()),
         eliminati.length ? h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer;margin-top:12px" }, "Eliminati (" + eliminati.length + ") — recuperabili"), eliminati.map(schedaEliminato)) : null,
         msg,
         h("h3", {}, "Nuovo progetto"),
@@ -86,6 +88,33 @@ function modificaProgetto(p, ricarica, msgEsterno, aziende) {
         } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
       } }, "Salva"),
       h("button", { class: "s", onclick: () => chiudi() }, "Annulla"))]);
+}
+
+// Memoria condivisa delle buone pratiche: nascono da sole quando un progetto si archivia; qui si correggono o si scartano.
+function buonePratiche() {
+  const box = h("div", { class: "carta" }, h("p", { class: "sotto" }, "Caricamento…"));
+  const mostra = async () => {
+    try {
+      const d = await api("GET", "/gestione/best-practice");
+      const scheda = (b) => {
+        const campo = (k, et) => b[k] ? h("div", { class: "sotto", style: "white-space:pre-wrap;margin-top:4px" }, h("b", {}, et + ": "), b[k]) : null;
+        return h("details", { style: "margin:6px 0;" + (b.stato === "scartata" ? "opacity:.6" : "") },
+          h("summary", { style: "cursor:pointer" }, h("b", {}, b.titolo), " — " + b.tipo + " · da «" + b.progetto_nome + "» · usata " + b.usata_n + " volte" + (b.stato === "scartata" ? " · scartata" : "") + (b.origine === "manuale" ? " · rivista da te" : "")),
+          campo("contesto", "Quando"), campo("cosa_funziona", "Cosa funziona"), campo("da_evitare", "Da evitare"), campo("checklist", "Checklist"),
+          h("div", { class: "azioni" },
+            h("button", { class: "s", onclick: async () => {
+              const t = prompt("Titolo", b.titolo); if (t === null) return;
+              const f = prompt("Cosa funziona (un punto per riga)", b.cosa_funziona); if (f === null) return;
+              const e = prompt("Da evitare (un punto per riga)", b.da_evitare); if (e === null) return;
+              try { await api("PUT", "/gestione/best-practice/" + b.id, { titolo: t, cosa_funziona: f, da_evitare: e }); mostra(); } catch (x) { box.append(avviso(x.message, "no")); } } }, "Modifica"),
+            h("button", { class: "s", onclick: async () => { try { await api("PUT", "/gestione/best-practice/" + b.id, { stato: b.stato === "scartata" ? "attiva" : "scartata" }); mostra(); } catch (x) { box.append(avviso(x.message, "no")); } } }, b.stato === "scartata" ? "Riattiva" : "Scarta")));
+      };
+      riempi(box, [h("p", { class: "aiuto" }, "Quando archivi un progetto, decisioni ed esiti diventano una buona pratica: gli agenti la consultano prima di iniziare lavori simili. Qui puoi correggerla o scartarla."),
+        d.schede.length ? d.schede.map(scheda) : h("p", { class: "sotto" }, "Ancora nessuna: la prima nasce quando archivi un progetto con una scheda compilata.")]);
+    } catch (x) { box.replaceChildren(avviso(x.message, "no")); }
+  };
+  mostra();
+  return box;
 }
 
 // Controllo di una squadra di progetto: tutti con Drive e con la scheda, stessa cartella.

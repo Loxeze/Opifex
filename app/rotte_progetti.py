@@ -1,10 +1,10 @@
 """Progetti (cartelle su Drive) e account Google collegati. Solo titolare, tranne il ritorno di Google."""
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from . import google, pm, registro
+from . import best_practice, google, pm, registro
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -240,12 +240,22 @@ class Archivia(BaseModel):
 
 
 @router.put("/gestione/progetti/{pid}/archivia")
-def archivia(pid: int, d: Archivia, _: dict = Depends(solo_titolare)):
-    """Il progetto si archivia soltanto: le cartelle su Drive non vengono mai cancellate dalla piattaforma."""
+def archivia(pid: int, d: Archivia, sfondo: BackgroundTasks, _: dict = Depends(solo_titolare)):
+    """Il progetto si archivia soltanto: le cartelle su Drive non vengono mai cancellate dalla piattaforma. Chiudendolo, il lavoro svolto diventa una buona pratica."""
     with connessione() as conn:
         if not conn.execute("UPDATE progetti SET archiviato=%s, eliminato_il = CASE WHEN %s THEN eliminato_il END WHERE id=%s RETURNING 1", (d.archiviato, d.archiviato, pid)).fetchone():
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Progetto non trovato")
+    if d.archiviato:
+        sfondo.add_task(_buona_pratica, pid)
     return {"ok": True}
+
+
+def _buona_pratica(pid: int):
+    try:
+        with connessione() as conn:
+            best_practice.genera(conn, pid)
+    except Exception:  # noqa: BLE001 - la chiusura del progetto non dipende dalla scheda di buone pratiche
+        pass
 
 
 @router.delete("/gestione/progetti/{pid}")

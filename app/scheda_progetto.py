@@ -214,6 +214,10 @@ STRUMENTI = [
     {"name": "progetto_decisione",
      "description": "Registra nella scheda una decisione presa (una frase, con il perche' se serve) o segna come superata una decisione precedente (superata_id).",
      "input_schema": {"type": "object", "properties": {"progetto": {"type": "string"}, "testo": {"type": "string"}, "superata_id": {"type": "integer"}}}},
+    {"name": "best_practice_cerca",
+     "description": "Cerca nella memoria condivisa delle buone pratiche (maturate nei progetti conclusi) quelle utili al lavoro che stai per fare: cosa ha funzionato, cosa evitare, "
+                    "checklist. Usalo a inizio lavoro con 2-5 parole chiave (es. «reel montaggio verticale»).",
+     "input_schema": {"type": "object", "properties": {"argomento": {"type": "string"}}, "required": ["argomento"]}},
 ]
 STRUMENTO_CREA = {"name": "progetto_crea",
                   "description": "Crea un nuovo progetto con la sua scheda iniziale. Usalo SOLO dopo che Lorenzo ha risposto di si' alla tua proposta di trasformare l'iniziativa in un progetto.",
@@ -233,6 +237,9 @@ def gestore(connessione, agente_id: int):
             with connessione() as conn:
                 if nome == "progetto_crea":
                     return crea_progetto(conn, agente_id, dati)
+                if nome == "best_practice_cerca":
+                    from . import best_practice
+                    return best_practice.esegui(conn, dati)
                 p = trova(conn, agente_id, dati.get("progetto"))
                 if nome == "progetto_leggi":
                     s = scheda(conn, p["id"])

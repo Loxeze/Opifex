@@ -14,7 +14,7 @@ from .fornitori import ErroreFornitore, Risposta, chiama_modello
 import contextvars
 PROVA_ISTRUZIONI = contextvars.ContextVar('prova_istruzioni', default=None)   # (agente_id, testo): prova di istruzioni non ancora applicate
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
-from . import archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
+from . import best_practice, archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
 from . import buffer as buffer_social
 from . import vademecum, note_aurora, scheda_impresa
@@ -220,6 +220,12 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         sp_ctx = scheda_progetto.contesto(conn, a_f)
         if sp_ctx:
             prefisso.append(sp_ctx); dim["scheda_progetto"] = len(sp_ctx)
+        try:
+            bp_ctx = best_practice.contesto(conn, a_f) if sp_ctx else ""
+        except Exception:  # noqa: BLE001
+            bp_ctx = ""
+        if bp_ctx:
+            prefisso.append(bp_ctx); dim["best_practice"] = len(bp_ctx)
         im_ctx = scheda_impresa.contesto(conn, a_f) if memoria._ok(a_f, "interno") else ""
         if im_ctx:
             prefisso.append(im_ctx); dim["scheda_impresa"] = len(im_ctx)
