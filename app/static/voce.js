@@ -19,6 +19,11 @@ const Voce = (() => {
     get leggiRisposte() { return leggiPref("leggi"); },
     set leggiRisposte(x) { scriviPref("leggi", x); if (!x) v.fermaLettura(); },
     viva: false,            // conversazione a mani libere: ascolta -> invia -> legge -> riascolta
+    senzaRipetizioni(t) {   // "ciao come stai ciao come stai ciao come stai" -> "ciao come stai"
+      t = String(t || "").replace(/\s+/g, " ").trim();
+      const m = t.match(/^(.{6,}?)(?:\s+\1)+$/i);
+      return m ? m[1] : t;
+    },
     avviaAscolto: null,     // la pagina chat lo imposta ad ogni disegno
     ascolta(campo, quandoFinito, quandoStato) {
       v.ferma();
@@ -27,14 +32,17 @@ const Voce = (() => {
       rec = new SR();
       rec.lang = "it-IT"; rec.interimResults = true; rec.continuous = !v.viva;
       const base = campo.value ? campo.value.replace(/\s+$/, "") + " " : "";
-      let finale = "";
-      rec.onresult = (ev) => {
-        let provvisorio = "";
-        for (let i = ev.resultIndex; i < ev.results.length; i++) {
-          const t = ev.results[i][0].transcript;
-          if (ev.results[i].isFinal) finale += t; else provvisorio += t;
+      rec.onresult = (ev) => {   // si ricostruisce TUTTO il testo da ev.results ad ogni evento: su Android gli eventi ripetono i risultati gia' finali e accumulandoli la frase si moltiplicava
+        const pezzi = [];
+        for (let i = 0; i < ev.results.length; i++) {
+          const t = String(ev.results[i][0].transcript || "").trim();
+          if (!t) continue;
+          const ult = pezzi.length ? pezzi[pezzi.length - 1] : "";
+          if (ult && (t === ult || ult.endsWith(t))) continue;   // ripetizione identica
+          if (ult && t.startsWith(ult)) pezzi[pezzi.length - 1] = t;   // risultato cumulativo: sostituisce il precedente
+          else pezzi.push(t);
         }
-        campo.value = (base + finale + provvisorio).trim();
+        campo.value = (base + Voce.senzaRipetizioni(pezzi.join(" "))).trim();
       };
       let ricevuto = false, errore = false;
       const spiega = (e) => e === "not-allowed" || e === "service-not-allowed"

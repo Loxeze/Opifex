@@ -196,7 +196,7 @@ function schermataCall(tid, esci) {
   // Riunione continua stile Meet/Zoom: il microfono resta aperto, il sistema capisce da solo quando parli e quando fai una pausa.
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const SERVER = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
-  let ultimaDetta = null, ultimo = 0, coda = [], parlando = false, vivo = true, riunione = null, occupato = false, inAttesa = "";
+  let ultimoBrowser = "", ultimaDetta = null, ultimo = 0, coda = [], parlando = false, vivo = true, riunione = null, occupato = false, inAttesa = "";
   let motore = SERVER ? "server" : SR ? "browser" : "nessuno", muto = false, flusso = null, ctx = null, an = null, buf = null, timer = null;
   let mr = null, pezzi = [], registrando = false, inizioReg = 0, inizioVoce = 0, ultimaVoce = 0, rumore = 4, forte = 0, livello = 0, rec = null, trascrivendo = 0;
   const tessere = h("div", { class: "riga", style: "flex-wrap:wrap;gap:10px;margin-bottom:10px" });
@@ -286,7 +286,15 @@ function schermataCall(tid, esci) {
     const nuovo = () => {
       if (!vivo || motore !== "browser" || muto || parlando || rec) return;
       const r = new SR(); r.lang = "it-IT"; r.interimResults = false; r.continuous = true; rec = r;
-      r.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) invia(e.results[i][0].transcript); };
+      r.onresult = (e) => {
+        for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) {
+          let t = String(e.results[i][0].transcript || "").trim();
+          if (!t || (ultimoBrowser && (t === ultimoBrowser || ultimoBrowser.endsWith(t)))) continue;   // Android ripete i risultati gia' finali
+          const prima = ultimoBrowser; ultimoBrowser = t; setTimeout(() => { if (ultimoBrowser === t) ultimoBrowser = ""; }, 4000);
+          if (prima && t.startsWith(prima)) t = t.slice(prima.length).trim();
+          if (t) invia(t);
+        }
+      };
       r.onerror = () => {}; r.onend = () => { rec = null; setTimeout(nuovo, 300); };
       try { r.start(); } catch (e) { rec = null; }
     };

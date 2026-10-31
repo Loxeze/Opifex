@@ -99,6 +99,9 @@ with TestClient(app) as c:
     ok("un agente con modello_riunione proprio lo usa, gli altri il globale", modelli_visti[:2] == ["claude-opus-5-5", "claude-haiku-5-5"], str(modelli_visti))
     sql("UPDATE agenti SET modello_riunione=NULL WHERE id=%s", (dario,))
     ok("voce veloce nelle riunioni: modello turbo e parti spezzate", "veloce: true" in c.get("/app/riunioni_call.js").text and "spezza(testo)" in c.get("/app/riunioni_call.js").text and ve.MODELLO_VELOCE == "eleven_turbo_v2_5")
+    vj = c.get("/app/voce.js").text
+    ok("dettatura: il testo si ricostruisce dai risultati (niente frase ripetuta 7-8 volte su Android)", "senzaRipetizioni" in vj and "for (let i = 0; i < ev.results.length; i++)" in vj and "finale +=" not in vj)
+    ok("riunioni: i risultati finali ripetuti dal browser non vengono reinviati", "ultimoBrowser" in c.get("/app/riunioni_call.js").text)
     ok("sql/103 Aurora/Elena su Sonnet", all(r[0] == "claude-sonnet-5-5" for r in sql("SELECT modello FROM agenti WHERE lower(nome) IN ('aurora','elena')")))
     ok("un'indicazione che nomina un manager lo interpella", call_riunioni.nominati_espliciti("Marco segui il sito", [{"nome": "Marco"}]) and not call_riunioni.nominati_espliciti("Il budget e' alto", [{"nome": "Marco"}]))
     ok("non e' piu' occupato", d["occupato"] is False)
