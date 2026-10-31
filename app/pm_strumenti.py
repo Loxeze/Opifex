@@ -104,6 +104,11 @@ def gestore(connessione, agente_id: int):
                     if dati.get("stato"):
                         if dati["stato"] not in STATI:
                             return "ERRORE: stato non valido"
+                        if dati["stato"] == "completata" and t["stato"] != "completata":
+                            from . import verifica_consegna
+                            blocco = verifica_consegna.blocco_chiusura(conn, agente_id, p["id"])
+                            if blocco:
+                                return blocco
                         conn.execute("UPDATE task SET stato = %s, completata_il = CASE WHEN %s = 'completata' THEN NOW() ELSE NULL END WHERE id = %s",
                                      (dati["stato"], dati["stato"], t["id"]))
                     if "scadenza" in dati:

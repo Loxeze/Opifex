@@ -28,5 +28,15 @@ with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row, autocommi
     ok("esiti salvati", conn.execute("SELECT count(*) n FROM verifiche_consegna WHERE esito='bloccata'").fetchone()["n"] == 2)
     ok("lo strumento e' tra quelli di progetto", any(s["name"] == "consegna_verifica" for s in sp.STRUMENTI))
     ok("la regola comune chiede verifica e una sola domanda", "consegna_verifica" in richieste.REGOLA and "una sola domanda precisa" in richieste.REGOLA)
+    conn.execute("INSERT INTO aziende (nome) VALUES ('Imp V') ON CONFLICT DO NOTHING")
+    az = conn.execute("SELECT id FROM aziende LIMIT 1").fetchone()["id"]
+    pv = conn.execute("INSERT INTO progetti (nome, azienda_id, descrizione) VALUES ('Reel Lancio', %s, 'Montaggio reel verticale dalle riprese grezze') RETURNING id", (az,)).fetchone()["id"]
+    pn = conn.execute("INSERT INTO progetti (nome, azienda_id, descrizione) VALUES ('Contabilita', %s, 'Bilancio fiscale') RETURNING id", (az,)).fetchone()["id"]
+    ok("progetto con checklist: chiusura bloccata senza controllo", "BLOCCATO" in (vc.blocco_chiusura(conn, a, pv) or ""))
+    ok("progetto senza buona pratica: nessun blocco", vc.blocco_chiusura(conn, a, pn) is None)
+    vc.registra(conn, a, pv, {"voci": [{"punto": "x", "esito": "no"}]})
+    ok("dopo un controllo bloccato resta bloccata", "ultimo controllo" in (vc.blocco_chiusura(conn, a, pv) or ""))
+    vc.registra(conn, a, pv, {"voci": [{"punto": "x", "esito": "ok", "prova": "file a.mp4 4K"}]})
+    ok("dopo un controllo ok si puo' chiudere", vc.blocco_chiusura(conn, a, pv) is None)
     g = sp.gestore(lambda: __import__("app.db", fromlist=["x"]).connessione(), a)
 print(f"{sum(ris)}/{len(ris)}"); sys.exit(0 if all(ris) else 1)
