@@ -24,6 +24,9 @@ STRUMENTI = [
     {"name": "google_elenca_cartella", "description": "Elenca il contenuto di una cartella di Drive (anche una cartella di lavoro autorizzata da Lorenzo, es. le riprese grezze): "
      "nome, tipo, dimensione, durata dei video e id di ogni file. Senza 'cartella_id' elenca la cartella Opifex. Usala prima di dire che dei file non si vedono.",
      "input_schema": {"type": "object", "properties": {"cartella_id": {"type": "string"}}}},
+    {"name": "google_crea_cartella", "description": "Crea una cartella su Drive (se esiste gia' con quel nome la riusa). 'dentro' e' l'id di una cartella autorizzata o il nome di un progetto; "
+     "senza, la crea nella cartella del tuo progetto. Esempio: la cartella «reels» del progetto.",
+     "input_schema": {"type": "object", "properties": {"nome": {"type": "string"}, "dentro": {"type": "string"}}, "required": ["nome"]}},
     {"name": "google_leggi", "description": "Legge un file che sta dentro la cartella Opifex: foglio o documento Google, oppure un file caricato (PDF, Word, Excel, PowerPoint, immagine, testo).",
      "input_schema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "google_crea_foglio", "description": "Crea un nuovo foglio Google formattato (intestazione colorata, riga bloccata, righe alternate, colonne adattate). Numeri come numeri. 'righe' e' una lista di righe, ognuna lista di celle; la prima riga e' l'intestazione. "
@@ -104,6 +107,11 @@ def _cartella_destinazione(conn, tok: str, radice: str, progetto: str | None, ag
             if cand:
                 return cand
         raise ErroreGoogle(f"Il progetto «{progetto}» non ha ancora una cartella su Drive (sincronizzalo dalla pagina Progetti)")
+    unico = conn.execute(
+        """SELECT p.drive_cartella_id FROM progetti p JOIN progetti_agenti x ON x.progetto_id = p.id
+           WHERE x.agente_id = %s AND NOT p.archiviato AND p.eliminato_il IS NULL AND p.drive_cartella_id IS NOT NULL""", (agente_id,)).fetchall()
+    if len(unico) == 1:
+        return unico[0]["drive_cartella_id"]   # chi lavora a un solo progetto salva nella cartella del progetto, dove la squadra lo trova
     return cartella_agente(conn, tok, radice, agente_id)
 
 
@@ -179,6 +187,22 @@ def _esegui(conn, agente_id: int, nome: str, d: dict) -> str:
                 extra += f" | video {int(v.get('durationMillis', 0)) // 1000} s {v.get('width', '?')}x{v.get('height', '?')}"
             out.append(f"{x['id']} | {x['name']} | {tipo}{extra}")
         return "\n".join(out)
+    if nome == "google_crea_cartella":
+        titolo = " ".join(str(d.get("nome", "")).split())[:100]
+        if not titolo:
+            return "ERRORE: scrivi il nome della cartella"
+        dentro = str(d.get("dentro") or "").strip()
+        if dentro and _nell_albero(tok, dentro, radici):
+            genitore = dentro
+        else:
+            try:
+                genitore = _cartella_destinazione(conn, tok, radice, dentro or None, agente_id)
+            except ErroreGoogle as e:
+                return f"ERRORE: {e}"
+        cid = google.cartella(tok, titolo, genitore)
+        conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli) VALUES (%s,'google_cartella_creata',%s::jsonb)",
+                     (agente_id, json.dumps({"cartella": titolo})))
+        return f"Cartella «{titolo}» pronta: id {cid} link https://drive.google.com/drive/folders/{cid}"
     if nome == "google_cerca":
         q = f"name contains '{_q(str(d.get('testo', ''))[:80])}' and trashed=false"
         f = _richiesta("GET", _DRIVE, tok, params={"q": q, "fields": "files(id,name,mimeType)", "pageSize": 30}).json().get("files", [])

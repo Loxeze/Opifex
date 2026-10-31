@@ -308,7 +308,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             costi_tool = bool(ok_int and (_sent or a["nome"] == "Aurora") and costi.richiesta_costi(messaggio, _sent))
             pm_tool = bool(conn.execute("SELECT 1 FROM progetti WHERE pm_agente_id = %s", (agente_id,)).fetchone())
             siti_tool = bool(ok_int and siti_hosting.ha_siti(conn, agente_id))
-            prog_tool = bool(scheda_progetto.strumenti_abilitati() and ok_int and (a["livello"] in ("manager", "referente") or pm_tool) and scheda_progetto.progetti_di(conn, agente_id))   # gli operativi leggono la scheda ma non pagano gli strumenti in ogni chiamata
+            prog_tool = bool(scheda_progetto.strumenti_abilitati() and ok_int and scheda_progetto.progetti_di(conn, agente_id))   # tutta la squadra di un progetto ha gli stessi strumenti sulla scheda (con la cache costano poco)
             form_tool = bool(scheda_progetto.strumenti_abilitati() and ok_int and (a["livello"] in ("manager", "referente") or pm_tool))
             prog_crea = bool(scheda_progetto.strumenti_abilitati() and ok_int and a["livello"] in ("manager", "referente") and not _sent)
             sq_pm = bool(form_tool and pm_tool)

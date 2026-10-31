@@ -85,6 +85,10 @@ def aggiungi_decisione(conn, progetto_id: int, testo: str, *, agente_id=None, ut
     i = conn.execute("INSERT INTO progetti_decisioni (progetto_id, testo, agente_id, utente_id) VALUES (%s,%s,%s,%s) RETURNING id",
                      (progetto_id, t, agente_id, utente_id)).fetchone()["id"]
     conn.execute("UPDATE progetti SET scheda_il = NOW() WHERE id = %s", (progetto_id,))
+    nome = (conn.execute("SELECT nome FROM progetti WHERE id = %s", (progetto_id,)).fetchone() or {}).get("nome", "")
+    for m in conn.execute("SELECT agente_id FROM progetti_agenti WHERE progetto_id = %s AND agente_id IS DISTINCT FROM %s", (progetto_id, agente_id)).fetchall():
+        conn.execute("INSERT INTO avvisi_agente (agente_id, testo) VALUES (%s,%s)",
+                     (m["agente_id"], f"NUOVA DECISIONE nel progetto «{nome}» (vale per tutta la squadra, non riaprirla): {t}"))
     return i
 
 
@@ -124,6 +128,10 @@ def scheda(conn, progetto_id: int, con_versioni: bool = False) -> dict:
 def _testo_progetto(conn, progetto_id: int, nome: str, breve: bool = False) -> str:
     p = scheda(conn, progetto_id)
     righe = [f"PROGETTO «{nome}»"]
+    cart = conn.execute("SELECT drive_cartella_id FROM progetti WHERE id = %s", (progetto_id,)).fetchone()
+    if cart and cart["drive_cartella_id"]:
+        righe.append(f"Cartella Drive del progetto (id {cart['drive_cartella_id']}): tutta la squadra la legge e ci scrive; elencala con google_elenca_cartella, "
+                     "creane le sottocartelle con google_crea_cartella, salva li' i file di lavoro.")
     for k, et in CAMPI.items():
         if p[k]:
             righe.append(f"{et}: {p[k][:600 if breve else MAX_CAMPO]}")

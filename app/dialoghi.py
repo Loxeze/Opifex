@@ -150,6 +150,13 @@ def _fai_parlare(conn, parlante_id: int, destinatario_id: int, conv_id: int, ist
         note = richieste.decisioni_note(conn)
         if note:
             sistema += "\n\n" + note
+    try:
+        from . import scheda_progetto
+        sp = scheda_progetto.contesto(conn, p)
+        if sp:
+            sistema += "\n\n" + sp
+    except Exception:  # noqa: BLE001 - la scheda e' un aiuto: non deve fermare il dialogo
+        pass
     storia = _storia(conn, conv_id)
     doc_ctx, _u, _e = memoria.contesto_documenti(conn, p, istruzione + "\n" + storia)  # anche nei dialoghi gli agenti vedono i loro documenti
     contenuto = anonimizza((doc_ctx + "\n\n=====\n\n" if doc_ctx else "") + storia + "\n\n=== Tocca a te ===\n" + istruzione)

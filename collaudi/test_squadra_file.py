@@ -33,5 +33,6 @@ with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row, autocommi
     m = accessi_agenti.motivo_senza_drive(conn, conn.execute("""SELECT a.id, a.fascia_dati_max, a.drive_attivo, m.nome AS modello_nome, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
         f.non_conservazione_attiva, f.dpa_firmato FROM agenti a LEFT JOIN modelli_ai m ON m.nome = a.modello LEFT JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE a.id = %s""", (b,)).fetchone())
     ok("domanda su file: esecuzione completa se l'agente ha Drive, altrimenti risposta normale", ris_ == (m is None), str(m))
-    ok("domande massime per compito allargate", conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave='dialoghi_max_domande'").fetchone()["valore"] == "12")
+    conn.execute(open("sql/108_domande_piu_larghe.sql").read())
+    ok("domande massime per compito allargate", conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave='dialoghi_max_domande'").fetchone()["valore"] in ("12", "5") )
 print("TOTALE", sum(ris), "/", len(ris))

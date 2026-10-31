@@ -27,6 +27,7 @@ function vistaProgetti() {
         h("div", { class: "azioni" },
           h("button", { class: "p", onclick: () => { stato.progettoAperto = p.id; vai("progetto"); } }, "Dashboard"),
           h("button", { class: "s", onclick: () => modificaProgetto(p, carica, msg, d.aziende) }, "Modifica"),
+          h("button", { class: "s", onclick: () => squadraProgetto(p, msg) }, "Squadra allineata?"),
           p.drive_url ? h("a", { href: p.drive_url, target: "_blank", rel: "noopener noreferrer" }, h("button", { class: "s", type: "button" }, "Apri su Drive")) : null,
           h("button", { class: "s", onclick: async (e) => { e.currentTarget.disabled = true; msg.replaceChildren();
             try { const r = await api("POST", "/gestione/progetti/" + p.id + "/sincronizza"); msg.replaceChildren(r.ok ? avviso("Cartelle aggiornate su Drive.", "ok") : avviso(r.errore, "no")); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); }
@@ -85,6 +86,25 @@ function modificaProgetto(p, ricarica, msgEsterno, aziende) {
         } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
       } }, "Salva"),
       h("button", { class: "s", onclick: () => chiudi() }, "Annulla"))]);
+}
+
+// Controllo di una squadra di progetto: tutti con Drive e con la scheda, stessa cartella.
+async function squadraProgetto(p, msg) {
+  const box = h("div", { class: "carta" });
+  msg.replaceChildren(box);
+  const mostra = async () => {
+    try {
+      const d = await api("GET", "/gestione/progetti/" + p.id + "/squadra");
+      const guasti = d.membri.filter(m => m.motivo);
+      riempi(box, [h("div", { class: "nome" }, "Squadra di «" + d.progetto + "»: " + (d.allineata ? "allineata" : "da allineare")),
+        h("p", { class: "sotto" }, d.cartella ? "Cartella Drive del progetto presente: tutti i membri con Drive la leggono e ci scrivono." : "Il progetto non ha ancora la cartella su Drive: usa «Crea/aggiorna cartelle su Drive»."),
+        d.membri.map(m => h("div", { class: "sotto" }, h("b", {}, m.nome), " — " + (m.motivo ? "senza Drive: " + m.motivo : "Drive e scheda del progetto ok"))),
+        guasti.length ? h("div", { class: "azioni" },
+          h("button", { class: "p", onclick: async () => { try { const r = await api("PUT", "/gestione/progetti/" + p.id + "/squadra/allinea", { fascia_interna: false }); await mostra(); box.append(avviso("Drive acceso a " + r.drive_accesi + " agenti.", "ok")); } catch (x) { box.append(avviso(x.message, "no")); } } }, "Accendi Drive a chi lo ha spento"),
+          guasti.some(m => m.correggibile_fascia) ? h("button", { class: "s", onclick: async () => { if (!confirm("Portare a «interno» la fascia dati degli agenti di questa squadra che oggi hanno solo «pubblico»? Potranno leggere i file del progetto.")) return; try { const r = await api("PUT", "/gestione/progetti/" + p.id + "/squadra/allinea", { fascia_interna: true }); await mostra(); box.append(avviso("Fascia dati portata a interno per " + r.fascia_portata_a_interno + " agenti.", "ok")); } catch (x) { box.append(avviso(x.message, "no")); } } }, "Dai ai membri la fascia «interno»") : null) : null]);
+    } catch (x) { box.replaceChildren(avviso(x.message, "no")); }
+  };
+  mostra();
 }
 
 // Chi ha gli strumenti Drive e, per chi non li ha, il motivo preciso.
