@@ -15,12 +15,25 @@ MAX_BYTE_SCARICO = 1_500_000_000
 MAX_MINUTI = 240
 
 
+def _ffmpeg() -> str | None:
+    """ffmpeg di sistema se c'e'; altrimenti quello incluso nel pacchetto Python imageio-ffmpeg (nessuna installazione a mano)."""
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _mmss(s: int) -> str:
     return f"{s // 60:02d}:{s % 60:02d}"
 
 
 def trascrivi(tok: str, fid: str, nome: str, durata_s: int | None, da_minuto: int = 0) -> str:
-    if not shutil.which("ffmpeg"):
+    ff = _ffmpeg()
+    if not ff:
         return ("ERRORE: sul server manca ffmpeg, che serve a estrarre l'audio. Lorenzo deve installarlo una volta: sudo apt-get install -y ffmpeg. "
                 "Intanto non posso trascrivere: segnalalo a Lorenzo in modo chiaro invece di aspettare.")
     da_minuto = max(0, int(da_minuto or 0))
@@ -42,7 +55,7 @@ def trascrivi(tok: str, fid: str, nome: str, durata_s: int | None, da_minuto: in
                         f.write(pezzo)
         except httpx.HTTPError as e:
             return f"ERRORE: scaricamento non riuscito ({type(e).__name__})"
-        cmd = ["ffmpeg", "-v", "error", "-ss", str(da_minuto * 60), "-i", sorgente, "-t", str(BLOCCO_S * BLOCCHI_PER_CHIAMATA), "-vn", "-ac", "1", "-ar", "16000",
+        cmd = [ff, "-v", "error", "-ss", str(da_minuto * 60), "-i", sorgente, "-t", str(BLOCCO_S * BLOCCHI_PER_CHIAMATA), "-vn", "-ac", "1", "-ar", "16000",
                "-b:a", "32k", "-f", "segment", "-segment_time", str(BLOCCO_S), "-reset_timestamps", "1", os.path.join(d, "b%03d.mp3")]
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
