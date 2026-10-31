@@ -41,6 +41,25 @@ function graficoArea(valori, etichette, colore, formato, alt) {
   return s;
 }
 
+function graficoBarre(valori, etichette, colore, formato, alt) {
+  const W = 480, H = 190, l = 46, r = 8, t = 16, b = 24, iw = W - l - r, ih = H - t - b;
+  const mx = Math.max(1e-9, ...valori) * 1.12, n = valori.length, passo = iw / n, larg = Math.max(4, passo * 0.68);
+  const Y = (v) => t + ih * (1 - v / mx);
+  const s = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": alt, class: "bt-grafico" });
+  for (let k = 0; k <= 3; k++) {
+    const v = mx * k / 3;
+    s.append(svgEl("line", { x1: l, x2: W - r, y1: Y(v), y2: Y(v), stroke: PB.griglia }), svgEl("text", { x: l - 6, y: Y(v) + 4, "text-anchor": "end", "font-size": 12, fill: PB.tenue }, formato(v)));
+  }
+  const imax = valori.indexOf(Math.max(...valori));
+  valori.forEach((v, i) => {
+    const x = l + passo * i + (passo - larg) / 2, oggi = i === n - 1, alt_ = Math.max(v ? 2 : 0, ih * v / mx);
+    s.append(svgEl("rect", { x, y: t + ih - alt_, width: larg, height: alt_, rx: 2, fill: colore, "fill-opacity": oggi ? 1 : 0.55 }, svgEl("title", {}, pbData(etichette[i]) + ": " + formato(v))));
+    if (oggi || i === imax) s.append(svgEl("text", { x: x + larg / 2, y: Math.max(11, t + ih - alt_ - 4), "text-anchor": oggi && n - 1 - imax < 3 && i !== imax ? "end" : "middle", "font-size": 12, "font-weight": 600, fill: PB.inchiostro }, formato(v)));
+  });
+  [0, 10, 20, n - 1].forEach(i => s.append(svgEl("text", { x: l + passo * i + passo / 2, y: H - 6, "text-anchor": i === 0 ? "start" : i === n - 1 ? "end" : "middle", "font-size": 12, fill: PB.tenue }, pbData(etichette[i]))));
+  return s;
+}
+
 function sparkline(valori, colore) {
   const w = 120, hh = 34, mx = Math.max(...valori), mn = Math.min(...valori);
   const p = valori.map((v, i) => `${(i * w / Math.max(1, valori.length - 1)).toFixed(1)},${(hh - 3 - (hh - 6) * (v - mn) / ((mx - mn) || 1)).toFixed(1)}`).join(" ");
@@ -153,14 +172,14 @@ function vistaDashboard() {
 
   const disegnaDati = (d) => {
     const c = d.crm, k = d.consumi, so = d.social, op = c.operazioni;
-    const g14 = k.giorni.slice(-14), vc = variazione(k.mese.costo, k.mese.costo_periodo_prima);
+    const g14 = k.giorni.slice(-14), prec7 = k.giorni.slice(-8, -1), media7 = prec7.reduce((a, x) => a + x.costo, 0) / Math.max(1, prec7.length), vc = variazione(k.mese.costo, k.mese.costo_periodo_prima);
     riempi(kpi, [
       pbTessera("Contatti CRM", nIt(c.contatti.totale), c.contatti.nuovi_7g ? "+" + nIt(c.contatti.nuovi_7g) + " in 7 giorni" : "nessun nuovo in 7 giorni"),
       pbTessera("Operazioni aperte", nIt(op.aperte), op.in_pausa ? nIt(op.in_pausa) + " in pausa" : "nessuna in pausa"),
       pbTessera("Valore in trattativa", eurInt(op.valore_aperto), "pesato " + eurInt(op.valore_pesato)),
-      pbTessera("Token oggi", compatto(k.oggi.token), compatto(k.mese.token) + " nel mese", sparkline(g14.map(x => x.token), PB.verde)),
-      pbTessera("Costo del mese", eur(k.mese.costo), vc ? h("span", {}, h("b", { class: vc.su ? "bt-giu" : "bt-su" }, vc.testo), " sullo stesso periodo del mese scorso") : "primo mese di dati", sparkline(g14.map(x => x.costo), PB.terra)),
-      pbTessera("Agenti attivi", k.agenti.attivi + "/" + k.agenti.totali, k.agenti.totali - k.agenti.attivi ? (k.agenti.totali - k.agenti.attivi) + " spenti" : "tutti al lavoro")]);
+      pbTessera("Costo di oggi", eur(k.oggi.costo), compatto(k.oggi.token) + " token · media 7 giorni " + eur(media7), sparkline(g14.map(x => x.costo), PB.terra)),
+      pbTessera("Costo del mese", eur(k.mese.costo), (vc ? h("span", {}, h("b", { class: vc.su ? "bt-giu" : "bt-su" }, vc.testo), " sul mese scorso · ") : "") + compatto(k.mese.token) + " token"),
+      pbTessera("Progetti vinti", eurInt(op.valore_vinto_anno), nIt(op.vinte_anno) + " da inizio anno · totale " + eurInt(op.valore_vinto_totale) + " (" + nIt(op.vinte_totali) + ")")]);
 
     const imbuto = pbScheda("Imbuto di vendita", [graficoImbuto(c.imbuto), h("p", { class: "bt-nota" }, c.conversione != null ? "Da contatto a cliente vinto: " + nIt(c.conversione, 1) + "% · perse negli ultimi 90 giorni: " + op.perse_90g : "Importa i contatti nel CRM per vedere l'imbuto.")],
       h("button", { class: "s", onclick: () => vai("crm") }, "Apri il CRM"), "bt-s4");
@@ -173,7 +192,7 @@ function vistaDashboard() {
 
     const giorni = k.giorni.map(x => x.giorno);
     const consumi = pbScheda("Token e costi, ultimi 30 giorni", h("div", { class: "bt-due" }, h("div", {}, h("div", { class: "bt-cap" }, "Token al giorno"), graficoArea(k.giorni.map(x => x.token), giorni, PB.verde, compatto, "Token al giorno negli ultimi 30 giorni")),
-      h("div", {}, h("div", { class: "bt-cap" }, "Costo al giorno, euro"), graficoArea(k.giorni.map(x => x.costo * ((stato.opzioni && stato.opzioni.cambio_eur) || 0.92)), giorni, PB.terra, (v) => "€ " + nIt(v, v < 10 ? 2 : 0), "Costo al giorno negli ultimi 30 giorni"))),
+      h("div", {}, h("div", { class: "bt-cap" }, "Costo al giorno, euro (oggi in evidenza)"), graficoBarre(k.giorni.map(x => x.costo * ((stato.opzioni && stato.opzioni.cambio_eur) || 0.92)), giorni, PB.terra, (v) => "€ " + nIt(v, v < 10 ? 2 : 0), "Costo al giorno negli ultimi 30 giorni"))),
       h("button", { class: "s", onclick: () => vai("impostazioni", "misure") }, "Dove vanno"), "bt-s4");
     riempi(riga1, [imbuto, operazioni, consumi]);
 

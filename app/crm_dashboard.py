@@ -46,10 +46,14 @@ def cruscotto(conn, utente_id: int) -> dict:
     regioni = conn.execute("""SELECT regione AS valore, count(*) AS n FROM crm_contatti WHERE regione IS NOT NULL GROUP BY regione ORDER BY n DESC LIMIT 8""").fetchall()
     categorie = conn.execute("""SELECT categoria AS valore, count(*) AS n FROM crm_contatto_categorie GROUP BY categoria ORDER BY n DESC LIMIT 8""").fetchall()
     crm._registra(conn, None, utente_id, "cruscotto_titolare", {}, c["totale"])
+    vt = conn.execute("""SELECT count(*) FILTER (WHERE chiusa_il >= date_trunc('year', NOW())) AS n_anno,
+                                COALESCE(sum(valore_euro) FILTER (WHERE chiusa_il >= date_trunc('year', NOW())),0) AS v_anno,
+                                count(*) AS n_tot, COALESCE(sum(valore_euro),0) AS v_tot FROM crm_opportunita WHERE stato = 'vinta'""").fetchone()
     return {
         "contatti": c,
         "opportunita": {"aperte": aperte_n, "valore_aperto": aperte_v, "valore_pesato": round(pesato), "vinte_90g": per["vinta"]["n"], "valore_vinto_90g": per["vinta"]["valore"],
-                        "perse_90g": per["persa"]["n"], "tasso_vittoria": tasso},
+                        "perse_90g": per["persa"]["n"], "tasso_vittoria": tasso,
+                        "vinte_anno": int(vt["n_anno"]), "valore_vinto_anno": float(vt["v_anno"]), "vinte_totali": int(vt["n_tot"]), "valore_vinto_totale": float(vt["v_tot"])},
         "imbuto": imbuto,
         "per_tipo": [{"tipo": r["tipo"], "n": r["n"], "valore": float(r["valore"])} for r in per_tipo],
         "scadenze": [{"id": r["id"], "titolo": r["titolo"], "stato": r["stato"], "valore": float(r["valore_euro"] or 0), "scadenza": r["scadenza"], "contatto_id": r["contatto_id"], "contatto": _nome(r)} for r in scadenze],

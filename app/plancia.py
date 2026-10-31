@@ -39,6 +39,9 @@ def crm(conn) -> dict:
         imbuto.append({"fase": nome, "n": n, "dal_precedente": round(100 * n / prima) if prima else None})
         prima = n or prima
     aperte_n = sum(per[s]["n"] for s in ("nuova", "contattato", "in_trattativa"))
+    vt = conn.execute("""SELECT count(*) FILTER (WHERE chiusa_il >= date_trunc('year', NOW())) AS n_anno,
+                                      COALESCE(sum(valore_euro) FILTER (WHERE chiusa_il >= date_trunc('year', NOW())),0) AS v_anno,
+                                      count(*) AS n_tot, COALESCE(sum(valore_euro),0) AS v_tot FROM crm_opportunita WHERE stato = 'vinta'""").fetchone()
     ferme = conn.execute("""SELECT titolo, stato, scadenza, (CURRENT_DATE - COALESCE(scadenza, creata_il::date)) AS giorni FROM crm_opportunita
                             WHERE stato IN ('nuova','contattato','in_trattativa') AND scadenza IS NOT NULL AND scadenza <= CURRENT_DATE + 7
                             ORDER BY scadenza LIMIT 4""").fetchall()
@@ -49,7 +52,8 @@ def crm(conn) -> dict:
         "operazioni": {"aperte": aperte_n, "in_pausa": per["in_pausa"]["n"], "valore_aperto": sum(per[s]["valore"] for s in ("nuova", "contattato", "in_trattativa")),
                        "valore_pesato": round(sum(per[s]["valore"] * PESO[s] for s in PESO)),
                        "per_fase": [{"stato": s, "n": per[s]["n"], "valore": per[s]["valore"]} for s in APERTE],
-                       "vinte_90g": per["vinta"]["n"], "valore_vinto_90g": per["vinta"]["valore"], "perse_90g": per["persa"]["n"]},
+                       "vinte_90g": per["vinta"]["n"], "valore_vinto_90g": per["vinta"]["valore"],
+                       "vinte_anno": int(vt["n_anno"]), "valore_vinto_anno": float(vt["v_anno"]), "vinte_totali": int(vt["n_tot"]), "valore_vinto_totale": float(vt["v_tot"]), "perse_90g": per["persa"]["n"]},
         "da_muovere": [{"titolo": r["titolo"], "stato": r["stato"], "scadenza": r["scadenza"], "giorni": int(r["giorni"] or 0)} for r in ferme],
     }
 

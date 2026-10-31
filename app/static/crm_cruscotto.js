@@ -29,6 +29,7 @@ function crmCruscotto() {
         tessera("Opportunità aperte", String(o.aperte), eurCrm(o.valore_aperto), () => { stato.crmTab = "pipeline"; disegna(); }),
         tessera("Valore previsto", eurCrm(o.valore_pesato), "pesato sulla fase"),
         tessera("Vinte (90 giorni)", String(o.vinte_90g), o.valore_vinto_90g ? eurCrm(o.valore_vinto_90g) : ""),
+        tessera("Progetti vinti da inizio anno", eurCrm(o.valore_vinto_anno), o.vinte_anno + " vinti · in totale " + eurCrm(o.valore_vinto_totale) + " (" + o.vinte_totali + ")"),
         tessera("Tasso di vittoria", o.tasso_vittoria === null ? "—" : o.tasso_vittoria + "%", o.perse_90g + " perse")),
       imbuto,
       h("div", { class: "griglia" },
