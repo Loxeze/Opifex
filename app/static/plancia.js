@@ -67,15 +67,15 @@ function sparkline(valori, colore) {
 }
 
 function graficoImbuto(imbuto) {
-  const W = 440, riga = 78, H = imbuto.length * riga, maxW = W - 70;
+  const W = 440, riga = 36, H = imbuto.length * riga, maxW = W - 60;
   const mx = Math.max(1, imbuto[0].n);
   const s = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": "Imbuto di vendita dai contatti del CRM", class: "bt-grafico" });
   imbuto.forEach((f, i) => {
-    const y = i * riga, w = Math.max(8, maxW * f.n / mx);
+    const y = i * riga, w = Math.max(6, maxW * f.n / mx);
     s.append(svgEl("g", {}, svgEl("title", {}, f.fase + ": " + nIt(f.n)),
-      svgEl("text", { x: 0, y: y + 16, "font-size": 15, "font-weight": 600, fill: PB.inchiostro }, f.fase, svgEl("tspan", { "font-weight": 400, fill: PB.tenue, "font-size": 13 }, "  " + (f.dal_precedente == null ? "tutti i contatti" : f.dal_precedente + "% di prima"))),
-      svgEl("rect", { x: 0, y: y + 26, width: w, height: 36, rx: 6, fill: PB.imbuto[i] }),
-      svgEl("text", { x: w + 12, y: y + 55, "font-size": 28, "font-weight": 500, fill: PB.inchiostro, "font-family": "Newsreader, Georgia, serif" }, nIt(f.n))));
+      svgEl("text", { x: 0, y: y + 10, "font-size": 10.5, "font-weight": 600, fill: PB.inchiostro }, f.fase, svgEl("tspan", { "font-weight": 400, fill: PB.tenue, "font-size": 9.5 }, "  " + (f.dal_precedente == null ? "tutti i contatti" : f.dal_precedente + "% di prima"))),
+      svgEl("rect", { x: 0, y: y + 14, width: w, height: 16, rx: 4, fill: PB.imbuto[i] }),
+      svgEl("text", { x: w + 8, y: y + 27, "font-size": 15, "font-weight": 500, fill: PB.inchiostro, "font-family": "Newsreader, Georgia, serif" }, nIt(f.n))));
   });
   return s;
 }
@@ -112,7 +112,7 @@ function vistaDashboard() {
   const ora = new Date().getHours(), saluto = ora < 6 ? "Buonanotte" : ora < 13 ? "Buongiorno" : ora < 19 ? "Buon pomeriggio" : "Buonasera";
   const titolo = h("h1", { class: "bt-titolo" }, saluto + (stato.nome ? " " + stato.nome.split(" ")[0] : "") + ". ");
   const sottotitolo = h("span", { class: "bt-corsivo" }, "Carico la plancia…"); titolo.append(sottotitolo);
-  const kpi = h("section", { class: "bt-griglia bt-kpis" }, [1, 2, 3, 4, 5, 6].map(() => h("article", { class: "bt-card bt-kpi" }, h("div", { class: "bt-sotto" }, "…"))));
+  const kpi = h("section", { class: "bt-griglia bt-kpis" }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(() => h("article", { class: "bt-card bt-kpi" }, h("div", { class: "bt-sotto" }, "…"))));
   const riga1 = h("section", { class: "bt-griglia" });
   const riga2 = h("section", { class: "bt-griglia" });
   const colDec = h("div", { class: "bt-col" });
@@ -173,20 +173,31 @@ function vistaDashboard() {
   const disegnaDati = (d) => {
     const c = d.crm, k = d.consumi, so = d.social, op = c.operazioni;
     const g14 = k.giorni.slice(-14), prec7 = k.giorni.slice(-8, -1), media7 = prec7.reduce((a, x) => a + x.costo, 0) / Math.max(1, prec7.length), vc = variazione(k.mese.costo, k.mese.costo_periodo_prima);
+    const sc0 = so.totali, nScad = c.da_muovere.filter(m => m.giorni > 0).length;
     riempi(kpi, [
-      pbTessera("Contatti CRM", nIt(c.contatti.totale), c.contatti.nuovi_7g ? "+" + nIt(c.contatti.nuovi_7g) + " in 7 giorni" : "nessun nuovo in 7 giorni"),
+      pbTessera("Contatti CRM", nIt(c.contatti.totale), "totale in archivio"),
+      pbTessera("Nuovi contatti", nIt(c.contatti.nuovi_7g || 0), "ultimi 7 giorni"),
       pbTessera("Operazioni aperte", nIt(op.aperte), op.in_pausa ? nIt(op.in_pausa) + " in pausa" : "nessuna in pausa"),
-      pbTessera("Valore in trattativa", eurInt(op.valore_aperto), "pesato " + eurInt(op.valore_pesato)),
-      pbTessera("Costo di oggi", eur(k.oggi.costo), compatto(k.oggi.token) + " token · media 7 giorni " + eur(media7), sparkline(g14.map(x => x.costo), PB.terra)),
-      pbTessera("Costo del mese", eur(k.mese.costo), (vc ? h("span", {}, h("b", { class: vc.su ? "bt-giu" : "bt-su" }, vc.testo), " sul mese scorso · ") : "") + compatto(k.mese.token) + " token"),
-      pbTessera("Progetti vinti", eurInt(op.valore_vinto_anno), nIt(op.vinte_anno) + " da inizio anno · totale " + eurInt(op.valore_vinto_totale) + " (" + nIt(op.vinte_totali) + ")")]);
+      pbTessera("In trattativa", eurInt(op.valore_aperto), "valore totale"),
+      pbTessera("Valore pesato", eurInt(op.valore_pesato), "sulle probabilità"),
+      pbTessera("Conversione", c.conversione != null ? nIt(c.conversione, 1) + "%" : "–", "contatto → cliente"),
+      pbTessera("Da muovere", nIt(c.da_muovere.length), nScad ? nScad + " scadute" : "nessuna scaduta"),
+      pbTessera("Perse", nIt(op.perse_90g || 0), "ultimi 90 giorni"),
+      pbTessera("Progetti vinti", eurInt(op.valore_vinto_anno), nIt(op.vinte_anno) + " da inizio anno"),
+      pbTessera("Vinti in totale", eurInt(op.valore_vinto_totale), nIt(op.vinte_totali) + " progetti"),
+      pbTessera("Costo di oggi", eur(k.oggi.costo), "media 7 gg " + eur(media7), sparkline(g14.map(x => x.costo), PB.terra)),
+      pbTessera("Token di oggi", compatto(k.oggi.token), "token usati"),
+      pbTessera("Costo del mese", eur(k.mese.costo), vc ? vc.testo + " sul mese scorso" : "mese in corso"),
+      pbTessera("Token del mese", compatto(k.mese.token), "token usati"),
+      pbTessera("Post preparati", nIt(sc0.creati), "questo mese"),
+      pbTessera("Post inviati", nIt(sc0.inviati), "questo mese"),
+      pbTessera("Post da approvare", nIt(so.da_approvare), so.da_approvare ? "in attesa di te" : "nessuno")]);
 
     const imbuto = pbScheda("Imbuto di vendita", [graficoImbuto(c.imbuto), h("p", { class: "bt-nota" }, c.conversione != null ? "Da contatto a cliente vinto: " + nIt(c.conversione, 1) + "% · perse negli ultimi 90 giorni: " + op.perse_90g : "Importa i contatti nel CRM per vedere l'imbuto.")],
       h("button", { class: "s", onclick: () => vai("crm") }, "Apri il CRM"), "bt-s4");
     const NOMI = { nuova: ["Nuova", PB.imbuto[0]], contattato: ["Contattato", PB.imbuto[1]], in_trattativa: ["In trattativa", PB.imbuto[3]], in_pausa: ["In pausa", "#9AA39E"] };
-    const tab = h("table", { class: "bt-tab" }, h("thead", {}, h("tr", {}, h("th", {}, "Fase"), h("th", {}, "Operazioni"), h("th", {}, "Valore"))),
-      h("tbody", {}, op.per_fase.map(f => h("tr", {}, h("td", {}, h("i", { class: "bt-chip", style: "background:" + NOMI[f.stato][1] }), NOMI[f.stato][0]), h("td", {}, nIt(f.n)), h("td", {}, eurInt(f.valore))))));
-    const mov = c.da_muovere.length ? [h("div", { class: "bt-cap", style: "margin-top:18px" }, "Da muovere questa settimana"), c.da_muovere.map(m => h("div", { class: "bt-riga-mov" }, h("span", {}, m.titolo),
+    const tab = h("div", { class: "bt-minis" }, op.per_fase.map(f => h("div", { class: "bt-mini", title: NOMI[f.stato][0] }, h("div", { class: "bt-cap" }, h("i", { class: "bt-chip", style: "background:" + NOMI[f.stato][1] }), NOMI[f.stato][0]), h("b", {}, nIt(f.n)), h("span", {}, eurInt(f.valore)))));
+    const mov = c.da_muovere.length ? [h("div", { class: "bt-cap", style: "margin-top:8px" }, "Da muovere questa settimana"), c.da_muovere.map(m => h("div", { class: "bt-riga-mov" }, h("span", {}, m.titolo),
       h("span", { class: "bt-tag" + (m.giorni > 0 ? " rosso" : "") }, m.giorni > 0 ? "scaduta da " + m.giorni + (m.giorni === 1 ? " giorno" : " giorni") : m.giorni === 0 ? "scade oggi" : "scade tra " + (-m.giorni) + " giorni")))] : null;
     const operazioni = pbScheda("Operazioni commerciali aperte", [tab, mov], h("button", { class: "s", onclick: () => vai("crm") }, "Apri"), "bt-s4");
 
@@ -227,7 +238,7 @@ function vistaDashboard() {
   carica(); caricaRichieste(); caricaIniziative(); caricaProgetti();
   stato.timer2 = setInterval(() => { attesa++; caricaRichieste(); caricaIniziative(); if (attesa % 4 === 0) { caricaProgetti(); daFare.ricarica(); } if (attesa % 20 === 0) carica(); }, 3000);
 
-  return h("div", { class: "bt-plancia" },
+  return h("div", { class: "bt-plancia bt-fitta" },
     h("div", { class: "bt-intesta" }, h("div", {}, h("div", { class: "bt-cap" }, new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })), titolo),
       h("div", { class: "bt-azioni" }, h("button", { class: "s", onclick: apriOrganigramma }, "Organigramma 3D ↗"), bottoneAllinea(), h("button", { class: "s", onclick: () => vai("task") }, "Task"), h("button", { class: "p", onclick: () => vai("riunioni") }, "Avvia una riunione"))),
     kpi, riga1, riga2,

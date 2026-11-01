@@ -41,11 +41,11 @@ with TestClient(app) as c:
     ok("gestione senza token -> 401", c.get("/gestione/agenti").status_code == 401)
     ok("gestione per collaboratore -> 403", c.get("/gestione/agenti", headers=HS).status_code == 403)
     ag = c.get("/gestione/agenti", headers=H).json()
-    ok("gestione elenca 18 agenti con i nuovi campi", len(ag) == 18 and "max_token_risposta" in ag[0] and "token_mese" in ag[0])
+    ok("gestione elenca 22 agenti con i nuovi campi", len(ag) == 22 and "max_token_risposta" in ag[0] and "token_mese" in ag[0])
     scout = next(a for a in ag if a["nome"] == "Scout")
     ok("Scout ha accesso al web di default", scout["accesso_web"] is True)
     op = c.get("/gestione/opzioni", headers=H).json()
-    ok("opzioni: 8 modelli, 4 divisioni, 3 fornitori", (len(op["modelli"]), len(op["divisioni"]), len(op["fornitori"])) == (8, 4, 3))
+    ok("opzioni: 8 modelli, 5 divisioni, 3 fornitori", (len(op["modelli"]), len(op["divisioni"]), len(op["fornitori"])) == (8, 5, 3))
 
     nuovo = dict(nome="Canvas", ruolo="Grafico", divisione_id=2, superiore_id=7, livello="operativo", modello="claude-haiku-5-5",
                  istruzioni="Prepari bozze grafiche.", fascia_dati_max="pubblico", max_token_risposta=700, budget_token_mensile=500,

@@ -93,7 +93,7 @@ const VISTE_COLLABORATORE = [["task", "Task"], ["progetti", "Progetti"], ["inizi
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Collegamenti (Google, posta)"], ["connessioni", "Connessioni a siti e app"], ["siti", "Siti e hosting (chiavi)"],
   ["canali", "Canali (Telegram)"], ["social", "Social"], ["monitorsocial", "Profili social monitorati"], ["archivio", "Archivio NAS"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["imprese", "Schede d'impresa"], ["tavoli", "Tavoli di lavoro"], ["noteaurora", "Note di Aurora"], ["miglioramenti", "Miglioramento degli agenti"], ["spesareparti", "Spesa per reparto"], ["dipendenze", "Controllo delle librerie"], ["diagnostica", "Diagnostica (log scaricabile)"], ["esempio", "Impara da un esempio"], ["memoriavett", "Memoria condivisa (vettoriale)"], ["giro", "Giro di aggiornamento"], ["contenuti", "Contenuti: brief e stili di montaggio"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["misure", "Consumi (dove vanno i token)"], ["sistema", "Backup e costi"]];
 
-function vai(vista, sezione) { if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") Voce.fermaTutto(); stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
+function vai(vista, sezione) { if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") { try { Voce.fermaTutto(); } catch (e) { /* la voce non deve mai impedire di cambiare pagina */ } } stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
 function cornice(contenuto) {
   if (window.name === "opifex-organigramma" || location.hash === "#organigramma") {   // finestra a parte: solo l'organigramma
@@ -154,7 +154,15 @@ function disegna() {
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
   if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
   const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
-  cornice(vista());
+  let contenuto;
+  try { contenuto = vista(); }
+  catch (e) {   // una schermata che si rompe non deve bloccare il menu: si mostra l'errore e si puo' andare altrove
+    if (typeof registraUso === "function") registraUso(etichettaVista(), "errore");
+    if (stato.vista === "impostazioni") stato.sezione = "profilo";
+    contenuto = h("div", { class: "carta" }, avviso("Questa schermata non si è aperta (" + (e && e.message ? e.message : "errore") + "). Scegli un'altra voce dal menu: il resto funziona.", "no"),
+      h("button", { class: "s", type: "button", onclick: () => vai("dashboard") }, "Torna alla plancia"));
+  }
+  cornice(contenuto);
 }
 
 // I fornitori fatturano in dollari: si mostrano in euro con il cambio impostato in Backup e costi.
