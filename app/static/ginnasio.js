@@ -23,6 +23,22 @@ function riempiConservando(el, contenuto) {
 }
 
 // Riquadro «Ora sta formando»: titolo, per chi, tappa, ultima azione e cosa c'e' dopo; si aggiorna da solo
+// Documenti scaricati che non hanno ancora destinatari: Padre Casati li associa ai colleghi giusti
+function riquadroAssegna() {
+  const box = h("div", { class: "carta", style: "margin-bottom:12px" });
+  const msg = h("div", { class: "sotto" });
+  const b = h("button", { class: "s", type: "button" }, "Fai assegnare i documenti a Padre Casati");
+  b.onclick = async () => {
+    b.disabled = true;
+    try { await api("POST", "/gestione/ginnasio/assegna-documenti"); msg.textContent = "Padre Casati ci sta lavorando: tra qualche minuto i documenti avranno i loro destinatari (li vedi in Sapere → Documenti)."; }
+    catch (e) { msg.textContent = e.message; b.disabled = false; }
+  };
+  api("GET", "/gestione/ginnasio/documenti-da-assegnare").then(r => {
+    box.replaceChildren(h("div", {}, r.n ? r.n + " documenti scaricati non sono ancora associati a nessun agente. Succede da solo ogni 6 ore; qui puoi farlo subito." : "Tutti i documenti hanno già dei destinatari."), r.n ? b : null, msg);
+  }).catch(() => {});
+  return box;
+}
+
 function bannerCasati() {
   const box = h("div", { class: "carta", style: "margin-bottom:12px" }, h("div", { class: "sotto" }, "Padre Casati: carico lo stato…"));
   let timer = null, firma = null;
@@ -141,6 +157,7 @@ function vistaGinnasio() {
   return [h("h2", {}, "Ginnasio"),
     h("p", { class: "aiuto" }, "A sinistra Padre Casati studia e custodisce la biblioteca; a destra forma gli agenti: ogni competenza ha cinque livelli (Junior, Medium, Senior, Expert, Master) e arriva a un agente solo dopo la tua approvazione. Si procede piano, nei limiti del budget giornaliero."),
     bannerCasati(),
+    riquadroAssegna(),
     h("div", { class: "ginnasio" }, h("section", {}, sinistra), h("section", {}, destra))];
 }
 

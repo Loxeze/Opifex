@@ -206,3 +206,19 @@ def togli(agente_id: int, competenza_id: int, _: dict = Depends(solo_titolare)):
     with connessione() as conn:
         g.togli(conn, agente_id, competenza_id)
     return {"ok": True}
+
+
+@router.get("/documenti-da-assegnare")
+def documenti_da_assegnare(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return {"n": g.conta_da_assegnare(conn)}
+
+
+@router.post("/assegna-documenti")
+def assegna_documenti(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        try:
+            g.avvia_assegnazione(conn)
+        except g.ErroreGinnasio as e:
+            _err(e)
+    return {"ok": True}

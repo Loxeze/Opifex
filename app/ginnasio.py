@@ -206,8 +206,34 @@ def prossima_eseguibile(conn) -> dict | None:
     return None
 
 
+RUNNING: set = set()      # formazioni che hanno davvero un lavoro attivo in questo processo
+MAX_RIPRESE = 3
+
+
+def recupera(conn) -> int:
+    """Una formazione 'in corso' senza un lavoro attivo e' rimasta orfana (riavvio o aggiornamento mentre lavorava): prima restava ferma per sempre
+    e bloccava tutte le altre. Ora torna in coda (gli appunti gia' scritti restano) e riparte; dopo MAX_RIPRESE tentativi va in errore, visibile."""
+    n = 0
+    for r in conn.execute("SELECT id, competenza_nome, riprese FROM richieste_formazione WHERE stato = 'in_corso' AND (avviata_il IS NULL OR avviata_il < NOW() - INTERVAL '2 minutes')").fetchall():
+        if r["id"] in RUNNING:
+            continue
+        if r["riprese"] + 1 >= MAX_RIPRESE:
+            conn.execute("UPDATE richieste_formazione SET stato = 'errore', errore = %s, conclusa_il = NOW() WHERE id = %s",
+                         ("Interrotta piu' volte (riavvii del server): premi Riprova quando il sistema e' stabile", r["id"]))
+            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"La formazione «{r['competenza_nome']}» si e' interrotta piu' volte: puoi riprovarla dal Ginnasio.",))
+        else:
+            conn.execute("UPDATE richieste_formazione SET stato = 'in_coda', riprese = riprese + 1 WHERE id = %s", (r["id"],))
+            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"La formazione «{r['competenza_nome']}» era rimasta ferma dopo un riavvio: l'ho rimessa in coda e riparte da sola.",))
+        n += 1
+    return n
+
+
 def giro(conn):
     """Chiamato dal lavoro di fondo: se attivo e senza formazioni in corso, avvia la prima della graduatoria che sta nel budget di oggi."""
+    recupera(conn)
+    conn.commit()
+    assegna_auto(conn)
+    conn.commit()
     s = stato_generale(conn)
     if not s["attivo"] or s["in_corso"]:
         return
@@ -216,6 +242,53 @@ def giro(conn):
         conn.execute("UPDATE richieste_formazione SET stato = 'in_corso', avviata_il = NOW() WHERE id = %s AND stato = 'in_coda'", (r["id"],))
         conn.commit()
         avvia(r["id"])
+
+
+def conta_da_assegnare(conn) -> int:
+    return conn.execute("""SELECT count(*) AS n FROM documenti d WHERE d.biblioteca AND NOT d.per_tutti AND (d.tipo_doc = 'studio' OR (d.tipo_doc = 'dispensa' AND d.stato_dispensa = 'approvata'))
+                           AND NOT EXISTS (SELECT 1 FROM documenti_agenti x WHERE x.documento_id = d.id)""").fetchone()["n"]
+
+
+def _assegna_lavoro():
+    from . import casati
+    from .esecuzione import esegui_agente
+    try:
+        with connessione() as conn:
+            cas = conn.execute("SELECT id FROM agenti WHERE ruolo_speciale = 'formatore' AND attivo LIMIT 1").fetchone()
+        if cas:
+            esegui_agente(cas["id"], casati.PROMPT_ASSEGNA, "interno", None, max_token=3000)
+    except Exception as e:  # noqa: BLE001
+        pass   # si vedra' dal fatto che i documenti restano senza destinatari
+
+
+def avvia_assegnazione(conn) -> bool:
+    """Padre Casati associa ai colleghi i documenti della biblioteca che non hanno destinatari (in base a ruolo, reparto e competenze)."""
+    if not conn.execute("SELECT 1 FROM agenti WHERE ruolo_speciale = 'formatore' AND attivo").fetchone():
+        raise ErroreGinnasio("Padre Casati non e' attivo")
+    imposta(conn, "casati_assegna_ultima", str(int(time.time())))
+    if SINCRONO:
+        _assegna_lavoro()
+    else:
+        threading.Thread(target=_assegna_lavoro, daemon=True).start()
+    return True
+
+
+def assegna_auto(conn):
+    """Ogni 6 ore al massimo, se ci sono documenti senza destinatari e Casati non sta formando."""
+    if impostazione(conn, "casati_assegna_auto", "1") != "1" or conta_da_assegnare(conn) == 0:
+        return
+    if conn.execute("SELECT 1 FROM richieste_formazione WHERE stato = 'in_corso'").fetchone():
+        return
+    try:
+        ultima = int(impostazione(conn, "casati_assegna_ultima", "0") or 0)
+    except ValueError:
+        ultima = 0
+    if time.time() - ultima < 6 * 3600:
+        return
+    try:
+        avvia_assegnazione(conn)
+    except ErroreGinnasio:
+        pass
 
 
 def avvia_manuale(conn, rid: int):
@@ -311,11 +384,20 @@ def adesso(conn) -> dict:
     return out
 
 
-def avvia(rid: int):
-    if SINCRONO:
+def _con_traccia(rid: int):
+    RUNNING.add(rid)
+    try:
         _lavora(rid)
+    finally:
+        RUNNING.discard(rid)
+
+
+def avvia(rid: int):
+    RUNNING.add(rid)   # subito: il recupero non deve scambiarla per orfana
+    if SINCRONO:
+        _con_traccia(rid)
     else:
-        threading.Thread(target=_lavora, args=(rid,), daemon=True).start()
+        threading.Thread(target=_con_traccia, args=(rid,), daemon=True).start()
 
 
 def _contesto_richiesta(conn, r: dict) -> str:
