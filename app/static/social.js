@@ -2,7 +2,7 @@
 // Social: collegamento diretto alle reti e coda dei post preparati dagli agenti, da approvare prima della pubblicazione.
 // Tutti i testi arrivano dall'API e vengono inseriti come testo, mai come HTML.
 
-const STATI_POST = { da_approvare: ["Da approvare", "avv"], inviato: ["Inviato", "ok"], programmato: ["Programmato", "avv"], in_pubblicazione: ["In pubblicazione…", "avv"], pubblicato: ["Pubblicato", "ok"], rifiutato: ["Rifiutato", "no"], errore: ["Errore", "no"] };
+const STATI_POST = { da_approvare: ["Da approvare", "avv"], inviato: ["Inviato a Buffer", "ok"], programmato: ["Programmato", "avv"], in_pubblicazione: ["In pubblicazione…", "avv"], pubblicato: ["Pubblicato", "ok"], rifiutato: ["Rifiutato", "no"], errore: ["Errore", "no"] };
 const quandoS = (t) => t ? new Date(t).toLocaleString("it-IT", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "appena approvato";
 const perInput = (t) => { const d = new Date(t); const p = (n) => String(n).padStart(2, "0"); return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes()); };
 
@@ -131,18 +131,43 @@ function schedaApp(p, ricarica) {
     }));
 }
 async function schedaCanali(corpo, apri) {
-  const st = await api("GET", "/gestione/social-nativo/stato");
+  const [st, bf] = await Promise.all([api("GET", "/gestione/social-nativo/stato"), api("GET", "/gestione/social/buffer").catch(() => ({ collegato: false, canali: [] }))]);
   const ricarica = () => schedaCanali(corpo, apri);
   const esito = st.esito ? (st.esito.startsWith("ok:") ? avviso(st.esito.slice(3), "ok") : avviso(st.esito, "no")) : null;
   riempi(corpo, [esito, h("p", { class: "aiuto" }, "Ogni rete richiede una piccola app registrata sul suo portale per sviluppatori (una volta sola, gratuita). Opifex pubblica e raccoglie i risultati direttamente, senza limiti di canali. Gli agenti preparano i post, ma pubblichi solo tu con l'approvazione."),
     st.provider.map(p => schedaApp(p, ricarica)),
+    h("h3", {}, "Buffer: per i profili che non si collegano direttamente"),
+    h("p", { class: "aiuto" }, "Instagram e Facebook personali non si possono collegare con il login diretto: passano da Buffer. I canali collegati a Buffer compaiono accanto agli altri in «Scrivi e pubblica» e per gli agenti; i risultati dettagliati restano solo per i canali diretti."),
+    schedaBuffer(bf, ricarica),
     h("h3", {}, "A chi serve ogni canale"), boxCanali(ricarica)]);
+}
+
+function schedaBuffer(bf, ricarica) {
+  const msg = h("div");
+  if (bf.collegato) {
+    return h("div", { class: "carta" }, h("div", { class: "nome" }, "Buffer collegato"),
+      bf.errore ? avviso(bf.errore, "no") : null,
+      bf.canali.length ? h("p", { class: "aiuto" }, "Canali: " + bf.canali.map(c => c.name + " (" + c.service + ")").join(", "))
+        : h("p", { class: "aiuto" }, "Nessun canale: collegali dentro Buffer (Instagram, Facebook, LinkedIn, TikTok…)."),
+      h("p", { class: "aiuto" }, "Per far preparare post a un agente, accendi «Può preparare post per i social» nella sua scheda: restano in attesa del tuo OK."),
+      msg, h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => {
+        if (!confirm("Scollegare Buffer?")) return;
+        try { await api("DELETE", "/gestione/social/buffer"); ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Scollega Buffer")));
+  }
+  const chiave = h("input", { type: "password", autocomplete: "off", placeholder: "Chiave API di Buffer" });
+  return h("div", { class: "carta" }, h("div", { class: "nome" }, "Collega Buffer"),
+    h("p", { class: "aiuto" }, "Non basta il login a Buffer: serve una chiave API. In Buffer clicca l'icona del profilo in basso a sinistra → «API» (oppure vai su publish.buffer.com/settings/api) → scheda «Personal Access» → «+ New Key». Incollala qui sotto: viene cifrata e non verrà più mostrata. Gli agenti non pubblicano mai da soli."),
+    h("label", {}, "Chiave API", chiave), msg,
+    h("div", { class: "azioni" }, h("button", { class: "p", onclick: async (ev) => {
+      const b = ev.currentTarget; b.disabled = true; msg.replaceChildren();
+      try { await api("PUT", "/gestione/social/buffer", { chiave: chiave.value.trim() }); ricarica(); }
+      catch (e) { msg.replaceChildren(avviso(e.message, "no")); b.disabled = false; } } }, "Collega e verifica")));
 }
 
 // ---------- scrivi e pubblica ----------
 async function schedaPubblica(corpo, apri) {
-  const st = await api("GET", "/gestione/social-nativo/stato");
-  const canali = st.provider.flatMap(p => p.account.flatMap(a => a.canali.filter(c => c.attivo)));
+  const [st, bf] = await Promise.all([api("GET", "/gestione/social-nativo/stato"), api("GET", "/gestione/social/buffer").catch(() => ({ collegato: false, canali: [] }))]);
+  const canali = st.provider.flatMap(p => p.account.flatMap(a => a.canali.filter(c => c.attivo))).concat((bf.canali || []).map(c => ({ id: "b:" + c.id, nome: c.name, rete: c.service + " via Buffer", buffer: true })));
   if (!canali.length) return riempi(corpo, [h("p", { class: "sotto" }, "Nessun canale collegato: collega prima almeno una rete."), h("button", { class: "p", type: "button", onclick: () => { stato.sezione = "social"; vai("impostazioni", "social"); } }, "Vai ai collegamenti")]);
   const msg = h("div"); const testo = h("textarea", { style: "min-height:130px" }); const conta = h("span", { class: "sotto" });
   const sel = canali.map(c => { const x = h("input", { type: "checkbox" }); return [c, x]; });
@@ -162,12 +187,15 @@ async function schedaPubblica(corpo, apri) {
   };
   const invia = async (ev) => {
     const b = ev.currentTarget; msg.replaceChildren();
-    const scelti = sel.filter(([, x]) => x.checked).map(([c]) => "n:" + c.id);
-    if (!scelti.length) return msg.replaceChildren(avviso("Scegli almeno un canale", "no"));
+    const scelti = sel.filter(([, x]) => x.checked).filter(([c]) => !c.buffer).map(([c]) => "n:" + c.id);
+    const viaBuffer = sel.filter(([, x]) => x.checked).filter(([c]) => c.buffer).map(([c]) => c.id.slice(2));
+    if (!scelti.length && !viaBuffer.length) return msg.replaceChildren(avviso("Scegli almeno un canale", "no"));
     if (url.value.trim()) { media.push({ tipo: /\.(mp4|mov|m4v)(\?|$)/i.test(url.value) ? "video" : "image", url: url.value.trim() }); url.value = ""; disegna(); }
     b.disabled = true;
     try {
-      await api("POST", "/gestione/social-nativo/post", { canali: scelti, testo: testo.value, media, programmato_il: quando.value ? new Date(quando.value).toISOString() : null });
+      const prog = quando.value ? new Date(quando.value).toISOString() : null;
+      if (scelti.length) await api("POST", "/gestione/social-nativo/post", { canali: scelti, testo: testo.value, media, programmato_il: prog });
+      for (const cid of viaBuffer) await api("POST", "/gestione/social/buffer/post", { canale_id: cid, testo: testo.value, media, programmato_il: prog });
       testo.value = ""; media.length = 0; disegna(); quando.value = ""; sel.forEach(([, x]) => x.checked = false); agg();
       msg.replaceChildren(avviso(quando.value || scelti.length ? "Fatto. Lo trovi in «Post e approvazioni»: lo stato passa da «In pubblicazione» a «Pubblicato» entro qualche minuto." : "Fatto", "ok"));
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }

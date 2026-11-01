@@ -345,7 +345,7 @@ with TestClient(app) as c:
     with __import__("app.db", fromlist=["x"]).connessione() as conn:
         rin = {p_: sn.token(conn, sql("SELECT id FROM account_social WHERE provider=%s", (p_,))[0][0]) for p_ in ("youtube", "threads", "x")}
     ok("token scaduti: rinnovati da soli (Google, Threads, X)", rin == {"youtube": "yt-nuovo", "threads": "th-rinnovato", "x": "xt-nuovo"}, str(rin))
-    ok("Buffer non esiste piu': nessuna rotta e nessun modulo", c.get("/gestione/social/buffer", headers=H).status_code in (404, 405) and not __import__("importlib").util.find_spec("app.buffer"))
+    ok("Buffer e' un'alternativa: spento di default, non nasconde i canali diretti", c.get("/gestione/social/buffer", headers=H).json()["collegato"] is False and len(c.get("/gestione/social/canali", headers=H).json()["canali"]) >= 1)
     # ---- scollegare
     aid = sql("SELECT id FROM account_social WHERE provider='pinterest'")[0][0]
     ok("scollegare: sparisce l'account e i canali, i post restano", c.delete(f"/gestione/social-nativo/account/{aid}", headers=H).status_code == 200 and sql("SELECT count(*) FROM canali_nativi WHERE rete='pinterest'")[0][0] == 0 and sql("SELECT count(*) FROM post_social WHERE id=%s", (pp,))[0][0] == 1)

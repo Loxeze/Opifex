@@ -361,8 +361,15 @@ def id_canale(cid: str) -> int | None:
 
 
 def canali_unificati(conn) -> list[dict]:
-    """Canali collegati, nel formato usato dai post: id, name, service."""
-    return [{"id": f"n:{c['id']}", "name": c["nome"], "service": c["rete"], "nativo": True} for c in canali_elenco(conn)]
+    """Canali diretti + canali Buffer (se collegato), nel formato usato dai post: id, name, service."""
+    out = [{"id": f"n:{c['id']}", "name": c["nome"], "service": c["rete"], "nativo": True} for c in canali_elenco(conn)]
+    try:
+        from . import buffer
+        if buffer.collegato(conn):
+            out += [dict(x, nativo=False) for x in buffer.canali(conn)]
+    except Exception:  # noqa: BLE001 - Buffer spento o irraggiungibile non deve nascondere i canali diretti
+        pass
+    return out
 
 
 # ---------- pubblicazione ----------

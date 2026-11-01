@@ -3,6 +3,7 @@ import json
 
 from . import social_nativo
 from .social_nativo import ErroreSocial
+from .buffer import ErroreBuffer
 
 
 def canali_per_agente(conn, agente_id: int) -> list[dict]:
@@ -72,8 +73,12 @@ def gestore(conn, agente_id: int):
                         return "ERRORE: data non valida (usa il formato 2026-11-05T10:30:00+01:00)"
                     if quando.tzinfo is None:
                         return "ERRORE: indica anche il fuso orario nella data"
-                media = social_nativo._media(d.get("media"), ch["service"])
-                social_nativo.verifica_post(ch["service"], testo, media)
+                if social_nativo.id_canale(cid) is not None:
+                    media = social_nativo._media(d.get("media"), ch["service"])
+                    social_nativo.verifica_post(ch["service"], testo, media)
+                else:   # canale Buffer
+                    from . import buffer
+                    media = buffer.valida_media(d.get("media"))
                 pid = conn.execute(
                     """INSERT INTO post_social (agente_id, canale_id, canale_nome, servizio, testo, media, programmato_il)
                        VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s) RETURNING id""",
@@ -82,7 +87,7 @@ def gestore(conn, agente_id: int):
                 conn.commit()
                 return f"Post n. {pid} preparato per {ch['name']}: e' in attesa di approvazione di Lorenzo (pagina Social)."
             return "Strumento sconosciuto"
-        except (ErroreSocial) as e:
+        except (ErroreSocial, ErroreBuffer) as e:
             conn.rollback()
             return "ERRORE: " + str(e)
         except Exception as e:

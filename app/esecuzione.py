@@ -300,7 +300,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                        if a["fornitore"] in STRUMENTI_FORNITORI and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
                                                                         a["non_conservazione_attiva"], a["dpa_firmato"])[0] else None)
             posta_tool = bool(posta_c)
-            social_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["social_attivo"] and __import__("app.social_nativo", fromlist=["x"]).ha_canali(conn))
+            social_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["social_attivo"] and (__import__("app.social_nativo", fromlist=["x"]).ha_canali(conn) or __import__("app.buffer", fromlist=["x"]).collegato(conn)))
             mem_tool = bool(ok_int)   # lo strumento di memoria si aggiunge agli agenti che usano comunque degli strumenti
             email_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["email_attivo"] and brevo_email.collegato(conn))
             crm_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["crm_attivo"])
