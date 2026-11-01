@@ -24,7 +24,7 @@ def _scelta(insieme):
     return f
 
 
-CHIAVI = {"stile": _scelta(STILI), "sfondo": _scelta(SFONDI), "vetro": lambda v: _numero(v, 0.3, 0.75)}
+CHIAVI = {"aspetto": _scelta({"bottega", "bronzo"}), "stile": _scelta(STILI), "sfondo": _scelta(SFONDI), "vetro": lambda v: _numero(v, 0.3, 0.75)}
 
 
 class Valore(BaseModel):

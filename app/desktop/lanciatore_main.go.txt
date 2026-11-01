@@ -1,0 +1,381 @@
+//go:build windows
+
+// Opifex · Archivio: app per Windows. Prepara da sola Python e i componenti (solo al primo avvio), a ogni apertura controlla
+// su Opifex se ci sono aggiornamenti (del programma dell'indice e di questo stesso eseguibile) e apre una finestra propria.
+package main
+
+import (
+	"archive/zip"
+	"bufio"
+	"crypto/sha256"
+	_ "embed"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+	"unsafe"
+)
+
+//go:embed indice.py
+var indicePy []byte
+
+const (
+	versione   = 2 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
+	urlPredef  = "https://app.opifex.space"
+	porta      = "8765"
+	pyZipURL   = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip"
+	getPipURL  = "https://bootstrap.pypa.io/get-pip.py"
+	revIniziale = 1
+)
+
+var pacchettiIniziali = []string{"numpy", "pillow", "pypdf", "imageio-ffmpeg", "faster-whisper", "open_clip_torch"}
+
+type manifesto struct {
+	Opifex    string `json:"opifex"`
+	Requisiti *struct {
+		Rev       int      `json:"rev"`
+		Pacchetti []string `json:"pacchetti"`
+	} `json:"requisiti"`
+	Indice *struct {
+		Sha256 string `json:"sha256"`
+		URL    string `json:"url"`
+	} `json:"indice"`
+	Lanciatore *struct {
+		Versione int    `json:"versione"`
+		Sha256   string `json:"sha256"`
+		URL      string `json:"url"`
+	} `json:"lanciatore"`
+}
+
+var (
+	user32      = syscall.NewLazyDLL("user32.dll")
+	kernel32    = syscall.NewLazyDLL("kernel32.dll")
+	msgBox      = user32.NewProc("MessageBoxW")
+	showWindow  = user32.NewProc("ShowWindow")
+	getConsole  = kernel32.NewProc("GetConsoleWindow")
+	consoleVisi = true
+)
+
+func avviso(titolo, testo string) {
+	t, _ := syscall.UTF16PtrFromString(testo)
+	c, _ := syscall.UTF16PtrFromString(titolo)
+	msgBox.Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(c)), 0x40)
+}
+
+func nascondiConsole() {
+	if h, _, _ := getConsole.Call(); h != 0 {
+		showWindow.Call(h, 0)
+		consoleVisi = false
+	}
+}
+
+func attendi() {
+	if consoleVisi {
+		fmt.Println("\nPremi Invio per chiudere.")
+		bufio.NewReader(os.Stdin).ReadString('\n')
+	}
+}
+
+func muori(msg string, err error) {
+	d := ""
+	if err != nil {
+		d = fmt.Sprintf("\n\nDettaglio: %v", err)
+	}
+	if consoleVisi {
+		fmt.Printf("\nERRORE: %s%s\nControlla la connessione a internet e riprova: il lavoro gia' fatto non va perso.\n", msg, d)
+		attendi()
+	} else {
+		avviso("Opifex · Archivio", msg+d)
+	}
+	os.Exit(1)
+}
+
+func scarica(url, dest string, timeout time.Duration) error {
+	c := &http.Client{Timeout: timeout}
+	r, err := c.Get(url)
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+	if r.StatusCode != 200 {
+		return fmt.Errorf("risposta %s", r.Status)
+	}
+	f, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(f, r.Body)
+	return err
+}
+
+func shaFile(p string) string {
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}
+
+func estrai(zipPath, dest string) error {
+	z, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return err
+	}
+	defer z.Close()
+	for _, f := range z.File {
+		p := filepath.Join(dest, f.Name)
+		if !strings.HasPrefix(p, filepath.Clean(dest)+string(os.PathSeparator)) {
+			continue
+		}
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(p, 0o755)
+			continue
+		}
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		in, err := f.Open()
+		if err != nil {
+			return err
+		}
+		out, err := os.Create(p)
+		if err != nil {
+			in.Close()
+			return err
+		}
+		io.Copy(out, in)
+		in.Close()
+		out.Close()
+	}
+	return nil
+}
+
+func esegui(py string, args ...string) error {
+	c := exec.Command(py, args...)
+	c.Stdout, c.Stderr, c.Stdin = os.Stdout, os.Stderr, os.Stdin
+	return c.Run()
+}
+
+func haNvidia() bool { return exec.Command("nvidia-smi").Run() == nil }
+
+func leggiRev(p string) int {
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return 0
+	}
+	var n int
+	fmt.Sscanf(strings.TrimSpace(string(b)), "%d", &n)
+	return n
+}
+
+func prendiManifesto(base string) (*manifesto, string) {
+	url := urlPredef
+	var cf struct {
+		URL string `json:"opifex_url"`
+	}
+	if b, err := os.ReadFile(filepath.Join(base, "config.json")); err == nil && json.Unmarshal(b, &cf) == nil && cf.URL != "" {
+		url = strings.TrimRight(cf.URL, "/")
+	}
+	if !strings.HasPrefix(url, "https://") {
+		return nil, url
+	}
+	c := &http.Client{Timeout: 6 * time.Second}
+	r, err := c.Get(url + "/desktop/manifesto")
+	if err != nil {
+		return nil, url
+	}
+	defer r.Body.Close()
+	if r.StatusCode != 200 {
+		return nil, url
+	}
+	var m manifesto
+	if json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&m) != nil {
+		return nil, url
+	}
+	return &m, url
+}
+
+// aggiorna l'eseguibile: lo sostituisce (Windows permette di rinominare un programma in esecuzione) e lo riavvia
+func aggiornaMe(base, url string, m *manifesto) {
+	if m.Lanciatore == nil || m.Lanciatore.Versione <= versione || !strings.HasPrefix(m.Lanciatore.URL, "/desktop/") {
+		return
+	}
+	me, err := os.Executable()
+	if err != nil {
+		return
+	}
+	nuovo := filepath.Join(base, "nuovo.exe")
+	if scarica(url+m.Lanciatore.URL, nuovo, 5*time.Minute) != nil || shaFile(nuovo) != m.Lanciatore.Sha256 {
+		os.Remove(nuovo)
+		return
+	}
+	vecchio := me + ".vecchio"
+	os.Remove(vecchio)
+	if os.Rename(me, vecchio) != nil {
+		return
+	}
+	b, _ := os.ReadFile(nuovo)
+	if os.WriteFile(me, b, 0o755) != nil {
+		os.Rename(vecchio, me)
+		return
+	}
+	os.Remove(nuovo)
+	exec.Command(me, os.Args[1:]...).Start()
+	os.Exit(0)
+}
+
+func installaPacchetti(py string, pk []string) error {
+	return esegui(py, append([]string{"-m", "pip", "install", "--no-warn-script-location", "--upgrade"}, pk...)...)
+}
+
+func browserApp() string {
+	cand := []string{
+		os.Getenv("ProgramFiles(x86)") + `\Microsoft\Edge\Application\msedge.exe`,
+		os.Getenv("ProgramFiles") + `\Microsoft\Edge\Application\msedge.exe`,
+		os.Getenv("ProgramFiles") + `\Google\Chrome\Application\chrome.exe`,
+		os.Getenv("ProgramFiles(x86)") + `\Google\Chrome\Application\chrome.exe`,
+		os.Getenv("LOCALAPPDATA") + `\Google\Chrome\Application\chrome.exe`,
+	}
+	for _, c := range cand {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
+func inAscolto() bool {
+	c := &http.Client{Timeout: 800 * time.Millisecond}
+	r, err := c.Get("http://127.0.0.1:" + porta + "/api/vivo")
+	if err != nil {
+		return false
+	}
+	r.Body.Close()
+	return r.StatusCode == 200
+}
+
+func apriFinestra(base string) {
+	u := "http://127.0.0.1:" + porta + "/"
+	if b := browserApp(); b != "" {
+		exec.Command(b, "--app="+u, "--user-data-dir="+filepath.Join(base, "finestra"), "--window-size=1180,860", "--no-first-run", "--no-default-browser-check").Start()
+		return
+	}
+	exec.Command("rundll32", "url.dll,FileProtocolHandler", u).Start()
+}
+
+func main() {
+	base := filepath.Join(os.Getenv("LOCALAPPDATA"), "IndiceArchivio")
+	pyDir := filepath.Join(base, "py")
+	py := filepath.Join(pyDir, "python.exe")
+	os.MkdirAll(base, 0o755)
+	if me, err := os.Executable(); err == nil {
+		os.Remove(me + ".vecchio")
+	}
+	marca := filepath.Join(base, "pronto-2")
+	_, errPronto := os.Stat(marca)
+	if errPronto == nil {
+		nascondiConsole()
+	} else {
+		fmt.Println("=== Opifex · Archivio ===")
+	}
+
+	m, url := prendiManifesto(base)
+	if m != nil {
+		aggiornaMe(base, url, m)
+	}
+
+	if errPronto != nil {
+		fmt.Println("Primo avvio: preparo tutto da solo. Ci vogliono alcuni minuti e qualche GB di scaricamento (una volta sola).")
+		if _, err := os.Stat(py); err != nil {
+			zp := filepath.Join(base, "python.zip")
+			if err := scarica(pyZipURL, zp, 20*time.Minute); err != nil {
+				muori("non riesco a scaricare Python", err)
+			}
+			if err := estrai(zp, pyDir); err != nil {
+				muori("non riesco a preparare Python", err)
+			}
+			os.Remove(zp)
+			pth, _ := filepath.Glob(filepath.Join(pyDir, "python*._pth"))
+			for _, p := range pth {
+				b, _ := os.ReadFile(p)
+				os.WriteFile(p, []byte(strings.ReplaceAll(string(b), "#import site", "import site")), 0o644)
+			}
+		}
+		gp := filepath.Join(base, "get-pip.py")
+		if err := scarica(getPipURL, gp, 5*time.Minute); err != nil {
+			muori("non riesco a scaricare pip", err)
+		}
+		if err := esegui(py, gp, "--no-warn-script-location"); err != nil {
+			muori("installazione di pip non riuscita", err)
+		}
+		if haNvidia() {
+			fmt.Println("Scheda NVIDIA trovata: installo PyTorch con supporto alla scheda (e' il pezzo piu' grande).")
+			if err := esegui(py, "-m", "pip", "install", "--no-warn-script-location", "torch", "--index-url", "https://download.pytorch.org/whl/cu124"); err != nil {
+				fmt.Println("Versione con scheda non riuscita: provo quella normale.")
+			}
+		}
+		pk, rev := pacchettiIniziali, revIniziale
+		if m != nil && m.Requisiti != nil && len(m.Requisiti.Pacchetti) > 0 {
+			pk, rev = m.Requisiti.Pacchetti, m.Requisiti.Rev
+		}
+		if err := installaPacchetti(py, pk); err != nil {
+			muori("installazione dei pacchetti non riuscita", err)
+		}
+		os.WriteFile(filepath.Join(base, "requisiti.rev"), []byte(fmt.Sprint(rev)), 0o644)
+		os.WriteFile(marca, []byte(time.Now().String()), 0o644)
+		fmt.Println("Preparazione finita.")
+		nascondiConsole()
+	} else if m != nil && m.Requisiti != nil && m.Requisiti.Rev > leggiRev(filepath.Join(base, "requisiti.rev")) {
+		// Opifex ha cambiato i componenti necessari: li aggiorno una volta
+		if installaPacchetti(py, m.Requisiti.Pacchetti) == nil {
+			os.WriteFile(filepath.Join(base, "requisiti.rev"), []byte(fmt.Sprint(m.Requisiti.Rev)), 0o644)
+		}
+	}
+
+	// il programma dell'indice: quello di Opifex se piu' recente, altrimenti quello gia' presente (o, la prima volta, quello incorporato)
+	script := filepath.Join(base, "indice.py")
+	if _, err := os.Stat(script); err != nil {
+		os.WriteFile(script, indicePy, 0o644)
+	}
+	if m != nil && m.Indice != nil && strings.HasPrefix(m.Indice.URL, "/desktop/") && m.Indice.Sha256 != shaFile(script) {
+		tmp := filepath.Join(base, "indice.nuovo")
+		if scarica(url+m.Indice.URL, tmp, time.Minute) == nil && shaFile(tmp) == m.Indice.Sha256 {
+			os.Rename(tmp, script)
+		} else {
+			os.Remove(tmp)
+		}
+	}
+
+	if !inAscolto() {
+		c := exec.Command(py, script, "interfaccia", "--db", filepath.Join(base, "indice.db"), "--non-aprire", "--finestra", "--porta", porta)
+		c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+		if lg, err := os.Create(filepath.Join(base, "ultimo-avvio.log")); err == nil {
+			c.Stdout, c.Stderr = lg, lg
+		}
+		if err := c.Start(); err != nil {
+			muori("non riesco ad avviare il programma", err)
+		}
+		pronto := false
+		for i := 0; i < 60; i++ {
+			if inAscolto() {
+				pronto = true
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		if !pronto {
+			muori("il programma non e' partito (dettagli in "+filepath.Join(base, "ultimo-avvio.log")+")", nil)
+		}
+		apriFinestra(base)
+		c.Wait() // si ferma da solo quando la finestra viene chiusa
+		return
+	}
+	apriFinestra(base) // gia' avviato: riapro solo la finestra
+}

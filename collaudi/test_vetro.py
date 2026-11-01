@@ -37,6 +37,10 @@ with TestClient(app) as c:
     ok("si riscrive senza duplicare", c.put("/account/preferenze/vetro", headers=H, json={"valore": 0.35}).status_code == 200 and sql("SELECT count(*) FROM preferenze_utente WHERE chiave='vetro'")[0][0] == 1)
     for nome, chiave, valore in [("stile sconosciuto", "stile", "neon"), ("sfondo sconosciuto", "sfondo", "<script>"), ("densita' troppo bassa", "vetro", 0.1), ("densita' troppo alta", "vetro", 0.9), ("densita' testuale", "vetro", "0.5"), ("densita' booleana", "vetro", True)]:
         ok(nome + ": 422", c.put(f"/account/preferenze/{chiave}", headers=H, json={"valore": valore}).status_code == 422)
+    ok("aspetto bronzo: salva", c.put("/account/preferenze/aspetto", headers=H, json={"valore": "bronzo"}).status_code == 200 and c.get("/account/preferenze", headers=H).json()["aspetto"] == "bronzo")
+    ok("aspetto sconosciuto: 422", c.put("/account/preferenze/aspetto", headers=H, json={"valore": "neon"}).status_code == 422)
+    _ix = c.get("/app/").text
+    ok("index collega bronzo.css e il file e' servito", "bronzo.css" in _ix and c.get("/app/bronzo.css").status_code == 200 and "body.bottega.bronzo" in c.get("/app/bronzo.css").text)
     ok("chiave sconosciuta: 404", c.put("/account/preferenze/qualsiasi", headers=H, json={"valore": 1}).status_code == 404)
     ok("azzera una preferenza", c.delete("/account/preferenze/sfondo", headers=H).status_code == 200 and "sfondo" not in c.get("/account/preferenze", headers=H).json())
     ok("le preferenze della vecchia Plancia non esistono piu'", c.put("/account/preferenze/plancia_layout", headers=H, json={"valore": {"aurora": [0, 0, 300, 300, 1, 0]}}).status_code == 404)

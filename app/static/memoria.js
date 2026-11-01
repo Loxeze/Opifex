@@ -4,7 +4,11 @@
 const TIPO_MEM = { decisione: "Decisione", fatto: "Fatto", preferenza: "Preferenza", lezione: "Lezione", sintesi: "Sintesi", regola: "Regola", procedura: "Procedura", esempio: "Esempio", errore: "Errore da evitare", studio: "Studio" };
 const FASCIA_MEM = { pubblico: "Pubblico", interno: "Interno", riservato: "Riservato" };
 
+const LIVELLO_MEM = { 1: "Lorenzo", 2: "Azienda e reparto", 3: "Progetto", 4: "Task" };
+
 function ambitoMem(v) {
+  if (v.persona) return "Livello 1 · Lorenzo (vale per tutti gli agenti)";
+  if (v.task_id) return "Livello 4 · Task: " + (v.task || v.task_id) + (v.progetto ? " · " + v.progetto : "");
   return (v.agente_personale ? ["Personale: " + v.agente_personale] : [v.divisione, v.azienda, v.progetto]).filter(Boolean).join(" · ") || "Generale";
 }
 
@@ -50,13 +54,14 @@ function pannelloMemoria() {
 
 function vistaMemoria() {
   const corpo = h("div"), msg = h("div");
-  let filtro = "proposta";
+  let filtro = "proposta", livello = 0;
+  const selLiv = h("select", {}, [["0", "Tutti i livelli"], ["1", "1 · Lorenzo"], ["2", "2 · Azienda e reparto"], ["3", "3 · Progetto"], ["4", "4 · Task"]].map(([v, n]) => h("option", { value: v }, n)));
   const sel = h("select", {}, [["proposta", "Da approvare"], ["approvata", "Approvate"], ["superata", "Superate"], ["scartata", "Scartate"], ["tutte", "Tutte"]].map(([v, n]) => h("option", { value: v }, n)));
   const q = h("input", { type: "search", maxlength: 100, placeholder: "Cerca nel testo…" });
   const nuova = h("div");
   const carica = async () => {
     try {
-      const d = await api("GET", "/memoria?stato=" + filtro + "&q=" + encodeURIComponent(q.value.trim()));
+      const d = await api("GET", "/memoria?stato=" + filtro + "&livello=" + livello + "&q=" + encodeURIComponent(q.value.trim()));
       riempi(corpo, d.voci.length ? d.voci.map(v => {
         const s = schedaMemoria(v, carica, msg);
         if (v.puo_approvare && v.stato === "approvata" && v.verifica_il) s.append(h("div", { class: "azioni" },
@@ -78,22 +83,29 @@ function vistaMemoria() {
         const di = h("select", {}, h("option", { value: "" }, "Generale"), d.opzioni.divisioni.map(x => h("option", { value: x.id }, x.nome)));
         const az = h("select", {}, h("option", { value: "" }, "Tutte le aziende"), d.opzioni.aziende.map(x => h("option", { value: x.id }, x.nome)));
         const pr = h("select", {}, h("option", { value: "" }, "Nessun progetto"), d.opzioni.progetti.map(x => h("option", { value: x.id }, x.nome)));
+        const lv = h("select", {}, [["", "Azienda / reparto / progetto (come sotto)"], ["persona", "1 · Lorenzo: vale per tutti gli agenti"], ["task", "4 · Task specifico (lavoro di durata)"]].map(([v, n]) => h("option", { value: v }, n)));
+        const tk = h("select", {}, h("option", { value: "" }, "Scegli il task"), (d.opzioni.task || []).map(x => h("option", { value: x.id }, x.nome)));
         const m2 = h("div");
         nuova.append(h("h3", {}, "Aggiungi una voce"),
           h("p", { class: "aiuto" }, "Una sola informazione, breve. Niente password o chiavi. Gli agenti dell'ambito scelto la ritroveranno quando serve."), t,
+          h("div", { class: "riga" }, h("label", {}, "Livello", lv), h("label", {}, "Task (solo livello 4)", tk)),
           h("div", { class: "riga" }, h("label", {}, "Tipo", tipo), h("label", {}, "Dipartimento", di), h("label", {}, "Azienda", az)),
           h("div", { class: "riga" }, h("label", {}, "Progetto", pr), h("label", {}, "Riservatezza", fa), h("label", {}, "Tema", tema)), m2,
           h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => {
-            try { await api("POST", "/memoria", { testo: t.value.trim(), tipo: tipo.value, fascia_dati: fa.value, divisione_id: di.value ? Number(di.value) : null,
-              azienda_id: az.value ? Number(az.value) : null, progetto_id: pr.value ? Number(pr.value) : null, tema: tema.value.trim() || null });
+            const pers = lv.value === "persona", conTask = lv.value === "task";
+            if (conTask && !tk.value) { m2.replaceChildren(avviso("Scegli il task a cui appartiene.", "no")); return; }
+            try { await api("POST", "/memoria", { testo: t.value.trim(), tipo: tipo.value, fascia_dati: fa.value, divisione_id: pers || !di.value ? null : Number(di.value),
+              azienda_id: pers || !az.value ? null : Number(az.value), progetto_id: pers || !pr.value ? null : Number(pr.value), tema: tema.value.trim() || null,
+              persona: pers, task_id: conTask ? Number(tk.value) : null });
               t.value = ""; m2.replaceChildren(avviso("Registrata.", "ok")); await carica(); } catch (e) { m2.replaceChildren(avviso(e.message, "no")); } } }, "Registra")));
       }
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
   sel.addEventListener("change", () => { filtro = sel.value; carica(); });
+  selLiv.addEventListener("change", () => { livello = Number(selLiv.value); carica(); });
   q.addEventListener("input", () => { clearTimeout(q._t); q._t = setTimeout(carica, 300); });
   carica();
   return h("div", {}, h("h2", {}, "Memoria di lavoro e dossier"),
-    h("p", { class: "aiuto" }, "Quello che gli agenti ricordano e sanno fare: decisioni, fatti, preferenze, lezioni, regole, procedure, esempi, errori da evitare e studi. Quelle di competenza (regole, procedure, studi, lezioni) hanno una data di verifica: scaduta, l'agente la riceve segnata «da riverificare». Le voci nascono come proposte (dalle tue risposte agli agenti, dalle approvazioni dei percorsi, dai suggerimenti degli agenti e dalle sintesi settimanali) e valgono solo dopo l'approvazione. Ogni agente riceve soltanto le voci del suo ambito e solo se la riservatezza lo consente."),
-    h("div", { class: "riga" }, sel, q), msg, corpo, nuova);
+    h("p", { class: "aiuto" }, "Quello che gli agenti ricordano e sanno fare: decisioni, fatti, preferenze, lezioni, regole, procedure, esempi, errori da evitare e studi. Quelle di competenza (regole, procedure, studi, lezioni) hanno una data di verifica: scaduta, l'agente la riceve segnata «da riverificare». Le voci nascono come proposte (dalle tue risposte agli agenti, dalle approvazioni dei percorsi, dai suggerimenti degli agenti e dalle sintesi settimanali) e valgono solo dopo l'approvazione. Ogni agente riceve soltanto le voci del suo ambito e solo se la riservatezza lo consente. Quattro livelli: 1 Lorenzo (chi sei, come contattarti, conferenze: lo ricevono tutti gli agenti), 2 azienda e reparto, 3 progetto, 4 task (un lavoro specifico di durata). In caso di contrasto vale il livello piu' specifico."),
+    h("div", { class: "riga" }, sel, selLiv, q), msg, corpo, nuova);
 }

@@ -13,7 +13,8 @@ TIPI_AGENTE = ("decisione", "fatto", "preferenza", "lezione", "regola", "procedu
 TIPI_CON_VERIFICA = ("regola", "procedura", "studio", "lezione")
 GIORNI_VERIFICA = 180
 MAX_VOCI = 6
-MAX_CARATTERI = 3500
+MAX_CARATTERI = 4500
+MAX_PERSONA = 5
 # una voce che sembra contenere un segreto non entra nella memoria
 SEGRETO = re.compile(r"(sk-[A-Za-z0-9_\-]{16,}|AKIA[0-9A-Z]{12,}|-----BEGIN [A-Z ]*PRIVATE KEY|(password|passwd|pwd|token|api[_ -]?key)\s*[:=]\s*\S{6,})", re.I)
 
@@ -35,23 +36,28 @@ def pulisci(testo: str) -> str:
 
 def proponi(conn, testo: str, tipo: str = "decisione", *, azienda_id=None, progetto_id=None, divisione_id=None, fascia_dati: str = "interno",
             fonte: str | None = None, agente_id=None, utente_id=None, stato: str = "proposta", decisa_da=None, sostituisce_id=None,
-            ambito_agente_id=None, tema: str | None = None, origine: str | None = None, casi: int = 0) -> int:
+            ambito_agente_id=None, tema: str | None = None, origine: str | None = None, casi: int = 0, persona: bool = False, task_id=None) -> int:
     if tipo not in TIPI:
         raise MemoriaNonValida("Tipo non valido")
     if fascia_dati not in ("pubblico", "interno", "riservato"):
         raise MemoriaNonValida("Riservatezza non valida")
     t = pulisci(testo)
+    if persona and any(x is not None for x in (azienda_id, progetto_id, divisione_id, task_id, ambito_agente_id)):
+        raise MemoriaNonValida("Una voce sulla persona non ha altro ambito")
+    if task_id is not None and conn.execute("SELECT 1 FROM task WHERE id = %s", (task_id,)).fetchone() is None:
+        raise MemoriaNonValida("Task inesistente")
     if conn.execute("SELECT 1 FROM memorie_lavoro WHERE stato IN ('proposta','approvata') AND lower(testo) = lower(%s) "
-                    "AND divisione_id IS NOT DISTINCT FROM %s AND azienda_id IS NOT DISTINCT FROM %s AND agente_id IS NOT DISTINCT FROM %s",
-                    (t, divisione_id, azienda_id, ambito_agente_id)).fetchone():
+                    "AND divisione_id IS NOT DISTINCT FROM %s AND azienda_id IS NOT DISTINCT FROM %s AND agente_id IS NOT DISTINCT FROM %s "
+                    "AND persona = %s AND task_id IS NOT DISTINCT FROM %s",
+                    (t, divisione_id, azienda_id, ambito_agente_id, persona, task_id)).fetchone():
         raise MemoriaNonValida("Voce gia' presente")
     r = conn.execute(
         """INSERT INTO memorie_lavoro (testo, tipo, stato, fascia_dati, azienda_id, progetto_id, divisione_id, fonte, proposta_da_agente_id,
-               proposta_da_utente_id, sostituisce_id, decisa_da_utente_id, decisa_il, agente_id, tema, origine, casi, verifica_il)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, CASE WHEN %s = 'approvata' THEN NOW() END, %s,%s,%s,%s,
+               proposta_da_utente_id, sostituisce_id, decisa_da_utente_id, decisa_il, agente_id, tema, origine, casi, persona, task_id, verifica_il)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, CASE WHEN %s = 'approvata' THEN NOW() END, %s,%s,%s,%s,%s,%s,
                    CASE WHEN %s = 'approvata' AND %s = ANY(%s) THEN CURRENT_DATE + %s END) RETURNING id""",
         (t, tipo, stato, fascia_dati, azienda_id, progetto_id, divisione_id, (fonte or "")[:200] or None, agente_id, utente_id,
-         sostituisce_id, decisa_da, stato, ambito_agente_id, (tema or "").strip()[:80] or None, (origine or "")[:60] or None, max(0, int(casi or 0)),
+         sostituisce_id, decisa_da, stato, ambito_agente_id, (tema or "").strip()[:80] or None, (origine or "")[:60] or None, max(0, int(casi or 0)), persona, task_id,
          stato, tipo, list(TIPI_CON_VERIFICA), GIORNI_VERIFICA)).fetchone()
     if sostituisce_id and stato == "approvata":
         conn.execute("UPDATE memorie_lavoro SET stato = 'superata' WHERE id = %s AND stato = 'approvata'", (sostituisce_id,))
@@ -70,47 +76,68 @@ def proponi_da_agente(conn, agente_id: int, testo: str, tipo: str = "decisione",
                    ambito_agente_id=agente_id if ambito == "personale" else None)
 
 
+LIVELLI = {1: "CHI E' LORENZO (valido sempre)", 2: "AZIENDA E REPARTO", 3: "PROGETTO", 4: "TASK IN CORSO"}
+
+
 def voci_per_agente(conn, a: dict, messaggio: str) -> list[dict]:
-    """Voci approvate pertinenti al messaggio, nell'ambito dell'agente. Se nessuna parola coincide, le piu' recenti."""
+    """Voci approvate dei quattro livelli (persona, azienda/reparto, progetto, task) pertinenti al messaggio e all'ambito dell'agente.
+    Il livello 1 (Lorenzo) arriva a tutti gli agenti, ma solo se la riservatezza consente di inviarlo al fornitore; gli altri solo nell'ambito dell'agente.
+    Se nessuna parola coincide, le piu' recenti. Ogni voce porta il suo livello."""
     vede_tutto = bool(a.get("vede_tutto"))
-    filtro = """v.stato = 'approvata' AND (v.agente_id IS NULL OR v.agente_id = %(a)s) AND (%(vt)s OR (
+    filtro = """v.stato = 'approvata' AND (v.agente_id IS NULL OR v.agente_id = %(a)s) AND (v.persona OR %(vt)s OR (
                   (v.divisione_id IS NULL OR v.divisione_id = %(div)s)
                   AND (v.azienda_id IS NULL OR v.azienda_id IN (SELECT azienda_id FROM agenti_aziende WHERE agente_id = %(a)s))
-                  AND (v.progetto_id IS NULL OR v.progetto_id IN (SELECT progetto_id FROM progetti_agenti WHERE agente_id = %(a)s))))"""
+                  AND (v.progetto_id IS NULL OR v.progetto_id IN (SELECT progetto_id FROM progetti_agenti WHERE agente_id = %(a)s))
+                  AND (v.task_id IS NULL OR v.task_id IN (SELECT t.id FROM task t WHERE t.assegnato_agente_id = %(a)s
+                         OR t.id IN (SELECT padre_id FROM task WHERE assegnato_agente_id = %(a)s AND padre_id IS NOT NULL)
+                         OR t.progetto_id IN (SELECT progetto_id FROM progetti_agenti WHERE agente_id = %(a)s)))))"""
+    liv = "CASE WHEN v.persona THEN 1 WHEN v.task_id IS NOT NULL THEN 4 WHEN v.progetto_id IS NOT NULL THEN 3 ELSE 2 END"
+    campi = f"v.id, v.testo, v.tipo, v.fascia_dati, v.creata_il, v.tema, v.casi, v.verifica_il, v.agente_id, {liv} AS livello"
     par = {"vt": vede_tutto, "div": a.get("divisione_id"), "a": a["id"], "l": MAX_VOCI * 3}
     q = query_ricerca(messaggio or "")
     righe = []
     if q:
         par["q"] = q
-        righe = conn.execute(f"""SELECT v.id, v.testo, v.tipo, v.fascia_dati, v.creata_il, v.tema, v.casi, v.verifica_il, v.agente_id, ts_rank_cd(v.ricerca, to_tsquery('italian', %(q)s)) AS p
+        righe = conn.execute(f"""SELECT {campi}, ts_rank_cd(v.ricerca, to_tsquery('italian', %(q)s)) AS p
                                  FROM memorie_lavoro v WHERE {filtro} AND v.ricerca @@ to_tsquery('italian', %(q)s)
                                  ORDER BY p DESC, v.casi DESC, v.id DESC LIMIT %(l)s""", par).fetchall()
-    recenti = conn.execute(f"""SELECT v.id, v.testo, v.tipo, v.fascia_dati, v.creata_il, v.tema, v.casi, v.verifica_il, v.agente_id FROM memorie_lavoro v WHERE {filtro}
-                               AND v.tipo IN ('sintesi','decisione') ORDER BY v.id DESC LIMIT 3""", par).fetchall()
+    recenti = conn.execute(f"""SELECT {campi} FROM memorie_lavoro v WHERE {filtro}
+                               AND v.tipo IN ('sintesi','decisione') AND NOT v.persona ORDER BY v.id DESC LIMIT 3""", par).fetchall()
+    # task e progetto sono il lavoro in corso: le loro voci recenti si vedono anche se la domanda non le nomina
+    attive = conn.execute(f"""SELECT {campi} FROM memorie_lavoro v WHERE {filtro} AND (v.task_id IS NOT NULL) ORDER BY v.id DESC LIMIT 3""", par).fetchall()
+    persona = conn.execute(f"""SELECT {campi} FROM memorie_lavoro v WHERE {filtro} AND v.persona ORDER BY v.id DESC LIMIT 40""", par).fetchall()
+    # del livello 1 tutti gli agenti ricevono il nucleo (le voci piu' pertinenti al messaggio, poi le altre) fino a MAX_PERSONA
+    pert = {r["id"] for r in righe if r["livello"] == 1}
+    persona = sorted(persona, key=lambda r: (r["id"] not in pert, -r["id"]))
     visti, out = set(), []
-    for r in list(righe) + list(recenti):
+    for r in persona[:MAX_PERSONA] + list(attive) + list(righe) + list(recenti):
         if r["id"] in visti:
             continue
         visti.add(r["id"])
         if puo_uscire(r["fascia_dati"], a["fascia_dati_max"], a["fascia_fornitore"], a["non_conservazione_attiva"], a["dpa_firmato"])[0]:
             out.append(r)
-    return out[:MAX_VOCI + 2]
+    nonp = [r for r in out if r["livello"] != 1]
+    return [r for r in out if r["livello"] == 1] + nonp[:MAX_VOCI + 2]
 
 
 def contesto(conn, a: dict, messaggio: str) -> str:
     voci = voci_per_agente(conn, a, messaggio)
     if not voci:
         return ""
-    righe, tot = [], 0
-    for v in voci:
+    righe, tot, ultimo = [], 0, None
+    for v in sorted(voci, key=lambda r: r["livello"]):
         scaduta = v.get("verifica_il") is not None and v["verifica_il"] < date.today()
         etichetta = v["tipo"] + (" personale" if v.get("agente_id") else "") + (f", tema {v['tema']}" if v.get("tema") else "") + f", {v['creata_il']:%d/%m/%Y}"
         riga = f"- [{etichetta}]" + (" (DA RIVERIFICARE: potrebbe essere superata)" if scaduta else "") + f" {v['testo']}"
         if tot + len(riga) > MAX_CARATTERI:
-            break
+            continue
+        if v["livello"] != ultimo:
+            ultimo = v["livello"]
+            righe.append(f"## {LIVELLI[ultimo]}")
         tot += len(riga)
         righe.append(riga)
-    return ("MEMORIA DI LAVORO (decisioni e fatti gia' approvati: tienine conto e non rimetterli in discussione senza motivo; se una voce e' superata o "
+    return ("MEMORIA DI LAVORO, a quattro livelli (decisioni e fatti gia' approvati: tienine conto e non rimetterli in discussione senza motivo; in caso di "
+            "contrasto vale il livello piu' specifico: task, poi progetto, poi azienda, poi le indicazioni generali su Lorenzo; se una voce e' superata o "
             "sbagliata dillo a Lorenzo; la data indica quando e' stata registrata):\n" + "\n".join(righe))
 
 

@@ -7,21 +7,69 @@ const quandoS = (t) => t ? new Date(t).toLocaleString("it-IT", { weekday: "short
 const perInput = (t) => { const d = new Date(t); const p = (n) => String(n).padStart(2, "0"); return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes()); };
 
 let schedaSocial = null;
+// Pagina Social: il lavoro di ogni giorno (panoramica, calendario, post, risultati). Canali e collegamenti sono in Impostazioni > Social.
 function vistaSocial() {
   const corpo = h("div"); const barra = h("div", { class: "azioni", style: "margin:6px 0 14px" });
-  const SCHEDE = [["risultati", "Risultati"], ["pubblica", "Scrivi e pubblica"], ["post", "Post e approvazioni"], ["canali", "Canali e collegamenti"]];
+  const SCHEDE = [["panoramica", "Panoramica"], ["pubblica", "Scrivi e pubblica"], ["post", "Post e approvazioni"], ["risultati", "Risultati"]];
   const apri = async (k) => {
+    if (!SCHEDE.some(([id]) => id === k)) k = "panoramica";
     schedaSocial = k;
-    barra.replaceChildren(...SCHEDE.map(([id, et]) => h("button", { class: id === k ? "p" : "s", type: "button", onclick: () => apri(id) }, et)));
+    barra.replaceChildren(...SCHEDE.map(([id, et]) => h("button", { class: id === k ? "p" : "s", type: "button", onclick: () => apri(id) }, et)),
+      h("button", { class: "s", type: "button", style: "margin-left:auto", onclick: () => { stato.sezione = "social"; vai("impostazioni", "social"); } }, "Canali e collegamenti"));
     corpo.replaceChildren(h("p", { class: "sotto" }, "Carico…"));
-    try { await ({ risultati: schedaRisultati, pubblica: schedaPubblica, post: schedaPost, canali: schedaCanali })[k](corpo, apri); }
+    try { await ({ panoramica: schedaPanoramica, risultati: schedaRisultati, pubblica: schedaPubblica, post: schedaPost })[k](corpo, apri); }
     catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };
-  (async () => {
-    if (schedaSocial) return apri(schedaSocial);
-    try { const st = await api("GET", "/gestione/social-nativo/stato"); apri(st.provider.some(p => p.account.length) ? "risultati" : "canali"); } catch (e) { apri("post"); }
-  })();
+  apri(schedaSocial || "panoramica");
   return [h("h2", {}, "Social"), barra, corpo];
+}
+
+// Impostazioni > Social: dove si collegano e si assegnano i canali
+function vistaSocialCanali() {
+  const corpo = h("div");
+  const apri = () => {};
+  schedaCanali(corpo, apri).catch(e => corpo.replaceChildren(avviso(e.message, "no")));
+  return [h("h2", {}, "Social: canali e collegamenti"), corpo];
+}
+
+// ---------- panoramica: calendario, in uscita, da approvare, ultimi usciti ----------
+let meseSocial = null;
+async function schedaPanoramica(corpo, apri) {
+  const [lista, st] = await Promise.all([api("GET", "/gestione/social/post"), api("GET", "/gestione/social-nativo/stato").catch(() => null)]);
+  const collegati = st ? st.provider.some(p => p.account.length) : true;
+  const dataPost = (p) => new Date(p.pubblicato_il || p.programmato_il || p.creato_il);
+  const oggi = new Date(); if (!meseSocial) meseSocial = new Date(oggi.getFullYear(), oggi.getMonth(), 1);
+  const riepilogo = h("div", { class: "bt-plancia", style: "margin-bottom:18px" }); riassuntoSocial(riepilogo);
+  const ricarica = () => schedaPanoramica(corpo, apri);
+  const daApp = lista.filter(p => p.stato === "da_approvare");
+  const inUscita = lista.filter(p => ["programmato", "inviato", "in_pubblicazione"].includes(p.stato)).sort((a, b) => dataPost(a) - dataPost(b));
+  const usciti = lista.filter(p => p.stato === "pubblicato").sort((a, b) => dataPost(b) - dataPost(a)).slice(0, 5);
+  const primo = new Date(meseSocial), mese = primo.getMonth(), giorni = new Date(primo.getFullYear(), mese + 1, 0).getDate(), vuote = (primo.getDay() + 6) % 7;
+  const celle = [];
+  for (let i = 0; i < vuote; i++) celle.push(h("div", { class: "cal-g vuoto" }));
+  for (let g = 1; g <= giorni; g++) {
+    const dd = lista.filter(p => { const d = dataPost(p); return d.getFullYear() === primo.getFullYear() && d.getMonth() === mese && d.getDate() === g; });
+    const e = g === oggi.getDate() && mese === oggi.getMonth() && primo.getFullYear() === oggi.getFullYear();
+    celle.push(h("div", { class: "cal-g" + (e ? " oggi" : "") }, h("span", { class: "cal-n" }, String(g)),
+      dd.slice(0, 3).map(p => h("div", { class: "cal-p " + (STATI_POST[p.stato] ? STATI_POST[p.stato][1] : ""), title: p.canale_nome + ": " + p.testo, onclick: () => apri("post") }, dataPost(p).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" }) + " " + (p.canale_nome || ""))),
+      dd.length > 3 ? h("div", { class: "sotto" }, "+" + (dd.length - 3)) : null));
+  }
+  const sposta = (n) => { meseSocial = new Date(primo.getFullYear(), mese + n, 1); ricarica(); };
+  const elenco = (v, vuoto) => v.length ? v.map(p => h("div", { class: "riga-post" }, h("div", { class: "sotto" }, quandoS(p.pubblicato_il || p.programmato_il) + " · " + (p.canale_nome || "") + (p.agente ? " · " + p.agente : "")),
+    h("div", {}, (p.testo || "").slice(0, 140) + ((p.testo || "").length > 140 ? "…" : "")), p.permalink ? h("a", { href: p.permalink, target: "_blank", rel: "noopener noreferrer", class: "sotto" }, "Apri il post") : null)) : h("p", { class: "sotto" }, vuoto);
+  riempi(corpo, [!collegati ? h("div", { class: "carta" }, h("p", { class: "aiuto" }, "Nessun canale collegato: collega almeno una rete per pubblicare e vedere i risultati."),
+      h("button", { class: "p", type: "button", onclick: () => { stato.sezione = "social"; vai("impostazioni", "social"); } }, "Collega i canali")) : null,
+    h("div", { class: "carta", style: "margin-bottom:14px" }, h("div", { class: "riga", style: "align-items:center;justify-content:space-between" },
+      h("h3", { style: "margin:0" }, primo.toLocaleDateString("it-IT", { month: "long", year: "numeric" })),
+      h("div", { class: "azioni", style: "margin:0" }, h("button", { class: "s", type: "button", onclick: () => sposta(-1) }, "‹"), h("button", { class: "s", type: "button", onclick: () => { meseSocial = null; ricarica(); } }, "Oggi"), h("button", { class: "s", type: "button", onclick: () => sposta(1) }, "›"))),
+      h("div", { class: "cal" }, ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"].map(n => h("div", { class: "cal-t" }, n)), celle)),
+    h("div", { class: "riga", style: "align-items:flex-start" },
+      h("div", { class: "carta", style: "flex:1 1 280px" }, h("h3", {}, "Da approvare (" + daApp.length + ")"),
+        daApp.length ? [daApp.slice(0, 4).map(p => h("div", { class: "riga-post" }, h("div", { class: "sotto" }, (p.canale_nome || "") + (p.agente ? " · " + p.agente : "")), h("div", {}, (p.testo || "").slice(0, 120) + "…"))),
+          h("button", { class: "p", type: "button", onclick: () => apri("post") }, "Rivedi e approva")] : h("p", { class: "sotto" }, "Nessun post in attesa.")),
+      h("div", { class: "carta", style: "flex:1 1 280px" }, h("h3", {}, "In uscita"), elenco(inUscita.slice(0, 5), "Niente di programmato. Scrivi un post o chiedi a un agente di prepararne.")),
+      h("div", { class: "carta", style: "flex:1 1 280px" }, h("h3", {}, "Ultimi pubblicati"), elenco(usciti, "Ancora nessun post pubblicato."))),
+    h("h3", { style: "margin-top:18px" }, "Questo mese a confronto"), riepilogo]);
 }
 
 async function schedaPost(corpo) {
@@ -95,7 +143,7 @@ async function schedaCanali(corpo, apri) {
 async function schedaPubblica(corpo, apri) {
   const st = await api("GET", "/gestione/social-nativo/stato");
   const canali = st.provider.flatMap(p => p.account.flatMap(a => a.canali.filter(c => c.attivo)));
-  if (!canali.length) return riempi(corpo, [h("p", { class: "sotto" }, "Nessun canale collegato: collega prima almeno una rete."), h("button", { class: "p", type: "button", onclick: () => apri("canali") }, "Vai ai collegamenti")]);
+  if (!canali.length) return riempi(corpo, [h("p", { class: "sotto" }, "Nessun canale collegato: collega prima almeno una rete."), h("button", { class: "p", type: "button", onclick: () => { stato.sezione = "social"; vai("impostazioni", "social"); } }, "Vai ai collegamenti")]);
   const msg = h("div"); const testo = h("textarea", { style: "min-height:130px" }); const conta = h("span", { class: "sotto" });
   const sel = canali.map(c => { const x = h("input", { type: "checkbox" }); return [c, x]; });
   const media = []; const lista = h("div"); const quando = h("input", { type: "datetime-local" }); const url = h("input", { placeholder: "oppure incolla l'indirizzo https di una foto o di un video" });
@@ -138,7 +186,7 @@ let periodoSocial = 30;
 async function schedaRisultati(corpo, apri) {
   const a = await api("GET", "/gestione/social-nativo/analisi?giorni=" + periodoSocial);
   const ricarica = () => schedaRisultati(corpo, apri);
-  if (!a.canali.length) return riempi(corpo, [h("p", { class: "sotto" }, "Nessun canale collegato: collega le reti e qui compariranno seguaci, visualizzazioni e interazioni."), h("button", { class: "p", type: "button", onclick: () => apri("canali") }, "Vai ai collegamenti")]);
+  if (!a.canali.length) return riempi(corpo, [h("p", { class: "sotto" }, "Nessun canale collegato: collega le reti e qui compariranno seguaci, visualizzazioni e interazioni."), h("button", { class: "p", type: "button", onclick: () => { stato.sezione = "social"; vai("impostazioni", "social"); } }, "Vai ai collegamenti")]);
   const msg = h("div");
   const scarica = async () => {
     try {

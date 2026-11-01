@@ -23,30 +23,33 @@ def _filtro(u: dict) -> tuple[str, list]:
     v = divisioni_visibili(u)
     if v is None:
         return "TRUE", []
-    return "m.divisione_id = ANY(%s)", [list(v)]
+    return "(m.divisione_id = ANY(%s) AND NOT m.persona)", [list(v)]
 
 
-CAMPI = """m.id, m.testo, m.tipo, m.stato, m.fascia_dati, m.azienda_id, m.progetto_id, m.divisione_id, m.fonte, m.sostituisce_id, m.creata_il, m.decisa_il, m.agente_id, m.tema, m.casi, m.verifica_il, m.origine,
-           z.nome AS azienda, p.nome AS progetto, d.nome AS divisione, ap.nome AS agente_personale, ag.nome AS proposta_da_agente, pu.nome AS proposta_da_utente, du.nome AS decisa_da"""
-DA = """FROM memorie_lavoro m LEFT JOIN aziende z ON z.id = m.azienda_id LEFT JOIN progetti p ON p.id = m.progetto_id
+CAMPI = """m.id, m.testo, m.tipo, m.stato, m.fascia_dati, m.azienda_id, m.progetto_id, m.divisione_id, m.fonte, m.sostituisce_id, m.creata_il, m.decisa_il, m.agente_id, m.tema, m.casi, m.verifica_il, m.origine, m.persona, m.task_id,
+           tk.titolo AS task, z.nome AS azienda, p.nome AS progetto, d.nome AS divisione, ap.nome AS agente_personale, ag.nome AS proposta_da_agente, pu.nome AS proposta_da_utente, du.nome AS decisa_da"""
+DA = """FROM memorie_lavoro m LEFT JOIN task tk ON tk.id = m.task_id LEFT JOIN aziende z ON z.id = m.azienda_id LEFT JOIN progetti p ON p.id = m.progetto_id
         LEFT JOIN divisioni d ON d.id = m.divisione_id LEFT JOIN agenti ag ON ag.id = m.proposta_da_agente_id
         LEFT JOIN agenti ap ON ap.id = m.agente_id LEFT JOIN utenti pu ON pu.id = m.proposta_da_utente_id LEFT JOIN utenti du ON du.id = m.decisa_da_utente_id"""
 
 
 @router.get("")
 def elenco(stato: str = Query(default="proposta", pattern="^(proposta|approvata|scartata|superata|tutte)$"), q: str = Query(default="", max_length=100),
-           u: dict = Depends(utente_corrente)):
+           livello: int = Query(default=0, ge=0, le=4), u: dict = Depends(utente_corrente)):
     cond, par = _filtro(u)
     with connessione() as conn:
         righe = conn.execute(
             f"""SELECT {CAMPI} {DA} WHERE {cond} AND (%s = 'tutte' OR m.stato = %s) AND (%s = '' OR m.testo ILIKE '%%' || %s || '%%')
-                ORDER BY m.id DESC LIMIT 300""", par + [stato, stato, q.strip(), q.strip()]).fetchall()
+                AND (%s = 0 OR %s = CASE WHEN m.persona THEN 1 WHEN m.task_id IS NOT NULL THEN 4 WHEN m.progetto_id IS NOT NULL THEN 3 ELSE 2 END)
+                ORDER BY m.id DESC LIMIT 300""", par + [stato, stato, q.strip(), q.strip(), livello, livello]).fetchall()
         for r in righe:
+            r["livello"] = 1 if r["persona"] else 4 if r["task_id"] else 3 if r["progetto_id"] else 2
             r["puo_approvare"] = _puo_approvare(conn, u, r["divisione_id"])
         n = conn.execute(f"SELECT count(*) AS n FROM memorie_lavoro m WHERE {cond} AND m.stato = 'proposta'", par).fetchone()["n"]
         opz = {"aziende": conn.execute("SELECT id, nome FROM aziende WHERE attiva ORDER BY nome").fetchall(),
                "progetti": conn.execute("SELECT id, nome FROM progetti WHERE NOT archiviato ORDER BY nome").fetchall(),
-               "divisioni": conn.execute("SELECT id, nome FROM divisioni WHERE attiva ORDER BY nome").fetchall()}
+               "divisioni": conn.execute("SELECT id, nome FROM divisioni WHERE attiva ORDER BY nome").fetchall(),
+               "task": conn.execute("SELECT id, titolo AS nome FROM task WHERE stato <> 'completata' AND padre_id IS NULL ORDER BY id DESC LIMIT 200").fetchall()}
         v = divisioni_visibili(u)
         if v is not None:
             opz["divisioni"] = [d for d in opz["divisioni"] if d["id"] in v]
@@ -64,19 +67,23 @@ class Nuova(BaseModel):
     tema: str | None = Field(default=None, max_length=80)
     agente_id: int | None = None      # voce personale: vale solo per questo agente
     casi: int = Field(default=0, ge=0, le=1000)
+    persona: bool = False             # livello 1: informazioni su Lorenzo, valide per tutti gli agenti (solo il titolare)
+    task_id: int | None = None        # livello 4: un lavoro specifico di durata
 
 
 @router.post("", status_code=201)
 def crea(d: Nuova, u: dict = Depends(utente_corrente)):
     """Inserimento diretto: la voce nasce gia' approvata (la scrive una persona autorizzata)."""
     with connessione() as conn:
+        if d.persona and u["ruolo_globale"] != "titolare":
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Le informazioni su Lorenzo le gestisce solo il titolare")
         if not _puo_approvare(conn, u, d.divisione_id):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Non puoi registrare memoria per questo ambito (le voci generali le gestisce il titolare)")
         try:
             mid = memoria_lavoro.proponi(conn, d.testo, d.tipo, azienda_id=d.azienda_id, progetto_id=d.progetto_id, divisione_id=d.divisione_id,
                                          fascia_dati=d.fascia_dati, fonte="inserita da " + u["nome"], utente_id=u["id"], stato="approvata",
                                          decisa_da=u["id"], sostituisce_id=d.sostituisce_id, ambito_agente_id=d.agente_id, tema=d.tema,
-                                         origine="inserita da una persona", casi=d.casi)
+                                         origine="inserita da una persona", casi=d.casi, persona=d.persona, task_id=d.task_id)
         except memoria_lavoro.MemoriaNonValida as e:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
         registro.registra(conn, u, "memoria", "voce registrata", d.testo[:200], "memoria", mid)

@@ -3,7 +3,9 @@
 // Le preferenze stanno sul server, una per utente.
 const Vetro = (() => {
   const SCENE = { alba: "Alba sui monti", notte: "Città di notte", oceano: "Oceano", arte: "Opere d'arte" };
-  const pref = { stile: "vetro", sfondo: "alba", vetro: 0.46 };
+  const pref = { stile: "vetro", sfondo: "alba", vetro: 0.46, aspetto: "bottega" };
+  let navIcone = false;
+  try { navIcone = localStorage.getItem("nav_icone") === "1"; const a0 = localStorage.getItem("aspetto"); if (a0 === "bronzo") pref.aspetto = a0; } catch (e) { /* facoltativo */ }
   let attuale = null, timer = {};
 
   function rng(seed) { let a = seed >>> 0; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -105,6 +107,9 @@ const Vetro = (() => {
     // 2.0: l'aspetto e' «Bottega» (chiaro, caldo, editoriale). Sfondi e vetro restano nel codice ma non si usano piu'.
     document.body.classList.remove("vetro");
     document.body.classList.add("bottega");
+    document.body.classList.toggle("bronzo", pref.aspetto === "bronzo");
+    document.body.classList.toggle("nav-icone", navIcone);
+    document.documentElement.style.colorScheme = pref.aspetto === "bronzo" ? "dark" : "light";
     document.documentElement.style.setProperty("--g", String(pref.vetro));
     const box = document.getElementById("vetro-sfondo"); if (box) box.remove();
     const did = document.getElementById("vetro-didascalia"); if (did) did.hidden = true;
@@ -114,6 +119,7 @@ const Vetro = (() => {
     try {
       const p = await api("GET", "/account/preferenze");
       if (SCENE[p.sfondo]) pref.sfondo = p.sfondo;
+      if (p.aspetto === "bottega" || p.aspetto === "bronzo") { pref.aspetto = p.aspetto; try { localStorage.setItem("aspetto", p.aspetto); } catch (e) { /* facoltativo */ } }
       if (typeof p.vetro === "number") pref.vetro = Math.min(0.75, Math.max(0.3, p.vetro));
       return p;
     } catch (e) { return {}; } finally { applica(); }
@@ -137,9 +143,14 @@ const Vetro = (() => {
     disegna();
     return corpo;
   }
+  function riduciMenu() { navIcone = !navIcone; try { localStorage.setItem("nav_icone", navIcone ? "1" : "0"); } catch (e) { /* facoltativo */ } applica(); }
   function sezioneAccount() {
-    return [h("h3", {}, "Aspetto"), h("div", { class: "carta" }, h("p", { class: "aiuto" }, "Dalla versione 2.0 Opifex ha un solo aspetto, chiaro e pulito, con il menu a sinistra. Gli sfondi fotografici non ci sono più."))];
+    const corpo = h("div", { class: "pl-gruppo" });
+    const scegli = (v) => { imposta("aspetto", v); try { localStorage.setItem("aspetto", v); } catch (e) { /* facoltativo */ } disegna(); };
+    const disegna = () => riempi(corpo, [h("span", {}, "Tema"), chip("Bottega (chiaro)", pref.aspetto === "bottega", () => scegli("bottega")), chip("Bronzo (vetro scuro)", pref.aspetto === "bronzo", () => scegli("bronzo"))]);
+    disegna();
+    return [h("h3", {}, "Aspetto"), h("div", { class: "carta" }, h("p", { class: "aiuto" }, "Scegli il tema: vale per te su ogni dispositivo. «Bronzo» è un vetro scuro smerigliato con accento arancio; il menu a sinistra si riduce a sole icone con il pulsante accanto a «Esci»."), corpo)];
   }
-  return { carica, applica, imposta, controlli, sezioneAccount, pref, SCENE };
+  return { carica, applica, imposta, controlli, sezioneAccount, riduciMenu, pref, SCENE };
 })();
 Vetro.applica();   // anche la schermata di accesso ha il suo sfondo

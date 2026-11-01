@@ -111,7 +111,7 @@ function cornice(contenuto) {
   radice.replaceChildren(
     h("header", {}, h("h1", {}, "Opifex", h("small", {}, "la bottega degli agenti")),
       h("nav", { "aria-label": "Menu principale" }, nav),
-      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("span", { class: "bt-ver" }, "2.0"))),
+      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, "2.0"))),
     h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "organigramma" ? "largo" : "" }, contenuto));
 }
 

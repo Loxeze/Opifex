@@ -53,6 +53,7 @@ ginnasio.SINCRONO = True
 az = sql("INSERT INTO aziende (nome, colore) VALUES ('Renovatio', '#3fd3c0') RETURNING id")[0][0]
 consegne.SINCRONO = True
 aur = ID("Aurora")
+sql("DELETE FROM memorie_lavoro WHERE persona")   # voci iniziali su Lorenzo: non servono a questo test
 with TestClient(app) as c:
     H = {"Authorization": "Bearer " + accedi(c, "l@p.it", PW)}
     HC = {"Authorization": "Bearer " + accedi(c, "c@p.it", PW)}

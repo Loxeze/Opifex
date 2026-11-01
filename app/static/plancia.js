@@ -2,8 +2,12 @@
 // Plancia 2.0: i numeri che contano a colpo d'occhio (CRM, consumi, uso, social) e le cose che aspettano te.
 // Tutti i testi arrivano dall'API e sono inseriti come testo; i grafici sono SVG disegnati qui, senza librerie.
 
-const PB = { verde: "#1E8466", ottone: "#B07A10", blu: "#3B7DC4", terra: "#C4502A", inchiostro: "#1B2421", tenue: "#5E6863", griglia: "#E3DED1",
+const PB_CHIARO = { verde: "#1E8466", ottone: "#B07A10", blu: "#3B7DC4", terra: "#C4502A", inchiostro: "#1B2421", tenue: "#5E6863", griglia: "#E3DED1",
   rampa: ["#EEF4F1", "#CFE3DA", "#9CCBBB", "#5FAA93", "#2E8A6F", "#0E5A45"], imbuto: ["#BFDACF", "#8CC0AC", "#5FAA93", "#2E8A6F", "#0E5A45"] };
+const PB_SCURO = { verde: "#E8924A", ottone: "#F3C46A", blu: "#7FB2E8", terra: "#F0866A", inchiostro: "#F1EBE3", tenue: "#BDB0A3", griglia: "rgba(255,255,255,.12)",
+  rampa: ["rgba(255,255,255,.08)", "#5A3A24", "#8A5530", "#B5702F", "#E8924A", "#F7B97A"], imbuto: ["#7A4A28", "#A0612F", "#C9763A", "#E8924A", "#F7B97A"] };
+// i colori dei grafici seguono il tema scelto (Bottega chiaro o Bronzo scuro)
+const PB = new Proxy(PB_CHIARO, { get: (t, k) => (document.body.classList.contains("bronzo") ? PB_SCURO : t)[k] });
 
 function svgEl(tag, attrs, ...figli) {
   const e = document.createElementNS("http://www.w3.org/2000/svg", tag);

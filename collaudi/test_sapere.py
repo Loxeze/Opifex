@@ -43,6 +43,7 @@ def finta_api(corpo):
 agente_browser._chiama_api = finta_api
 tmp = Path(tempfile.mkdtemp()); backup.CARTELLA = tmp / "bk"; backup.FILE_ENV = tmp / ".env"; (tmp / ".env").write_text("SEGRETO=1\n")
 
+sql("DELETE FROM memorie_lavoro WHERE persona")   # voci iniziali su Lorenzo: non servono a questo test
 with TestClient(app) as c:
     H = {"Authorization": "Bearer " + accedi(c, "l@p.it", PW)}
     HC = {"Authorization": "Bearer " + accedi(c, "c@p.it", PW)}

@@ -52,6 +52,7 @@ from .rotte_task import router as router_task
 from .rotte_percorsi import router as router_percorsi
 from .rotte_social import router as router_social
 from .rotte_email_uscita import router as router_email_uscita
+from .desktop import router as router_desktop
 from .rotte_fornitori import router as router_fornitori
 from .rotte_posta import router as router_posta
 from .rotte_registro import router as router_registro
@@ -321,6 +322,7 @@ app.include_router(router_task)
 app.include_router(router_percorsi)
 app.include_router(router_social)
 app.include_router(router_email_uscita)
+app.include_router(router_desktop)
 app.include_router(router_fornitori)
 app.include_router(router_posta)
 app.include_router(router_registro)
