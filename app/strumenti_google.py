@@ -60,10 +60,14 @@ STRUMENTI = [
      "Niente script e niente immagini da internet: le foto di Drive si passano in 'immagini' ([{nome:'foto', file_id:'...'}]) e si usano nell'HTML come src=\"@foto\" o url(@foto) (object-fit:cover per riempire). "
      "formato: ig_post, ig_quadrato, verticale_9_16, linkedin, facebook, youtube_miniatura, x_post, a4_300dpi, a3_300dpi (PNG/JPG di stampa), a4_pdf, a4_orizzontale_pdf, a3_pdf (PDF), oppure larghezza e altezza in pixel. "
      "uscita: png (default), jpg o pdf. Per i formati in px il tuo HTML deve riempire esattamente larghezza x altezza CSS (a4: 794x1123, a3: 1123x1587, social: i pixel del formato). "
-     "Dopo averla creata guardala con immagine_analizza (file_id del risultato, con 'domanda') e correggi l'HTML finche' testo, gerarchia e margini sono a posto; poi consegna il link a Lorenzo.",
+     "COME SI LAVORA: ogni chiamata disegna la grafica e la controlla (controlli automatici di impaginazione + giudizio di un art director che la guarda davvero) SENZA salvarla. Correggi l'HTML seguendo i difetti indicati e richiama, finche' il giudizio e' OK (voto da 8). "
+     "Solo allora richiama con salva=true: la grafica va su Drive e Lorenzo riceve il link. Massimo 4 giri. Se il giudizio dice 'NON HO POTUTO GUARDARLA' NON dichiarare che e' bella ne' pronta: salvala come BOZZA NON VERIFICATA e scrivi a Lorenzo che nessuno l'ha vista, riportando il motivo. "
+     "REGOLE DI IMPAGINAZIONE: un solo punto focale (titolo grande, almeno 8% della larghezza); massimo 2 caratteri e 3 colori; margini almeno 6% della larghezza; molto spazio bianco; niente riquadri con bordo attorno a ogni blocco; testo corrente almeno 2,2% della larghezza; "
+     "allineamenti coerenti su una griglia; se hai una foto falla protagonista a tutta pagina o a meta' pagina con object-fit:cover; i contatti e il logo piccoli in fondo. Parti dai riferimenti di stile che ti ha dato Lorenzo (guardali con immagine_analizza) e riprendine impaginazione, palette e atmosfera. "
+     "'brief' = in una frase che grafica e' e che effetto deve fare (serve al giudizio). 'riservata'=true solo se il contenuto non e' destinato alla pubblicazione.",
      "input_schema": {"type": "object", "properties": {"html": {"type": "string"}, "formato": {"type": "string"}, "larghezza": {"type": "integer"}, "altezza": {"type": "integer"},
                                                        "uscita": {"type": "string", "enum": ["png", "jpg", "pdf"]}, "immagini": {"type": "array", "items": {"type": "object", "properties": {"nome": {"type": "string"}, "file_id": {"type": "string"}}, "required": ["nome", "file_id"]}},
-                                                       "nome": {"type": "string"}, "progetto": {"type": "string"}}, "required": ["html"]}},
+                                                       "nome": {"type": "string"}, "progetto": {"type": "string"}, "brief": {"type": "string"}, "salva": {"type": "boolean"}, "riservata": {"type": "boolean"}}, "required": ["html"]}},
 ]
 
 AVVISO = ("\n\nGOOGLE DRIVE: hai strumenti per cercare, leggere, creare e modificare file nella cartella Opifex (google_*). "
@@ -244,6 +248,7 @@ def _esegui(conn, agente_id: int, nome: str, d: dict) -> str:
     if nome == "grafica_crea":
         from . import grafica
         import base64
+        from PIL import Image
         try:
             fmt_ = str(d.get("formato") or "")
             uscita = str(d.get("uscita") or ("pdf" if fmt_ in grafica.PDF else "png")).lower()
@@ -265,10 +270,19 @@ def _esegui(conn, agente_id: int, nome: str, d: dict) -> str:
                 imm[nm] = f"data:{tipo_img};base64," + base64.b64encode(dati).decode()
             pagina = grafica.componi(d.get("html"), imm)
             esito = grafica.renderizza(pagina, w, h, scala, uscita if uscita != "pdf" else "png", pdf=(uscita == "pdf"))
+            problemi = grafica.controlli(pagina, w, h)
+            anteprima = esito if uscita != "pdf" else grafica.renderizza(pagina, w, h, min(scala, 1.0), "png")
+            if max(Image.open(io.BytesIO(anteprima)).size) > 1800:
+                _im = Image.open(io.BytesIO(anteprima)); _im.thumbnail((1800, 1800)); _b = io.BytesIO(); _im.save(_b, "PNG"); anteprima = _b.getvalue()
+            giudizio = grafica.critica(anteprima, str(d.get("brief") or ""), bool(d.get("riservata")))
         except grafica.ErroreGrafica as e:
             return "ERRORE: " + str(e)
         except Exception as e:  # noqa: BLE001
             return f"ERRORE: la grafica non e' stata generata ({type(e).__name__}: {str(e)[:200]})"
+        referto = ("CONTROLLI AUTOMATICI: " + (" | ".join(problemi) if problemi else "nessun problema di impaginazione rilevato") + "\nGIUDIZIO DELL'ART DIRECTOR: " + giudizio)
+        if not d.get("salva"):
+            return ("NON SALVATA (anteprima). " + referto + "\nCorreggi i difetti e richiama grafica_crea; quando il giudizio e' OK e i controlli sono puliti richiama con salva=true. "
+                    "Se non hai potuto vederla, salva comunque come bozza non verificata e dillo a Lorenzo.")
         dest = _cartella_destinazione(conn, tok, radice, d.get("progetto"), agente_id)
         base = re.sub(r"[^\w .\-]", "_", str(d.get("nome") or "grafica"))[:80]
         mime = {"png": "image/png", "jpg": "image/jpeg", "pdf": "application/pdf"}[uscita]
@@ -277,7 +291,7 @@ def _esegui(conn, agente_id: int, nome: str, d: dict) -> str:
         corpo = (f"--{limite}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{json.dumps({'name': nome_file, 'parents': [dest]})}\r\n--{limite}\r\nContent-Type: {mime}\r\n\r\n").encode() + esito + f"\r\n--{limite}--".encode()
         f_ = _richiesta("POST", _UPLOAD, tok, params={"uploadType": "multipart", "fields": "id,name,webViewLink"}, headers={"Content-Type": f"multipart/related; boundary={limite}"}, content=corpo).json()
         conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli) VALUES (%s,'google_file_creato',%s::jsonb)", (agente_id, json.dumps({"file": f_["name"], "tipo": "grafica"})))
-        return f"Grafica creata: «{f_['name']}» id {f_['id']} link {f_.get('webViewLink', '')} ({desc}, {len(esito) // 1024} KB). Controllala con immagine_analizza prima di consegnarla." if uscita != "pdf" else f"PDF creato: «{f_['name']}» id {f_['id']} link {f_.get('webViewLink', '')} ({desc}, {len(esito) // 1024} KB)."
+        return f"Salvata: «{f_['name']}» id {f_['id']} link {f_.get('webViewLink', '')} ({desc}, {len(esito) // 1024} KB).\n" + referto + ("\nATTENZIONE: nessuno ha visto questa grafica: consegnala come BOZZA NON VERIFICATA." if giudizio.startswith("NON HO POTUTO") else "")
     if nome in ("immagine_analizza", "immagine_adatta"):
         from . import creativi
         fid = str(d.get("file_id", ""))
