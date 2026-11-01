@@ -144,30 +144,31 @@ async function schedaCanali(corpo, apri) {
 
 function schedaBuffer(bf, ricarica) {
   const msg = h("div");
-  if (bf.collegato) {
-    return h("div", { class: "carta" }, h("div", { class: "nome" }, "Buffer collegato"),
-      bf.errore ? avviso(bf.errore, "no") : null,
-      bf.canali.length ? h("p", { class: "aiuto" }, "Canali: " + bf.canali.map(c => c.name + " (" + c.service + ")").join(", "))
-        : h("p", { class: "aiuto" }, "Nessun canale: collegali dentro Buffer (Instagram, Facebook, LinkedIn, TikTok…)."),
-      h("p", { class: "aiuto" }, "Per far preparare post a un agente, accendi «Può preparare post per i social» nella sua scheda: restano in attesa del tuo OK."),
-      msg, h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => {
-        if (!confirm("Scollegare Buffer?")) return;
-        try { await api("DELETE", "/gestione/social/buffer"); ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Scollega Buffer")));
-  }
+  const accounts = bf.account || [];
   const chiave = h("input", { type: "password", autocomplete: "off", placeholder: "Chiave API di Buffer" });
-  return h("div", { class: "carta" }, h("div", { class: "nome" }, "Collega Buffer"),
-    h("p", { class: "aiuto" }, "Non basta il login a Buffer: serve una chiave API. In Buffer clicca l'icona del profilo in basso a sinistra → «API» (oppure vai su publish.buffer.com/settings/api) → scheda «Personal Access» → «+ New Key». Incollala qui sotto: viene cifrata e non verrà più mostrata. Gli agenti non pubblicano mai da soli."),
-    h("label", {}, "Chiave API", chiave), msg,
-    h("div", { class: "azioni" }, h("button", { class: "p", onclick: async (ev) => {
-      const b = ev.currentTarget; b.disabled = true; msg.replaceChildren();
-      try { await api("PUT", "/gestione/social/buffer", { chiave: chiave.value.trim() }); ricarica(); }
-      catch (e) { msg.replaceChildren(avviso(e.message, "no")); b.disabled = false; } } }, "Collega e verifica")));
+  const nome = h("input", { maxlength: 60, placeholder: "Nome per riconoscerlo (facoltativo), es. Personale o Renovatio" });
+  return h("div", {},
+    accounts.map(a => h("div", { class: "carta", style: "margin-bottom:8px" }, h("div", { class: "nome" }, "Buffer · " + a.etichetta),
+      a.errore ? avviso(a.errore, "no") : null,
+      a.canali.length ? h("p", { class: "aiuto" }, "Canali: " + a.canali.map(c => c.name + " (" + c.service + ")").join(", "))
+        : (a.errore ? null : h("p", { class: "aiuto" }, "Nessun canale: collegali dentro Buffer (Instagram, Facebook, LinkedIn, TikTok…).")),
+      h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => {
+        if (!confirm("Scollegare questo account Buffer?")) return;
+        try { await api("DELETE", "/gestione/social/buffer/" + a.id); ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Scollega")))),
+    accounts.length ? h("p", { class: "aiuto" }, "Per far preparare post a un agente, accendi «Può preparare post per i social» nella sua scheda: restano in attesa del tuo OK.") : null,
+    h("div", { class: "carta" }, h("div", { class: "nome" }, accounts.length ? "Collega un altro account Buffer" : "Collega Buffer"),
+      h("p", { class: "aiuto" }, "Non basta il login a Buffer: serve una chiave API, una per ogni account. In Buffer clicca l'icona del profilo in basso a sinistra → «API» (oppure vai su publish.buffer.com/settings/api) → scheda «Personal Access» → «+ New Key». Incollala qui sotto: viene cifrata e non verrà più mostrata. Gli agenti non pubblicano mai da soli."),
+      h("label", {}, "Chiave API", chiave), h("label", {}, "Nome", nome), msg,
+      h("div", { class: "azioni" }, h("button", { class: "p", onclick: async (ev) => {
+        const b = ev.currentTarget; b.disabled = true; msg.replaceChildren();
+        try { await api("PUT", "/gestione/social/buffer", { chiave: chiave.value.trim(), etichetta: nome.value.trim() }); ricarica(); }
+        catch (e) { msg.replaceChildren(avviso(e.message, "no")); b.disabled = false; } } }, "Collega e verifica"))));
 }
 
 // ---------- scrivi e pubblica ----------
 async function schedaPubblica(corpo, apri) {
   const [st, bf] = await Promise.all([api("GET", "/gestione/social-nativo/stato"), api("GET", "/gestione/social/buffer").catch(() => ({ collegato: false, canali: [] }))]);
-  const canali = st.provider.flatMap(p => p.account.flatMap(a => a.canali.filter(c => c.attivo))).concat((bf.canali || []).map(c => ({ id: "b:" + c.id, nome: c.name, rete: c.service + " via Buffer", buffer: true })));
+  const canali = st.provider.flatMap(p => p.account.flatMap(a => a.canali.filter(c => c.attivo))).concat((bf.canali || []).map(c => ({ id: "b:" + c.id, nome: c.name, rete: c.service + " via Buffer" + ((bf.account || []).length > 1 ? " · " + c.account : ""), buffer: true })));
   if (!canali.length) return riempi(corpo, [h("p", { class: "sotto" }, "Nessun canale collegato: collega prima almeno una rete."), h("button", { class: "p", type: "button", onclick: () => { stato.sezione = "social"; vai("impostazioni", "social"); } }, "Vai ai collegamenti")]);
   const msg = h("div"); const testo = h("textarea", { style: "min-height:130px" }); const conta = h("span", { class: "sotto" });
   const sel = canali.map(c => { const x = h("input", { type: "checkbox" }); return [c, x]; });

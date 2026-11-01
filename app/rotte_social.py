@@ -18,42 +18,49 @@ def _err(e: Exception, codice: int = status.HTTP_409_CONFLICT):
 
 @router.get("/buffer")
 def stato_buffer(_: dict = Depends(solo_titolare)):
-    """Buffer: alternativa per i profili che non si possono collegare direttamente (es. profili personali di Instagram e Facebook)."""
+    """Buffer: alternativa per i profili che non si possono collegare direttamente (es. profili personali di Instagram e Facebook). Piu' account insieme."""
     with connessione() as conn:
-        out = {"collegato": buffer.collegato(conn), "canali": [], "errore": None}
-        if out["collegato"]:
-            try:
-                out["canali"] = buffer.canali(conn)
-            except buffer.ErroreBuffer as e:
-                out["errore"] = str(e)
-        return out
+        acc = buffer.stato_account(conn)
+        return {"collegato": bool(acc), "account": acc, "canali": [c for a in acc for c in a["canali"]],
+                "errore": next((a["errore"] for a in acc if a["errore"]), None)}
 
 
 class Chiave(BaseModel):
     chiave: str = Field(min_length=10, max_length=500)   # mai restituita
+    etichetta: str = Field(default="", max_length=60)
 
 
 @router.put("/buffer")
 def collega(d: Chiave, utente: dict = Depends(solo_titolare)):
+    """Aggiunge un account Buffer (se ne possono collegare piu' di uno)."""
     with connessione() as conn:
         try:
-            buffer.salva_chiave(conn, d.chiave)
+            aid = buffer.aggiungi(conn, d.chiave, d.etichetta)
             conn.commit()
-            canali = buffer.canali(conn)
+            canali = buffer.canali_account(conn, buffer._account(conn, aid))
         except cassaforte.CassaforteNonConfigurata as e:
             raise _err(e, status.HTTP_503_SERVICE_UNAVAILABLE)
         except buffer.ErroreBuffer as e:
-            buffer.scollega(conn)   # una chiave che non funziona non resta salvata
-            conn.commit()
+            conn.rollback()
             raise _err(e)
         registro.registra(conn, utente, "collegamento", "Buffer collegato", "Buffer", "buffer", "buffer")
-    return {"collegato": True, "canali": canali}
+    return {"collegato": True, "id": aid, "canali": canali}
+
+
+@router.delete("/buffer/{account_id}")
+def scollega_uno(account_id: int, utente: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        if conn.execute("SELECT 1 FROM account_buffer WHERE id = %s", (account_id,)).fetchone() is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Account Buffer inesistente")
+        buffer.rimuovi(conn, account_id)
+        registro.registra(conn, utente, "collegamento", "Account Buffer scollegato", "Buffer", "buffer", "buffer")
+        return {"collegato": buffer.collegato(conn)}
 
 
 @router.delete("/buffer")
 def scollega(utente: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        buffer.scollega(conn)
+        buffer.rimuovi(conn)
         registro.registra(conn, utente, "collegamento", "Buffer scollegato", "Buffer", "buffer", "buffer")
     return {"collegato": False}
 

@@ -23,20 +23,27 @@ PW = "PasswordLunga!2026"
 sql("INSERT INTO utenti (nome,email,password_hash,ruolo_globale) VALUES ('Lorenzo','l@p.it',%s,'titolare')", (cifra_password(PW),))
 sql("INSERT INTO utenti (nome,email,password_hash,ruolo_globale) VALUES ('Anna','anna@p.it',%s,'collaboratore')", (cifra_password(PW),))
 inviati = []
-def finto(conn, query):
-    if "organizations" in query: return {"account": {"organizations": [{"id": "ORG1", "name": "Lorenzo"}]}}
-    if "channels(" in query: return {"channels": [{"id": "CH1", "name": "lorenzo.zeppa", "service": "instagram"}, {"id": "CH2", "name": "Lorenzo Zeppa", "service": "facebook"}]}
+from app import cassaforte
+def finto(cifrata, query):
+    k = cassaforte.decifra(cifrata); o = "ORGA" if "chiave-A" in k else "ORGB"
+    if "organizations" in query: return {"account": {"organizations": [{"id": o, "name": "Org " + o}]}}
+    if "channels(" in query:
+        return {"channels": [{"id": "CH1", "name": "lorenzo.zeppa", "service": "instagram"}, {"id": "CH2", "name": "Lorenzo Zeppa", "service": "facebook"}]} if o == "ORGA" else {"channels": [{"id": "CH3", "name": "renovatio", "service": "facebook"}]}
     if "createPost" in query:
-        inviati.append(query); return {"createPost": {"post": {"id": "BP" + str(len(inviati))}}}
+        inviati.append((o, query)); return {"createPost": {"post": {"id": "BP" + str(len(inviati))}}}
     return {}
-buffer._gql = finto
+buffer._gql_chiave = finto
 with TestClient(app) as c:
     H = {"Authorization": "Bearer " + accedi(c, "l@p.it", PW)}; HA = {"Authorization": "Bearer " + accedi(c, "anna@p.it", PW)}
     ok("Buffer non collegato all'inizio", c.get("/gestione/social/buffer", headers=H).json()["collegato"] is False)
     ok("solo il titolare collega Buffer", c.put("/gestione/social/buffer", headers=HA, json={"chiave": "x" * 20}).status_code == 403)
-    r = c.put("/gestione/social/buffer", headers=H, json={"chiave": "chiave-di-prova-buffer"})
+    r = c.put("/gestione/social/buffer", headers=H, json={"chiave": "chiave-A-di-prova-buffer", "etichetta": "Personale"})
     ok("collegamento con chiave", r.status_code == 200 and len(r.json()["canali"]) == 2, r.text)
-    ok("la chiave e' cifrata e mai restituita", "chiave-di-prova" not in sql("SELECT valore FROM impostazioni_sistema WHERE chiave='buffer_chiave_cifrata'")[0][0] and "chiave-di-prova" not in c.get("/gestione/social/buffer", headers=H).text)
+    ok("la chiave e' cifrata e mai restituita", "chiave-A" not in sql("SELECT chiave_cifrata FROM account_buffer")[0][0] and "chiave-A" not in c.get("/gestione/social/buffer", headers=H).text)
+    ok("lo stesso account non si collega due volte", c.put("/gestione/social/buffer", headers=H, json={"chiave": "chiave-A-altra-copia"}).status_code == 409)
+    r = c.put("/gestione/social/buffer", headers=H, json={"chiave": "chiave-B-di-prova-buffer", "etichetta": "Renovatio"})
+    st = c.get("/gestione/social/buffer", headers=H).json()
+    ok("secondo account collegato: due account, tre canali", r.status_code == 200 and len(st["account"]) == 2 and {x["id"] for x in st["canali"]} == {"CH1", "CH2", "CH3"} and [a["etichetta"] for a in st["account"]] == ["Personale", "Renovatio"], str(st)[:200])
     ok("i canali Buffer compaiono tra i canali assegnabili", {x["id"] for x in c.get("/gestione/social/canali", headers=H).json()["canali"]} >= {"CH1", "CH2"})
     # post preparato da un agente e approvato
     ag = sql("SELECT id FROM agenti WHERE nome='Sofia'")[0][0]
@@ -57,6 +64,11 @@ with TestClient(app) as c:
     ok("media non https: 409/422", c.post("/gestione/social/buffer/post", headers=H, json={"canale_id": "CH2", "testo": "a", "media": [{"tipo": "image", "url": "http://x/y.jpg"}]}).status_code in (409, 422))
     ok("Anna non pubblica", c.post("/gestione/social/buffer/post", headers=HA, json={"canale_id": "CH2", "testo": "a"}).status_code == 403)
     ok("i canali diretti restano in elenco (nessun conflitto)", c.get("/gestione/social-nativo/stato", headers=H).status_code == 200)
+    r = c.post("/gestione/social/buffer/post", headers=H, json={"canale_id": "CH3", "testo": "Dal secondo account"})
+    ok("un post sul secondo account usa la chiave del secondo account", r.status_code == 201 and inviati[-1][0] == "ORGB" and inviati[0][0] == "ORGA", str(inviati)[:100])
+    sec = [a for a in c.get("/gestione/social/buffer", headers=H).json()["account"] if a["etichetta"] == "Renovatio"][0]["id"]
+    ok("scollego un solo account: l'altro resta", c.delete(f"/gestione/social/buffer/{sec}", headers=H).status_code == 200 and [x["id"] for x in c.get("/gestione/social/buffer", headers=H).json()["canali"]] == ["CH1", "CH2"])
+    ok("account inesistente: 404", c.delete("/gestione/social/buffer/9999", headers=H).status_code == 404)
     ok("scollega Buffer", c.delete("/gestione/social/buffer", headers=H).status_code == 200 and c.get("/gestione/social/buffer", headers=H).json()["collegato"] is False)
     ok("le migrazioni non cancellano piu' la chiave", "DELETE FROM impostazioni_sistema" not in open("sql/24_zz_social_estesi.sql").read())
 print("TOTALE", sum(ris), "/", len(ris)); sys.exit(0 if all(ris) else 1)
