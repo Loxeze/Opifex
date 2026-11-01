@@ -170,7 +170,7 @@ STRUMENTI = [
 ]
 
 AVVISO = ("\n\nCANVA: hai strumenti per creare design vuoti (canva_crea_design), cercarli (canva_cerca_design) ed esportarli (canva_esporta_design). "
-          "Non puoi disegnare dentro Canva ne' cancellare o condividere: crea il design, passa il link a Lorenzo con il testo e le indicazioni da inserire. "
+          "Canva NON permette di disegnare dentro i design: non creare design vuoti per poi chiedere a Lorenzo di compilarli. Se devi produrre una grafica (locandina, scheda, post, copertina) disegnala tu con grafica_crea e consegna il file finito; usa Canva solo per cercare o esportare design che esistono gia'. "
           "Non dichiarare di aver fatto qualcosa se lo strumento ha dato errore: riporta l'errore.")
 
 

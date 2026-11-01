@@ -55,6 +55,15 @@ STRUMENTI = [
                                                       "intervallo": {"type": "string"}, "aggiungi": {"type": "boolean"}}, "required": ["file_id", "righe"]}},
     {"name": "google_sostituisci_documento", "description": "Sostituisce l'intero contenuto di un documento creato da un agente; 'testo' in Markdown, stessa impaginazione di google_crea_documento.",
      "input_schema": {"type": "object", "properties": {"file_id": {"type": "string"}, "testo": {"type": "string"}}, "required": ["file_id", "testo"]}},
+    {"name": "grafica_crea", "description": "DISEGNI TU la grafica (locandina, scheda A4, post, copertina, story, miniatura): la impagini in HTML e CSS e Opifex la trasforma in PNG, JPG o PDF e la salva su Drive nella cartella del progetto. "
+     "NON serve Canva: Canva non permette di disegnare dentro i design. 'html' e' il corpo della pagina con stile inline o <style>: dimensioni in px pari al formato, font di Google Fonts con <link> (altrimenti font di sistema), sfondi a colori e gradienti, flex/grid, SVG inline per loghi e icone. "
+     "Niente script e niente immagini da internet: le foto di Drive si passano in 'immagini' ([{nome:'foto', file_id:'...'}]) e si usano nell'HTML come src=\"@foto\" o url(@foto) (object-fit:cover per riempire). "
+     "formato: ig_post, ig_quadrato, verticale_9_16, linkedin, facebook, youtube_miniatura, x_post, a4_300dpi, a3_300dpi (PNG/JPG di stampa), a4_pdf, a4_orizzontale_pdf, a3_pdf (PDF), oppure larghezza e altezza in pixel. "
+     "uscita: png (default), jpg o pdf. Per i formati in px il tuo HTML deve riempire esattamente larghezza x altezza CSS (a4: 794x1123, a3: 1123x1587, social: i pixel del formato). "
+     "Dopo averla creata guardala con immagine_analizza (file_id del risultato, con 'domanda') e correggi l'HTML finche' testo, gerarchia e margini sono a posto; poi consegna il link a Lorenzo.",
+     "input_schema": {"type": "object", "properties": {"html": {"type": "string"}, "formato": {"type": "string"}, "larghezza": {"type": "integer"}, "altezza": {"type": "integer"},
+                                                       "uscita": {"type": "string", "enum": ["png", "jpg", "pdf"]}, "immagini": {"type": "array", "items": {"type": "object", "properties": {"nome": {"type": "string"}, "file_id": {"type": "string"}}, "required": ["nome", "file_id"]}},
+                                                       "nome": {"type": "string"}, "progetto": {"type": "string"}}, "required": ["html"]}},
 ]
 
 AVVISO = ("\n\nGOOGLE DRIVE: hai strumenti per cercare, leggere, creare e modificare file nella cartella Opifex (google_*). "
@@ -232,6 +241,43 @@ def _esegui(conn, agente_id: int, nome: str, d: dict) -> str:
                 tipo = {MIME_FOGLIO: "foglio", MIME_DOC: "documento", "application/vnd.google-apps.folder": "cartella"}.get(x["mimeType"], "altro")
                 out.append(f"{x['id']} | {x['name']} | {tipo}")
         return "\n".join(out) or "Nessun file trovato nella cartella Opifex"
+    if nome == "grafica_crea":
+        from . import grafica
+        import base64
+        try:
+            fmt_ = str(d.get("formato") or "")
+            uscita = str(d.get("uscita") or ("pdf" if fmt_ in grafica.PDF else "png")).lower()
+            if uscita not in ("png", "jpg", "pdf"):
+                return "ERRORE: uscita deve essere png, jpg o pdf"
+            w, h, scala, desc = grafica.misure(fmt_, d.get("larghezza"), d.get("altezza"))
+            imm = {}
+            for x in (d.get("immagini") or [])[:grafica.MAX_IMMAGINI]:
+                nm, fid = re.sub(r"[^\w-]", "", str(x.get("nome") or "")), str(x.get("file_id") or "")
+                if not nm or not fid:
+                    return "ERRORE: ogni immagine ha bisogno di nome e file_id"
+                if not _nell_albero(tok, fid, radici):
+                    return f"ERRORE: l'immagine {fid} non e' dentro Opifex ne' in una cartella di lavoro autorizzata"
+                m = _richiesta("GET", f"{_DRIVE}/{fid}", tok, params={"fields": "name,mimeType,size"}).json()
+                if not m["mimeType"].startswith("image/") or int(m.get("size") or 0) > 25 * 1024 * 1024:
+                    return f"ERRORE: {m.get('name', fid)} non e' un'immagine fino a 25 MB"
+                dati = _richiesta("GET", f"{_DRIVE}/{fid}", tok, params={"alt": "media"}).content
+                dati, tipo_img = grafica.alleggerisci(dati, m["mimeType"])
+                imm[nm] = f"data:{tipo_img};base64," + base64.b64encode(dati).decode()
+            pagina = grafica.componi(d.get("html"), imm)
+            esito = grafica.renderizza(pagina, w, h, scala, uscita if uscita != "pdf" else "png", pdf=(uscita == "pdf"))
+        except grafica.ErroreGrafica as e:
+            return "ERRORE: " + str(e)
+        except Exception as e:  # noqa: BLE001
+            return f"ERRORE: la grafica non e' stata generata ({type(e).__name__}: {str(e)[:200]})"
+        dest = _cartella_destinazione(conn, tok, radice, d.get("progetto"), agente_id)
+        base = re.sub(r"[^\w .\-]", "_", str(d.get("nome") or "grafica"))[:80]
+        mime = {"png": "image/png", "jpg": "image/jpeg", "pdf": "application/pdf"}[uscita]
+        nome_file = f"{base}_{fmt_ or 'personalizzato'}.{uscita}"
+        limite = "opifex-limite-7c3"
+        corpo = (f"--{limite}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{json.dumps({'name': nome_file, 'parents': [dest]})}\r\n--{limite}\r\nContent-Type: {mime}\r\n\r\n").encode() + esito + f"\r\n--{limite}--".encode()
+        f_ = _richiesta("POST", _UPLOAD, tok, params={"uploadType": "multipart", "fields": "id,name,webViewLink"}, headers={"Content-Type": f"multipart/related; boundary={limite}"}, content=corpo).json()
+        conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli) VALUES (%s,'google_file_creato',%s::jsonb)", (agente_id, json.dumps({"file": f_["name"], "tipo": "grafica"})))
+        return f"Grafica creata: «{f_['name']}» id {f_['id']} link {f_.get('webViewLink', '')} ({desc}, {len(esito) // 1024} KB). Controllala con immagine_analizza prima di consegnarla." if uscita != "pdf" else f"PDF creato: «{f_['name']}» id {f_['id']} link {f_.get('webViewLink', '')} ({desc}, {len(esito) // 1024} KB)."
     if nome in ("immagine_analizza", "immagine_adatta"):
         from . import creativi
         fid = str(d.get("file_id", ""))
