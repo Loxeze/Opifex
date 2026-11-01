@@ -88,7 +88,8 @@ def canali(conn) -> list[dict]:
 def canali_per_agente(conn, agente_id: int) -> list[dict]:
     """Canali che l'agente puo' usare: quelli senza assegnazioni (liberi) e quelli assegnati alle sue aziende o ai suoi progetti.
     Un agente che «vede tutto» li ha tutti."""
-    tutti = canali(conn)
+    from . import social_nativo
+    tutti = social_nativo.canali_unificati(conn)
     a = conn.execute("SELECT vede_tutto FROM agenti WHERE id = %s", (agente_id,)).fetchone()
     if a and a["vede_tutto"]:
         return tutti
@@ -151,21 +152,28 @@ STRUMENTI = [
      "input_schema": {"type": "object", "properties": {"canale_id": {"type": "string"}, "testo": {"type": "string"}, "quando": {"type": "string"},
                                                       "media": {"type": "array", "items": {"type": "object", "properties": {"tipo": {"type": "string"}, "url": {"type": "string"}}}}},
                       "required": ["canale_id", "testo"]}},
+    {"name": "social_analisi", "description": "Risultati dei canali social collegati direttamente a Opifex: seguaci, post pubblicati, visualizzazioni, interazioni, post migliori e "
+     "giorni/orari che funzionano meglio. Usalo prima di preparare nuovi post, per decidere cosa funziona. 'giorni' = periodo (default 30).",
+     "input_schema": {"type": "object", "properties": {"giorni": {"type": "integer"}}}},
 ]
 
-AVVISO = ("\n\nSOCIAL: puoi preparare post per i canali collegati a Buffer (social_elenca_canali, social_prepara_post). Non pubblichi tu: ogni post va in coda "
+AVVISO = ("\n\nSOCIAL: puoi preparare post per i canali social collegati (social_elenca_canali, social_prepara_post) e leggerne i risultati (social_analisi: guardali prima di scrivere). Non pubblichi tu: ogni post va in coda "
           "«Da approvare» e lo pubblica solo Lorenzo, dopo averlo letto. Scrivi testi pronti, adatti alla rete scelta, senza inventare dati. "
           "Quando prepari un post dillo a Lorenzo indicando canale e data.")
 
 
 def gestore(conn, agente_id: int):
     from datetime import datetime
+    from .social_nativo import ErroreSocial
 
     def _g(nome: str, d: dict) -> str:
         try:
             if nome == "social_elenca_canali":
                 c = canali_per_agente(conn, agente_id)
-                return "\n".join(f"{x['id']} | {x['name']} | {x['service']}" for x in c) or "Nessun canale collegato a Buffer"
+                return "\n".join(f"{x['id']} | {x['name']} | {x['service']}" for x in c) or "Nessun canale social collegato"
+            if nome == "social_analisi":
+                from . import social_nativo
+                return social_nativo.riassunto_testo(conn, int(d.get("giorni") or 30))
             if nome == "social_prepara_post":
                 testo = str(d.get("testo", "")).strip()
                 if not testo or len(testo) > 5000:
@@ -183,6 +191,9 @@ def gestore(conn, agente_id: int):
                     if quando.tzinfo is None:
                         return "ERRORE: indica anche il fuso orario nella data"
                 media = valida_media(d.get("media"))
+                from . import social_nativo
+                if social_nativo.id_canale(cid) is not None:
+                    social_nativo.verifica_post(ch["service"], testo, media)
                 pid = conn.execute(
                     """INSERT INTO post_social (agente_id, canale_id, canale_nome, servizio, testo, media, programmato_il)
                        VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s) RETURNING id""",
@@ -191,7 +202,7 @@ def gestore(conn, agente_id: int):
                 conn.commit()
                 return f"Post n. {pid} preparato per {ch['name']}: e' in attesa di approvazione di Lorenzo (pagina Social)."
             return "Strumento sconosciuto"
-        except ErroreBuffer as e:
+        except (ErroreBuffer, ErroreSocial) as e:
             conn.rollback()
             return "ERRORE: " + str(e)
         except Exception as e:

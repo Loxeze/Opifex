@@ -1,10 +1,10 @@
 """Pagina Social: collegamento a Buffer (solo titolare) e coda dei post da approvare."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from . import buffer, cassaforte
+from . import buffer, cassaforte, social_nativo
 from . import registro
 from .db import connessione
 from .permessi import solo_titolare
@@ -63,10 +63,7 @@ def scollega(utente: dict = Depends(solo_titolare)):
 def canali_assegnati(_: dict = Depends(solo_titolare)):
     """Canali di Buffer con le aziende e i progetti a cui sono assegnati (nessuna assegnazione = libero per tutti gli agenti social)."""
     with connessione() as conn:
-        try:
-            elenco_c = buffer.canali(conn)
-        except buffer.ErroreBuffer as e:
-            raise _err(e)
+        elenco_c = social_nativo.canali_unificati(conn)
         ass = conn.execute("SELECT canale_id, azienda_id, progetto_id FROM canali_social_assegnazioni").fetchall()
         for c in elenco_c:
             c["aziende"] = [a["azienda_id"] for a in ass if a["canale_id"] == c["id"] and a["azienda_id"]]
@@ -84,12 +81,9 @@ class Assegnazione(BaseModel):
 @router.put("/canali/{canale_id}")
 def assegna_canale(canale_id: str, d: Assegnazione, utente: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        try:
-            ch = next((x for x in buffer.canali(conn) if x["id"] == canale_id), None)
-        except buffer.ErroreBuffer as e:
-            raise _err(e)
+        ch = next((x for x in social_nativo.canali_unificati(conn) if x["id"] == canale_id), None)
         if ch is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Canale inesistente su Buffer")
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Canale inesistente")
         az, pr = sorted(set(d.aziende)), sorted(set(d.progetti))
         if az and conn.execute("SELECT count(*) AS n FROM aziende WHERE id = ANY(%s)", (az,)).fetchone()["n"] != len(az):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Azienda inesistente")
@@ -169,6 +163,22 @@ def decisione(pid: int, d: Decisione, utente: dict = Depends(solo_titolare)):
             raise HTTPException(status.HTTP_409_CONFLICT, "Il post non e' piu' in attesa")
         if p["programmato_il"] is not None and p["programmato_il"] <= datetime.now(timezone.utc):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "L'orario scelto e' gia' passato: modificalo prima di approvare")
+        if social_nativo.id_canale(p["canale_id"]) is not None:
+            c = conn.execute("SELECT rete FROM canali_nativi WHERE id=%s AND attivo", (social_nativo.id_canale(p["canale_id"]),)).fetchone()
+            if c is None:
+                raise HTTPException(status.HTTP_409_CONFLICT, "Il canale non e' piu' collegato")
+            try:
+                social_nativo.verifica_post(c["rete"], p["testo"], p["media"])
+            except social_nativo.ErroreSocial as e:
+                raise _err(e, status.HTTP_422_UNPROCESSABLE_ENTITY)
+            conn.execute("UPDATE post_social SET stato='programmato', errore=NULL, nota=%s, approvato_da_utente_id=%s, aggiornato_il=NOW() WHERE id=%s",
+                         (d.nota or None, utente["id"], pid))
+            registro.registra(conn, utente, "post_social", "approvato (pubblicazione diretta)", (p["testo"] or "")[:200], "post_social", pid, d.nota,
+                              {"canale": p["canale_nome"], "programmato_il": p["programmato_il"]})
+            conn.commit()
+            if p["programmato_il"] is None or p["programmato_il"] <= datetime.now(timezone.utc) + timedelta(seconds=60):
+                social_nativo.avvia_pubblicazione(pid)
+            return {"stato": "programmato"}
         try:
             bid = buffer.crea_post(conn, p["canale_id"], p["testo"], p["media"], p["programmato_il"])
         except buffer.ErroreBuffer as e:

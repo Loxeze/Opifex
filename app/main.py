@@ -27,6 +27,7 @@ from .formazione_auto import router as router_formauto
 from .sfondo_arte import router as router_arte
 from .stili_montaggio import router as router_contenuti
 from .monitor_social import router as router_monsoc
+from .rotte_social_nativo import router as router_social_nativo
 from .archivio_nas import router as router_archivio, router_nas as router_archivio_nas
 from .rotte_squadre import router as router_squadre
 from .rotte_avatar import router as router_avatar
@@ -168,6 +169,7 @@ async def _manutenzione():
         _passo("relazioni tra documenti", lambda c: __import__("app.memoria_vettoriale", fromlist=["x"]).relaziona(c))
         _passo("studi in coda", lambda c: __import__("app.studio", fromlist=["x"]).giro(c))
         _passo("formazione automatica", lambda c: __import__("app.formazione_auto", fromlist=["x"]).giro(c))
+        _passo("risultati dei canali social", lambda c: __import__("app.social_nativo", fromlist=["x"]).giro_raccolta(c))
         _passo("monitoraggio dei profili social", lambda c: __import__("app.monitor_social", fromlist=["x"]).giro(c))
         _passo("archivio NAS", lambda c: __import__("app.archivio_nas", fromlist=["x"]).giro(c))
         _passo("giro di aggiornamento", lambda c: __import__("app.giro_domande", fromlist=["x"]).giro(c))
@@ -192,6 +194,7 @@ async def _trigger_orari():
 
     def giro():
         _passo("trigger a orario", trigger.tick)
+        _passo("pubblicazione social", lambda c: __import__("app.social_nativo", fromlist=["x"]).giro_pubblicazione(c))
         _passo("attese scadute e Ginnasio automatico", attese.controlla)
         _passo("notifiche push", webpush.invia_notifiche)
     await asyncio.sleep(45)
@@ -275,6 +278,7 @@ async def errore_imprevisto(richiesta, ex):
 
 
 app.include_router(router_agenti)
+app.include_router(router_social_nativo)
 app.include_router(router_briefing)
 app.include_router(router_gestione)
 app.include_router(router_documenti)

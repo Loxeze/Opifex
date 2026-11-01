@@ -117,7 +117,7 @@ with TestClient(app) as c:
     coda.append(msg(555, "/aiuto")); telegram.giro(1)
     ok("/aiuto", "/richieste" in ultimo())
     coda.append({"update_id": 999, "message": {"chat": {"id": 555, "type": "private"}, "voice": {"file_id": "x"}}}); telegram.giro(1)
-    ok("messaggio vocale: spiega che per ora e' solo testo", "solo messaggi di testo" in ultimo())
+    ok("messaggio vocale non scaricabile: Lorenzo ne e' informato", "vocale" in ultimo() and "Non riesco" in ultimo())
 
     # --- notifiche in uscita
     sql("DELETE FROM notifiche")
