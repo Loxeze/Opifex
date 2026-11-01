@@ -955,6 +955,60 @@ def analisi(conn, giorni: int = 30) -> dict:
             "ultima_raccolta": _leggi(conn, "sn_ultima_raccolta") or None}
 
 
+def _somme(conn, giorni_da: int, giorni_a: int) -> dict:
+    """Totali dei post pubblicati tra `giorni_da` e `giorni_a` giorni fa (ultime metriche rilevate di ciascun post)."""
+    t = conn.execute(f"""SELECT count(*) AS post, coalesce(sum(m.visualizzazioni),0) AS visualizzazioni, coalesce(sum(m.raggiunti),0) AS raggiunti,
+                          coalesce(sum(m.mi_piace),0) AS mi_piace, coalesce(sum(m.commenti),0) AS commenti, coalesce(sum(m.condivisioni),0) AS condivisioni,
+                          coalesce(sum(m.salvataggi),0) AS salvataggi, coalesce(sum(m.click),0) AS click
+                       FROM post_social p LEFT JOIN {_ULTIME} m ON m.post_id=p.id
+                       WHERE p.stato='pubblicato' AND p.pubblicato_il > NOW() - make_interval(days => %s) AND p.pubblicato_il <= NOW() - make_interval(days => %s)""",
+                      (giorni_da, giorni_a)).fetchone()
+    t = {k: int(v or 0) for k, v in t.items()}
+    t["interazioni"] = _eng(t)
+    return t
+
+
+def panoramica(conn, giorni: int = 30) -> dict:
+    """Primo colpo d'occhio della pagina Social: interazioni, post, commenti, visualizzazioni e andamento, dai canali collegati,
+    con il confronto sul periodo precedente della stessa lunghezza."""
+    giorni = max(1, min(int(giorni), 365))
+    ora, prima = _somme(conn, giorni, 0), _somme(conn, 2 * giorni, giorni)
+    seg_ora = seg_prima = 0
+    canali = []
+    for c in analisi(conn, giorni)["canali"]:
+        if not c["attivo"]:
+            continue
+        pr = conn.execute(f"""SELECT count(*) AS post, coalesce(sum(coalesce(m.mi_piace,0)+coalesce(m.commenti,0)+coalesce(m.condivisioni,0)+coalesce(m.salvataggi,0)),0) AS inter
+                              FROM post_social p LEFT JOIN {_ULTIME} m ON m.post_id=p.id WHERE p.canale_id=%s AND p.stato='pubblicato'
+                              AND p.pubblicato_il > NOW() - make_interval(days => %s) AND p.pubblicato_il <= NOW() - make_interval(days => %s)""",
+                          (c["canale_id"], 2 * giorni, giorni)).fetchone()
+        if c["seguaci"] is not None:
+            seg_ora += c["seguaci"]
+            seg_prima += c["seguaci"] - (c["seguaci_variazione"] or 0)
+        canali.append({k: c[k] for k in ("canale_id", "nome", "rete", "errore", "seguaci", "seguaci_variazione", "post", "visualizzazioni", "interazioni",
+                                         "commenti", "coinvolgimento", "dati_post")} | {"post_prima": int(pr["post"]), "interazioni_prima": int(pr["inter"])})
+    giorno = "(p.pubblicato_il AT TIME ZONE 'Europe/Rome')::date"
+    perg = {str(r["g"]): r for r in conn.execute(f"""SELECT {giorno} AS g, count(*) AS post, coalesce(sum(m.visualizzazioni),0) AS vis,
+                          coalesce(sum(coalesce(m.mi_piace,0)+coalesce(m.commenti,0)+coalesce(m.condivisioni,0)+coalesce(m.salvataggi,0)),0) AS inter,
+                          coalesce(sum(m.commenti),0) AS comm
+                       FROM post_social p LEFT JOIN {_ULTIME} m ON m.post_id=p.id
+                       WHERE p.stato='pubblicato' AND p.pubblicato_il > NOW() - make_interval(days => %s) GROUP BY 1""", (giorni + 1,)).fetchall()}
+    oggi = conn.execute("SELECT (NOW() AT TIME ZONE 'Europe/Rome')::date AS d").fetchone()["d"]
+    from datetime import timedelta
+    serie = []
+    for i in range(giorni - 1, -1, -1):
+        d = oggi - timedelta(days=i)
+        r = perg.get(str(d))
+        serie.append({"giorno": str(d), "post": int(r["post"]) if r else 0, "interazioni": int(r["inter"]) if r else 0,
+                      "commenti": int(r["comm"]) if r else 0, "visualizzazioni": int(r["vis"]) if r else 0})
+    migliori = analisi(conn, giorni)["migliori"][:3]
+    nativi = len(canali)
+    return {"giorni": giorni, "ora": ora, "prima": prima, "seguaci": seg_ora if nativi else None,
+            "seguaci_variazione": (seg_ora - seg_prima) if nativi else None, "canali": canali, "serie": serie,
+            "migliori": [{k: p[k] for k in ("id", "canale_nome", "servizio", "testo", "pubblicato_il", "permalink", "visualizzazioni", "interazioni", "commenti")} for p in migliori],
+            "ultima_raccolta": _leggi(conn, "sn_ultima_raccolta") or None}
+
+
 def riassunto_testo(conn, giorni: int = 30) -> str:
     a = analisi(conn, giorni)
     if not a["canali"]:

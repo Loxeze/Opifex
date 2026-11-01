@@ -36,7 +36,7 @@ function graficoArea(valori, etichette, colore, formato, alt) {
     const v = mx * k / 3;
     s.append(svgEl("line", { x1: l, x2: W - r, y1: Y(v), y2: Y(v), stroke: PB.griglia }), svgEl("text", { x: l - 6, y: Y(v) + 4, "text-anchor": "end", "font-size": 12, fill: PB.tenue }, formato(v)));
   }
-  [0, 10, 20, valori.length - 1].forEach(i => s.append(svgEl("text", { x: X(i), y: H - 6, "text-anchor": i === 0 ? "start" : i === valori.length - 1 ? "end" : "middle", "font-size": 12, fill: PB.tenue }, pbData(etichette[i]))));
+  [0, 10, 20, valori.length - 1].filter((i, k, a) => i < valori.length && a.indexOf(i) === k).forEach(i => s.append(svgEl("text", { x: X(i), y: H - 6, "text-anchor": i === 0 ? "start" : i === valori.length - 1 ? "end" : "middle", "font-size": 12, fill: PB.tenue }, pbData(etichette[i]))));
   const linea = valori.map((v, i) => X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" L");
   s.append(svgEl("path", { d: `M${linea} L${X(valori.length - 1)},${Y(0)} L${X(0)},${Y(0)} Z`, fill: colore, "fill-opacity": ".14" }),
     svgEl("path", { d: "M" + linea, fill: "none", stroke: colore, "stroke-width": 2, "stroke-linejoin": "round" }),
@@ -60,7 +60,7 @@ function graficoBarre(valori, etichette, colore, formato, alt) {
     s.append(svgEl("rect", { x, y: t + ih - alt_, width: larg, height: alt_, rx: 2, fill: colore, "fill-opacity": oggi ? 1 : 0.55 }, svgEl("title", {}, pbData(etichette[i]) + ": " + formato(v))));
     if (oggi || i === imax) s.append(svgEl("text", { x: x + larg / 2, y: Math.max(11, t + ih - alt_ - 4), "text-anchor": oggi && n - 1 - imax < 3 && i !== imax ? "end" : "middle", "font-size": 12, "font-weight": 600, fill: PB.inchiostro }, formato(v)));
   });
-  [0, 10, 20, n - 1].forEach(i => s.append(svgEl("text", { x: l + passo * i + passo / 2, y: H - 6, "text-anchor": i === 0 ? "start" : i === n - 1 ? "end" : "middle", "font-size": 12, fill: PB.tenue }, pbData(etichette[i]))));
+  [0, 10, 20, n - 1].filter((i, k, a) => i < n && a.indexOf(i) === k).forEach(i => s.append(svgEl("text", { x: l + passo * i + passo / 2, y: H - 6, "text-anchor": i === 0 ? "start" : i === n - 1 ? "end" : "middle", "font-size": 12, fill: PB.tenue }, pbData(etichette[i]))));
   return s;
 }
 

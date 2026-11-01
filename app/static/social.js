@@ -41,6 +41,7 @@ async function schedaPanoramica(corpo, apri) {
   const oggi = new Date(); if (!meseSocial) meseSocial = new Date(oggi.getFullYear(), oggi.getMonth(), 1);
   const riepilogo = h("div", { class: "bt-plancia", style: "margin-bottom:18px" }); riassuntoSocial(riepilogo);
   const ricarica = () => schedaPanoramica(corpo, apri);
+  const cruscotto = h("div", { class: "bt-plancia", style: "margin-bottom:18px" }); cruscottoSocial(cruscotto, ricarica);
   const daApp = lista.filter(p => p.stato === "da_approvare");
   const inUscita = lista.filter(p => ["programmato", "inviato", "in_pubblicazione"].includes(p.stato)).sort((a, b) => dataPost(a) - dataPost(b));
   const usciti = lista.filter(p => p.stato === "pubblicato").sort((a, b) => dataPost(b) - dataPost(a)).slice(0, 5);
@@ -59,6 +60,7 @@ async function schedaPanoramica(corpo, apri) {
     h("div", {}, (p.testo || "").slice(0, 140) + ((p.testo || "").length > 140 ? "…" : "")), p.permalink ? h("a", { href: p.permalink, target: "_blank", rel: "noopener noreferrer", class: "sotto" }, "Apri il post") : null)) : h("p", { class: "sotto" }, vuoto);
   riempi(corpo, [!collegati ? h("div", { class: "carta" }, h("p", { class: "aiuto" }, "Nessun canale collegato: collega almeno una rete per pubblicare e vedere i risultati."),
       h("button", { class: "p", type: "button", onclick: () => { stato.sezione = "social"; vai("impostazioni", "social"); } }, "Collega i canali")) : null,
+    cruscotto, h("h3", { style: "margin-top:6px" }, "Calendario e coda"),
     h("div", { class: "carta", style: "margin-bottom:14px" }, h("div", { class: "riga", style: "align-items:center;justify-content:space-between" },
       h("h3", { style: "margin:0" }, primo.toLocaleDateString("it-IT", { month: "long", year: "numeric" })),
       h("div", { class: "azioni", style: "margin:0" }, h("button", { class: "s", type: "button", onclick: () => sposta(-1) }, "‹"), h("button", { class: "s", type: "button", onclick: () => { meseSocial = null; ricarica(); } }, "Oggi"), h("button", { class: "s", type: "button", onclick: () => sposta(1) }, "›"))),
@@ -69,7 +71,50 @@ async function schedaPanoramica(corpo, apri) {
           h("button", { class: "p", type: "button", onclick: () => apri("post") }, "Rivedi e approva")] : h("p", { class: "sotto" }, "Nessun post in attesa.")),
       h("div", { class: "carta", style: "flex:1 1 280px" }, h("h3", {}, "In uscita"), elenco(inUscita.slice(0, 5), "Niente di programmato. Scrivi un post o chiedi a un agente di prepararne.")),
       h("div", { class: "carta", style: "flex:1 1 280px" }, h("h3", {}, "Ultimi pubblicati"), elenco(usciti, "Ancora nessun post pubblicato."))),
-    h("h3", { style: "margin-top:18px" }, "Questo mese a confronto"), riepilogo]);
+    h("h3", { style: "margin-top:18px" }, "Post preparati dagli agenti: questo mese a confronto"), riepilogo]);
+}
+
+// Cruscotto in cima alla panoramica: interazioni, post, commenti e andamento dai canali collegati, con confronto sul periodo precedente.
+async function cruscottoSocial(box, ricarica) {
+  try {
+    const d = await api("GET", "/gestione/social-nativo/panoramica?giorni=" + periodoSocial);
+    const msg = h("div");
+    const O = d.ora, P = d.prima;
+    const var_ = (a, b) => { const x = variazione(a, b); return x ? h("span", { class: "bt-var" + (x.su ? "" : " giu") }, " " + x.testo) : null; };
+    const kpi = (t, ora, prima, f) => h("article", { class: "bt-card bt-kpi" }, h("div", { class: "bt-cap" }, t), h("div", { class: "bt-num" }, f(ora)),
+      h("div", { class: "bt-sotto" }, "periodo prima: " + f(prima), var_(ora, prima)));
+    const barra = h("div", { class: "azioni", style: "align-items:center;margin-bottom:10px" },
+      [7, 30, 90].map(g => h("button", { class: g === periodoSocial ? "p" : "s", type: "button", onclick: () => { periodoSocial = g; ricarica(); } }, g + " giorni")),
+      h("button", { class: "s", type: "button", onclick: async (ev) => { ev.currentTarget.disabled = true; msg.replaceChildren(avviso("Leggo i dati dalle reti…", "avv")); try { await api("POST", "/gestione/social-nativo/raccogli"); ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); ev.currentTarget.disabled = false; } } }, "Aggiorna i dati ora"),
+      h("span", { class: "sotto" }, d.ultima_raccolta ? "Dati letti dalle reti il " + new Date(d.ultima_raccolta).toLocaleString("it-IT") + " (si aggiornano ogni 6 ore)" : "Dati non ancora letti dalle reti: premi «Aggiorna i dati ora»"));
+    if (!d.canali.length) return riempi(box, [barra, msg, h("p", { class: "sotto" }, "Qui compariranno interazioni, commenti e andamento dei post appena colleghi un canale diretto (Instagram, Facebook, LinkedIn, TikTok, YouTube, Threads, X, Pinterest). I post inviati tramite Buffer non restituiscono questi risultati.")]);
+    const nonVuoto = d.serie.some(x => x.post || x.interazioni);
+    const etich = d.serie.map(x => x.giorno);
+    const kp = [kpi("Interazioni", O.interazioni, P.interazioni, nIt), kpi("Post pubblicati", O.post, P.post, nIt), kpi("Commenti", O.commenti, P.commenti, nIt),
+      kpi("Visualizzazioni", O.visualizzazioni, P.visualizzazioni, compatto),
+      d.seguaci == null ? null : h("article", { class: "bt-card bt-kpi" }, h("div", { class: "bt-cap" }, "Seguaci"), h("div", { class: "bt-num" }, compatto(d.seguaci)),
+        h("div", { class: "bt-sotto" }, d.seguaci_variazione == null ? "su tutti i canali" : (d.seguaci_variazione >= 0 ? "+" : "") + nIt(d.seguaci_variazione) + " nel periodo"))];
+    const righe = d.canali.map(c => h("tr", {}, h("td", {}, c.nome, h("span", { class: "bt-sotto" }, " · " + c.rete), c.errore ? h("div", { class: "bt-sotto", style: "color:var(--no,#b4402a)" }, c.errore) : null),
+      h("td", {}, nIt(c.post), h("span", { class: "bt-sotto" }, " (" + nIt(c.post_prima) + ")")),
+      h("td", {}, c.dati_post ? [nIt(c.interazioni), var_(c.interazioni, c.interazioni_prima)] : "n.d."), h("td", {}, c.dati_post ? nIt(c.commenti) : "n.d."),
+      h("td", {}, c.dati_post ? compatto(c.visualizzazioni) : "n.d."), h("td", {}, c.coinvolgimento == null ? "—" : nIt(c.coinvolgimento, 1) + "%"),
+      h("td", {}, c.seguaci == null ? "—" : [compatto(c.seguaci), c.seguaci_variazione ? h("span", { class: "bt-sotto" }, " " + (c.seguaci_variazione > 0 ? "+" : "") + nIt(c.seguaci_variazione)) : null])));
+    const eur = (v) => nIt(Math.round(v));
+    riempi(box, [barra, msg, h("section", { class: "bt-griglia bt-kpis" }, kp),
+      h("section", { class: "bt-griglia", style: "margin-top:12px" },
+        h("article", { class: "bt-card bt-s6" }, h("div", { class: "bt-testa" }, h("h2", {}, "Interazioni nel tempo")),
+          nonVuoto ? graficoArea(d.serie.map(x => x.interazioni), etich, PB.terra, eur, "Interazioni per giorno di pubblicazione dei post")
+            : h("p", { class: "bt-sotto" }, "Nessun post pubblicato in questo periodo."),
+          h("p", { class: "bt-nota" }, "Ogni giorno somma le interazioni dei post usciti quel giorno.")),
+        h("article", { class: "bt-card bt-s6" }, h("div", { class: "bt-testa" }, h("h2", {}, "Post pubblicati")),
+          nonVuoto ? graficoBarre(d.serie.map(x => x.post), etich, PB.verde, (v) => Number.isInteger(v) ? nIt(v) : "", "Post pubblicati per giorno") : h("p", { class: "bt-sotto" }, "Nessun post pubblicato in questo periodo."))),
+      h("article", { class: "bt-card", style: "margin-top:12px;overflow-x:auto" }, h("div", { class: "bt-testa" }, h("h2", {}, "Canali a confronto")),
+        h("table", { class: "bt-tab" }, h("thead", {}, h("tr", {}, ["Canale", "Post (prima)", "Interazioni", "Commenti", "Visual.", "Coinvolg.", "Seguaci"].map(t => h("th", {}, t)))), h("tbody", {}, righe)),
+        h("p", { class: "bt-nota" }, "Confronto con i " + d.giorni + " giorni precedenti. LinkedIn non fornisce i risultati dei post senza l'approvazione del suo programma partner; i post inviati tramite Buffer non sono inclusi.")),
+      d.migliori.length ? h("article", { class: "bt-card", style: "margin-top:12px" }, h("div", { class: "bt-testa" }, h("h2", {}, "Post che hanno funzionato meglio")),
+        d.migliori.map(p => h("div", { class: "bt-riga-mov" }, h("div", {}, h("b", {}, p.canale_nome), " · " + nIt(p.interazioni) + " interazioni, " + nIt(p.commenti || 0) + " commenti" + (p.visualizzazioni ? ", " + compatto(p.visualizzazioni) + " visualizzazioni" : "")),
+          h("div", { class: "bt-sotto" }, (p.testo || "").slice(0, 120), p.permalink ? [" ", h("a", { href: p.permalink, target: "_blank", rel: "noopener noreferrer" }, "apri")] : null)))) : null]);
+  } catch (e) { box.replaceChildren(avviso(e.message, "no")); }
 }
 
 async function schedaPost(corpo) {

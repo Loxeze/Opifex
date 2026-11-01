@@ -214,6 +214,12 @@ def analisi(giorni: int = Query(default=30, ge=1, le=365), _: dict = Depends(sol
         return sn.analisi(conn, giorni)
 
 
+@router.get("/panoramica")
+def panoramica(giorni: int = Query(default=30, ge=1, le=365), _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return sn.panoramica(conn, giorni)
+
+
 @router.get("/analisi.csv")
 def analisi_csv(giorni: int = Query(default=90, ge=1, le=365), _: dict = Depends(solo_titolare)):
     with connessione() as conn:
