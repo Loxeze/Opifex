@@ -6,6 +6,8 @@ import io
 import json
 import re
 
+import time
+
 import httpx
 
 from . import google
@@ -63,10 +65,15 @@ AVVISO = ("\n\nGOOGLE DRIVE: hai strumenti per cercare, leggere, creare e modifi
 
 
 def _richiesta(metodo, url, tok, **kw):
-    try:
-        r = httpx.request(metodo, url, headers={"Authorization": "Bearer " + tok, **kw.pop("headers", {})}, timeout=30, **kw)
-    except httpx.HTTPError as e:
-        raise ErroreGoogle(f"Google non raggiungibile ({type(e).__name__})") from None
+    hh = {"Authorization": "Bearer " + tok, **kw.pop("headers", {})}
+    for tentativo in range(3):
+        try:
+            r = httpx.request(metodo, url, headers=hh, timeout=30, **kw)
+            break
+        except httpx.HTTPError as e:
+            if tentativo == 2:
+                raise ErroreGoogle(f"Google non raggiungibile ({type(e).__name__})") from None
+            time.sleep(1.5 * (tentativo + 1))
     if r.status_code >= 400:
         try:
             m = r.json().get("error", {}).get("message", "")

@@ -37,10 +37,15 @@ def _scrivi(conn, chiave: str, valore: str):
 
 
 def _http(metodo: str, url: str, **kw) -> dict:
-    try:
-        r = httpx.request(metodo, url, timeout=20, **kw)
-    except httpx.HTTPError as e:
-        raise ErroreGoogle(f"Google non raggiungibile ({type(e).__name__})") from None
+    r = None
+    for tentativo in range(3):  # la rete del server puo' perdere un colpo: si riprova prima di dare errore
+        try:
+            r = httpx.request(metodo, url, timeout=20, **kw)
+            break
+        except httpx.HTTPError as e:
+            if tentativo == 2:
+                raise ErroreGoogle(f"Google non raggiungibile ({type(e).__name__})") from None
+            time.sleep(1.5 * (tentativo + 1))
     if r.status_code >= 400:
         try:
             m = r.json().get("error_description") or r.json().get("error", {})
@@ -122,6 +127,7 @@ def token_accesso(conn, account_id: int) -> str:
         conn.execute("UPDATE account_google SET ultimo_errore=%s WHERE id=%s", (str(e), account_id))
         raise
     _cache[account_id] = (t["access_token"], time.time() + int(t.get("expires_in", 3000)))
+    conn.execute("UPDATE account_google SET ultimo_errore=NULL WHERE id=%s AND ultimo_errore IS NOT NULL", (account_id,))
     return t["access_token"]
 
 
