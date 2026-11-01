@@ -87,4 +87,12 @@ with TestClient(app) as c:
     ricevuti.clear(); copione[:] = [fine("ok")]
     c.post(f"/agenti/{marco}/chat", headers=H, json={"messaggio": "guarda la posta", "fascia_dati": "interno"})
     ok("un agente che non puo' ricevere dati riservati non ha la posta", not ricevuti or not any(t["name"].startswith("gmail_") for t in ricevuti[0].get("tools", [])))
+    # invio: solo se l'agente lo ha attivato
+    sql("UPDATE agenti SET fascia_dati_max='riservato' WHERE id=%s", (marco,))
+    for modo, atteso in (("bozze", False), ("approvazione", True), ("diretto", True)):
+        c.put(f"/gestione/agenti/{marco}", headers=H, json={"invio_posta": modo})
+        ricevuti.clear(); copione[:] = [fine("ok")]
+        c.post(f"/agenti/{marco}/chat", headers=H, json={"messaggio": "guarda la posta", "fascia_dati": "interno"})
+        nm = [t["name"] for t in ricevuti[0]["tools"]] if ricevuti else []
+        ok(f"modo {modo}: posta_invia {'presente' if atteso else 'assente'}", ("posta_invia" in nm) == atteso, str(nm))
 print(f"TOTALE {sum(ris)}/{len(ris)}")

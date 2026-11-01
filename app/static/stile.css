@@ -319,3 +319,14 @@ table.anteprima{border-collapse:collapse;font-size:12px}table.anteprima th,table
 
 .chat-fondo{align-self:center;margin:-44px 0 8px;position:relative;z-index:2;box-shadow:0 2px 10px rgba(0,0,0,.35)}
 .chat-fondo[hidden]{display:none}
+
+/* Agenti: dipartimenti grandi e richiudibili */
+.gruppo-agenti{margin-top:18px}
+.gruppo-agenti .griglia[hidden]{display:none!important}
+.gruppo-testa{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--carta);border:1px solid var(--bordo);border-radius:12px;padding:14px 16px;margin-bottom:12px;color:var(--testo);font:inherit;cursor:pointer}
+.gruppo-testa:hover{border-color:var(--primario)}
+.gruppo-testa:focus-visible{outline:2px solid var(--primario);outline-offset:2px}
+.gruppo-nome{font-size:21px;font-weight:600;letter-spacing:.01em;flex:1;min-width:0}
+.gruppo-freccia{font-size:20px;color:var(--primario);width:22px;text-align:center;flex:0 0 auto}
+.gruppo-conta{flex:0 0 auto;min-width:30px;text-align:center;padding:2px 10px;border-radius:999px;background:var(--carta2);color:var(--tenue);font-size:14px}
+.gruppo-comandi{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}

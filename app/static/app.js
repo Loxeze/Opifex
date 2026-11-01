@@ -189,8 +189,57 @@ function vistaAgenti() {
         h("button", { class: "p", onclick: () => modulo(null) }, "+ Nuovo agente"))),
     garanzie.length ? avviso("I dati interni e riservati restano bloccati verso: " +
       garanzie.map(f => f.nome).join(", ") + " (mancano le garanzie di non conservazione/DPA). Gli agenti lavorano solo su dati pubblici.", "avv") : null,
-    (() => { const blocco = h("div", {}, [...gruppi].map(([nome, lista]) => [h("h3", {}, nome), h("div", { class: "griglia" }, lista.map(carta))])); riempiExtraAgenti(blocco); riempiVociAgenti(blocco); return blocco; })(),
+    codaEmailUscita(),
+    (() => {
+      const chiusi = (() => { try { return new Set(JSON.parse(localStorage.getItem("agenti_chiusi") || "[]")); } catch (e) { return new Set(); } })();
+      const salva = () => { try { localStorage.setItem("agenti_chiusi", JSON.stringify([...chiusi])); } catch (e) { /* facoltativo */ } };
+      const sezioni = [...gruppi].map(([nome, lista]) => {
+        const griglia = h("div", { class: "griglia" }, lista.map(carta));
+        const freccia = h("span", { class: "gruppo-freccia", "aria-hidden": "true" });
+        const testa = h("button", { type: "button", class: "gruppo-testa", "aria-expanded": "true" }, freccia, h("span", { class: "gruppo-nome" }, nome), h("span", { class: "gruppo-conta" }, String(lista.length)));
+        const imposta = (chiuso) => { griglia.hidden = chiuso; testa.setAttribute("aria-expanded", chiuso ? "false" : "true"); freccia.textContent = chiuso ? "▸" : "▾"; };
+        testa.onclick = () => { const c = !griglia.hidden; imposta(c); c ? chiusi.add(nome) : chiusi.delete(nome); salva(); };
+        imposta(chiusi.has(nome));
+        return { nome, griglia, imposta, nodo: h("section", { class: "gruppo-agenti" }, testa, griglia) };
+      });
+      const tutti = (chiudi) => { sezioni.forEach(x => { x.imposta(chiudi); chiudi ? chiusi.add(x.nome) : chiusi.delete(x.nome); }); salva(); };
+      const blocco = h("div", {}, h("div", { class: "gruppo-comandi" }, h("button", { class: "s", type: "button", onclick: () => tutti(true) }, "Chiudi tutti"), h("button", { class: "s", type: "button", onclick: () => tutti(false) }, "Apri tutti")), sezioni.map(x => x.nodo));
+      riempiExtraAgenti(blocco); riempiVociAgenti(blocco); return blocco;
+    })(),
   ];
+}
+
+// Email preparate dagli agenti in attesa di approvazione (e ultime inviate / in errore)
+function codaEmailUscita() {
+  const box = h("div");
+  const carica = async () => {
+    let lista = [];
+    try { lista = await api("GET", "/gestione/email-uscita"); } catch (e) { return; }
+    const attesa = lista.filter(x => x.stato === "da_approvare" || x.stato === "errore");
+    const recenti = lista.filter(x => x.stato === "inviata" || x.stato === "rifiutata").slice(0, 8);
+    if (!attesa.length && !recenti.length) { box.replaceChildren(); return; }
+    const msg = h("div");
+    const scheda = (x) => {
+      const dest = h("input", { value: x.destinatari, style: "width:100%" }), ogg = h("input", { value: x.oggetto, style: "width:100%" }), testo = h("textarea", { style: "min-height:110px;width:100%" }, x.testo);
+      const agisci = async (azione, b) => { b.disabled = true; msg.replaceChildren();
+        try {
+          if (azione === "approva") await api("PUT", "/gestione/email-uscita/" + x.id, { destinatari: dest.value, oggetto: ogg.value, testo: testo.value });
+          await api("POST", "/gestione/email-uscita/" + x.id + "/decisione", { azione }); carica();
+        } catch (e) { msg.replaceChildren(avviso(e.message, "no")); b.disabled = false; } };
+      const bi = h("button", { class: "p", type: "button", onclick: () => agisci("approva", bi) }, x.stato === "errore" ? "Riprova a inviare" : "Invia");
+      const bs = h("button", { class: "s", type: "button", onclick: () => agisci("rifiuta", bs) }, "Scarta");
+      return h("div", { class: "carta", style: "margin-top:10px" },
+        h("div", { class: "sotto" }, (x.agente ? x.agente + " · " : "") + (x.mittente ? "da " + x.mittente + " · " : "") + new Date(x.creata_il).toLocaleString("it-IT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })),
+        x.stato === "errore" ? avviso("Invio non riuscito: " + (x.errore || "errore"), "no") : null,
+        h("label", {}, "A", dest), h("label", {}, "Oggetto", ogg), h("label", {}, "Testo", testo), h("div", { class: "azioni" }, bi, bs));
+    };
+    riempi(box, [h("h3", {}, "Email da approvare" + (attesa.length ? " (" + attesa.length + ")" : "")),
+      attesa.length ? attesa.map(scheda) : h("p", { class: "sotto" }, "Nessuna email in attesa."), msg,
+      recenti.length ? h("details", { style: "margin-top:10px" }, h("summary", {}, "Ultime email inviate o scartate"),
+        recenti.map(x => h("div", { class: "sotto" }, (x.stato === "inviata" ? "Inviata" : "Scartata") + " · " + x.destinatari + " · «" + x.oggetto + "»" + (x.agente ? " · " + x.agente : "") + (x.diretta ? " · diretta" : "")))) : null]);
+  };
+  carica();
+  return box;
 }
 
 // Schede (tab) dentro i moduli lunghi: tutti i campi restano nel documento, se ne vede una sezione alla volta
@@ -286,6 +335,11 @@ function modulo(a) {
   const gmailSel = h("select", {}, h("option", { value: "" }, "Nessuna casella"),
     (stato.opzioni.account_gmail || []).map(g => h("option", { value: g.id }, g.etichetta + " — " + g.email)));
   gmailSel.value = d.gmail_account_id || "";
+  const OPZ_INVIO = [["bozze", "Solo bozze", "legge e prepara bozze, non invia"], ["approvazione", "Invio con la mia approvazione", "prepara l'email e resta in coda «Email da approvare»: parte solo quando la approvi"], ["diretto", "Invio diretto", "l'email parte subito, senza approvazione (massimo 5 per richiesta)"]];
+  const gruppoInvio = "invio-" + (d.id || "nuovo");
+  const radiInvio = OPZ_INVIO.map(([v, et, aiuto]) => { const r = h("input", { type: "radio", name: gruppoInvio, value: v }); r.checked = (d.invio_posta || "bozze") === v;
+    return h("label", { class: "interruttore", style: "cursor:pointer" }, r, h("span", {}, h("b", {}, et), " — " + aiuto)); });
+  const invioScelto = () => (radiInvio.map(l => l.querySelector("input")).find(r => r.checked) || { value: "bozze" }).value;
   const socialAttivo = h("input", { type: "checkbox" }); socialAttivo.checked = !!d.social_attivo;
   const emailAttivo = h("input", { type: "checkbox" }); emailAttivo.checked = !!d.email_attivo;
   const crmAttivo = h("input", { type: "checkbox" }); crmAttivo.checked = !!d.crm_attivo;
@@ -338,7 +392,7 @@ function modulo(a) {
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,
       fasi: fasi.filter(f => f.titolo.trim()).map(f => ({ ...f, titolo: f.titolo.trim() })),
-      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, email_attivo: emailAttivo.checked, crm_attivo: crmAttivo.checked, canva_attivo: canvaAttivo.checked, archivio_attivo: archivioAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null,
+      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, email_attivo: emailAttivo.checked, crm_attivo: crmAttivo.checked, canva_attivo: canvaAttivo.checked, archivio_attivo: archivioAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null, invio_posta: invioScelto(),
       connessioni: conn.filter(([, cb]) => cb.checked).map(([c]) => c.id),
     };
     try {
@@ -430,7 +484,10 @@ function modulo(a) {
         ["Strumenti", [      h("h3", {}, "Dialoghi con gli altri agenti"),
       h("div", { class: "interruttore" }, dialoga, h("span", {}, "Può fare domande a superiore, subordinati e altri manager mentre lavora")),
       h("div", { class: "interruttore" }, vedeTutto, h("span", {}, "Vede cosa fai e cosa ti dicono gli altri agenti (sintesi recente, nei limiti di riservatezza)")),
-      h("label", {}, "Casella di posta che gestisce (legge e prepara bozze, non invia)", gmailSel),
+      h("label", {}, "Casella di posta che gestisce", gmailSel),
+      h("h3", {}, "Invio delle email"),
+      h("p", { class: "aiuto" }, "Vale per l'agente che ha una casella (Gmail scelta qui sopra, oppure una casella IMAP assegnata in Collegamenti). Puoi provare prima con l'approvazione e passare all'invio diretto quando ti fidi."),
+      ...radiInvio,
       h("div", { class: "interruttore" }, socialAttivo, h("span", {}, "Può preparare post per i social (non pubblica: li approvi tu dalla pagina Social)")),
       h("div", { class: "interruttore" }, archivioAttivo, h("span", {}, "Può cercare foto e video nell'Archivio NAS e chiedere foto pronte o trascrizioni (serve il connettore sul NAS)")),
       h("div", { class: "interruttore" }, canvaAttivo, h("span", {}, "Può creare ed esportare design su Canva (serve Canva collegato in Collegamenti)")),

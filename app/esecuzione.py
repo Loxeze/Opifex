@@ -15,7 +15,7 @@ import contextvars
 PROVA_ISTRUZIONI = contextvars.ContextVar('prova_istruzioni', default=None)   # (agente_id, testo): prova di istruzioni non ancora applicate
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
 from . import banco, creativi, best_practice, archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
-from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
+from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta
 from . import strumenti_social
 from . import vademecum, note_aurora, scheda_impresa
 from .navigatore import ErroreNavigazione, Navigatore
@@ -41,7 +41,7 @@ def _carica_agente(conn, agente_id: int) -> dict:
         """
         SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.tipo, a.fascia_dati_max, a.attivo,
                a.modello AS modello_richiesto,
-               a.max_token_risposta, a.sforzo, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.crm_attivo, a.canva_attivo, a.archivio_attivo, a.ruolo_speciale, a.usa_biblioteca, a.sandbox_attivo, a.controllore_id, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
+               a.max_token_risposta, a.sforzo, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.invio_posta, a.crm_attivo, a.canva_attivo, a.archivio_attivo, a.ruolo_speciale, a.usa_biblioteca, a.sandbox_attivo, a.controllore_id, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
                m.id AS modello_id, m.nome AS modello_nome,
                m.costo_input_per_milione, m.costo_output_per_milione,
                f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
@@ -392,6 +392,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     gp = strumenti_posta.gestore(conn, posta_c, agente_id)
                     for s_ in strumenti_posta.STRUMENTI:
                         gestori[s_["name"]] = gp
+                if (gmail_tool or posta_tool) and a["invio_posta"] in ("approvazione", "diretto"):
+                    extra.append(invio_posta.STRUMENTO_INVIA)
+                    avviso_extra += invio_posta.avviso(a["invio_posta"])
+                    gestori["posta_invia"] = invio_posta.gestore(conn, agente_id, a["invio_posta"], a["gmail_account_id"] if gmail_tool else None, posta_c if posta_tool else [])
 
                 if crm_tool:
                     extra.append(crm.STRUMENTO)

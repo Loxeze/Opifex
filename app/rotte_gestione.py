@@ -63,6 +63,7 @@ class DatiAgente(BaseModel):
     gmail_account_id: int | None = None
     social_attivo: bool = False
     email_attivo: bool = False
+    invio_posta: str = Field(default="bozze", pattern="^(bozze|approvazione|diretto)$")
     rimanda_a: str | None = Field(default=None, max_length=300)
     crm_attivo: bool = False
     canva_attivo: bool = False
@@ -96,6 +97,7 @@ class ModificaAgente(BaseModel):
     gmail_account_id: int | None = None
     social_attivo: bool | None = None
     email_attivo: bool | None = None
+    invio_posta: str | None = Field(default=None, pattern="^(bozze|approvazione|diretto)$")
     rimanda_a: str | None = Field(default=None, max_length=300)
     crm_attivo: bool | None = None
     canva_attivo: bool | None = None
@@ -157,7 +159,7 @@ SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divis
        a.sentinella,
        CASE WHEN a.sentinella THEN 'sentinella' WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' ELSE a.livello END AS categoria,
        a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.sforzo, a.budget_token_mensile,
-       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.rimanda_a, a.crm_attivo, a.canva_attivo, a.archivio_attivo, ETICHETTA_SQL AS etichetta,
+       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.invio_posta, a.rimanda_a, a.crm_attivo, a.canva_attivo, a.archivio_attivo, ETICHETTA_SQL AS etichetta,
        COALESCE((SELECT json_agg(json_build_object('titolo', f.titolo, 'istruzioni', f.istruzioni, 'approvazione', f.approvazione,
                                                     'parere_superiore', f.parere_superiore) ORDER BY f.posizione)
                  FROM fasi_agente f WHERE f.agente_id = a.id), '[]'::json) AS fasi,
@@ -224,6 +226,8 @@ def crea(d: DatiAgente, utente: dict = Depends(solo_titolare)):
              d.max_token_risposta, d.budget_token_mensile, d.accesso_web, dati["siti_consentiti"],
              d.max_ricerche, d.attivo, d.modello_dialogo or None, d.dialoghi_attivi, bool(dati.get("sentinella")), d.vede_tutto, d.drive_attivo, d.gmail_account_id, d.social_attivo),
         ).fetchone()
+        if d.invio_posta != "bozze":
+            conn.execute("UPDATE agenti SET invio_posta = %s WHERE id = %s", (d.invio_posta, riga["id"]))
         if d.email_attivo:
             conn.execute("UPDATE agenti SET email_attivo = TRUE WHERE id = %s", (riga["id"],))
         if d.crm_attivo:
