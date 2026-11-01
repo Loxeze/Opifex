@@ -15,6 +15,7 @@ def ok(n, c, d=""):
     ris.append(bool(c)); print(("OK    " if c else "FALLITO") + " | " + n + (f"  [{d}]" if d and not c else ""))
 HTML = "<div style='width:794px;height:1123px;background:linear-gradient(#1E8466,#0E5A45);color:#fff;font:700 64px serif;display:flex;align-items:center;justify-content:center'>Renovatio</div>"
 ok("strumento grafica_crea elencato con le istruzioni", any(s["name"] == "grafica_crea" and "NON serve Canva" in s["description"] and "salva=true" in s["description"] for s in sg.STRUMENTI))
+ok("il briefing grafico e' nelle istruzioni degli agenti con Drive", all(k in sg.AVVISO for k in ("PRIMA DI DISEGNARE", "Riferimenti di stile", "logo", "Colori e caratteri", "memoria_proponi", "BOZZA")))
 ok("l'avviso di Canva manda gli agenti a grafica_crea", "grafica_crea" in canva.AVVISO and "NON permette" in canva.AVVISO)
 ok("misure: a4 stampa a 300 dpi", gr.misure("a4_300dpi")[:2] == (794, 1123) and abs(gr.misure("a4_300dpi")[2] * 794 - 2480) < 1)
 ok("misure: personalizzato e limiti", gr.misure("", 1000, 500)[:2] == (1000, 500))

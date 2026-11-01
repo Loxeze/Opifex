@@ -11,6 +11,20 @@ STAMPA = {"a4_300dpi": (794, 1123), "a3_300dpi": (1123, 1587)}   # misura CSS: i
 HOST_FONT = ("fonts.googleapis.com", "fonts.gstatic.com")
 
 
+BRIEFING = ("\n\nGRAFICA - PRIMA DI DISEGNARE: quando ti chiedono una grafica (locandina, scheda, post, copertina, miniatura) controlla cosa sai gia' (la richiesta, la memoria del progetto e dell'azienda, la cartella Drive del progetto con logo, riferimenti e foto). "
+            "Cio' che manca chiedilo UNA sola volta a chi ti ha dato l'incarico (Lorenzo o un collaboratore), in un solo messaggio con questo elenco, saltando le voci che hai gia':\n"
+            "1. A cosa serve e dove sara' usata (stampa A4, post Instagram, story, copertina...): decide il formato.\n"
+            "2. Riferimenti di stile: 2 o 3 esempi di grafica che piacciono (file su Drive o link) e COSA piace (margini larghi, titolo grande, una sola foto...).\n"
+            "3. Il logo: file vettoriale su Drive e dove metterlo.\n"
+            "4. Colori e caratteri del marchio (o la conferma di quelli che hai in memoria).\n"
+            "5. Le foto da usare (cartella o file su Drive). Se non ci sono foto, dillo e proponi cosa fare.\n"
+            "6. I testi definitivi e i contatti (e-mail, sito, indirizzo, loghi dei partner).\n"
+            "7. Il tono, in una frase (sobrio, istituzionale, caldo, da museo, giovane...).\n"
+            "Non inventare loghi, contatti, date o dati e non consegnare con segnaposto tipo «[email]»: se mancano chiedili. Se la persona risponde «procedi» o ha fretta, disegna con quello che c'e' e consegna come BOZZA dicendo cosa manca. "
+            "Appena ricevi colori, caratteri, logo o regole di stile che valgono sempre, proponili con memoria_proponi (cosi' non vengono richiesti di nuovo a nessuno). "
+            "Poi lavora a giri con grafica_crea (anteprima, correzioni, salva=true) e consegna il link con una riga su cosa hai scelto e perche'.")
+
+
 class ErroreGrafica(Exception):
     pass
 
