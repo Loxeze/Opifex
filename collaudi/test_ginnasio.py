@@ -251,6 +251,21 @@ with TestClient(app) as c:
             fuori = True
     casati.FORMAZIONE.reset(tk)
     ok("fuori da una formazione non si salvano video", fuori)
+    # trascrizione su richiesta, senza formazione
+    yt_._trascrizione = lambda v: [{"text": f"frase{i} del video", "start": i * 20.0, "duration": 19.0} for i in range(400)]
+    g_ = casati.gestore({"id": casati_id, "nome": "Padre Casati"}, casati_id, connessione)
+    r1 = g_("trascrivi_video_youtube", {"url": "https://youtu.be/AAAAAAAAAAA"})
+    ok("trascrivi_video_youtube: funziona fuori da una formazione, salva e da' l'inizio", "Trascrizione di" in r1 and "[0:00]" in r1 and "biblioteca_leggi" in r1 and sql("SELECT count(*) FROM documenti WHERE fonte_url='https://www.youtube.com/watch?v=AAAAAAAAAAA' AND biblioteca")[0][0] == 1, r1[:200])
+    ok("trascrivi_video_youtube: lo stesso video non si ripete", "gia' in biblioteca" in g_("trascrivi_video_youtube", {"url": "https://www.youtube.com/watch?v=AAAAAAAAAAA"}))
+    ok("trascrivi_video_youtube: indirizzo non YouTube rifiutato", g_("trascrivi_video_youtube", {"url": "https://example.com/v"}).startswith("ERRORE"))
+    def _senza(v): raise yt_.ErroreYoutube("Trascrizione non disponibile")
+    yt_._trascrizione = _senza
+    ok("trascrivi_video_youtube: video senza sottotitoli, errore chiaro", "non disponibile" in g_("trascrivi_video_youtube", {"url": "https://youtu.be/BBBBBBBBBBB"}))
+    yt_._trascrizione = lambda v: [{"text": f"x{i}", "start": i * 20.0, "duration": 19.0} for i in range(40)]
+    for i in range(casati.MAX_TRASCRIZIONI_ESECUZIONE):
+        last = g_("trascrivi_video_youtube", {"url": f"https://youtu.be/CCCCCCCCCC{i}"})
+    ok("trascrivi_video_youtube: tetto per richiesta", "limite" in last.lower())
+    ok("lo strumento e' dato a Padre Casati anche fuori formazione", casati.STRUMENTO_TRASCRIVI["name"] == "trascrivi_video_youtube" and 'casati.STRUMENTO_TRASCRIVI' in open("app/esecuzione.py").read())
     ok("i video non sono tra gli strumenti di Casati fuori formazione", "cerca_video" not in [t["name"] for t in casati.STRUMENTI] and {"cerca_video", "scarica_trascrizione_video"} == {t["name"] for t in casati.STRUMENTI_VIDEO})
     sql("INSERT INTO eventi_lavoro (agente_id, tipo, dettaglio, richiesta_id) VALUES (%s,'fase','ricerca',%s)", (casati_id, rv))
     sql("INSERT INTO eventi_lavoro (agente_id, tipo, dettaglio, richiesta_id) VALUES (%s,'strumento','cerca_fonti: tecniche di storytelling',%s)", (casati_id, rv))

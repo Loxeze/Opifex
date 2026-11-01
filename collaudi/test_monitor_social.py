@@ -11,7 +11,7 @@ import psycopg
 from datetime import date, timedelta
 from fastapi.testclient import TestClient
 from app.main import app
-from app import monitor_social, agente_browser, buffer, backup
+from app import monitor_social, agente_browser, social_nativo as _sn, backup
 from app.db import connessione
 from app.sicurezza import cifra_password
 from aiuto2fa import accedi
@@ -120,9 +120,9 @@ with TestClient(app) as c:
     def rotta(url, params): raise monitor_social.ErroreMonitor("quota esaurita")
     monitor_social._get = rotta
     ok("errore del servizio: messaggio leggibile e profilo segnalato", c.post(f"{B}/profili/{yt}/raccogli", headers=H).status_code == 422 and sql("SELECT errore FROM profili_monitorati WHERE id=%s", (yt,))[0][0] == "quota esaurita")
-    # canali Buffer
-    buffer.canali = lambda conn: [{"id": "1", "name": "lorenzo.zeppa", "service": "instagram"}, {"id": "2", "name": "Renovatio Group", "service": "linkedin"}]
-    ok("importazione dei canali Buffer come profili nostri", c.post(B + "/importa-canali", headers=H).json()["aggiunti"] == 2 and sql("SELECT count(*) FROM profili_monitorati WHERE proprio")[0][0] == 3 + 0 or True)
+    # canali collegati
+    _sn.canali_elenco = lambda conn, solo_attivi=True: [{"rete": "instagram", "nome": "lorenzo.zeppa"}, {"rete": "linkedin", "nome": "Renovatio Group"}]
+    ok("importazione dei canali collegati come profili nostri", c.post(B + "/importa-canali", headers=H).json()["aggiunti"] == 2 and sql("SELECT count(*) FROM profili_monitorati WHERE proprio")[0][0] == 3 + 0 or True)
     ok("togliere un profilo toglie le rilevazioni", c.delete(f"{B}/profili/{yt}", headers=H).status_code == 200 and sql("SELECT count(*) FROM rilevazioni_profili WHERE profilo_id=%s", (yt,))[0][0] == 0)
 src = open("app/static/controlli.js").read()
 ok("vista registrata", "vistaMonitorSocial" in src and "monitorsocial: vistaMonitorSocial" in open("app/static/dashboard.js").read() and "monitorsocial" in open("app/static/app.js").read())

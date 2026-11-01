@@ -16,7 +16,7 @@ PROVA_ISTRUZIONI = contextvars.ContextVar('prova_istruzioni', default=None)   # 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
 from . import banco, creativi, best_practice, archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
 from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta
-from . import buffer as buffer_social
+from . import strumenti_social
 from . import vademecum, note_aurora, scheda_impresa
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
@@ -300,7 +300,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                        if a["fornitore"] in STRUMENTI_FORNITORI and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
                                                                         a["non_conservazione_attiva"], a["dpa_firmato"])[0] else None)
             posta_tool = bool(posta_c)
-            social_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["social_attivo"] and (buffer_social.collegato(conn) or __import__("app.social_nativo", fromlist=["x"]).ha_canali(conn)))
+            social_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["social_attivo"] and __import__("app.social_nativo", fromlist=["x"]).ha_canali(conn))
             mem_tool = bool(ok_int)   # lo strumento di memoria si aggiunge agli agenti che usano comunque degli strumenti
             email_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["email_attivo"] and brevo_email.collegato(conn))
             crm_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["crm_attivo"])
@@ -368,10 +368,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     for s_ in strumenti_google.STRUMENTI:
                         gestori[s_["name"]] = g
                 if social_tool:
-                    extra.extend(buffer_social.STRUMENTI)
-                    avviso_extra += buffer_social.AVVISO
-                    gs = buffer_social.gestore(conn, agente_id)
-                    for s_ in buffer_social.STRUMENTI:
+                    extra.extend(strumenti_social.STRUMENTI)
+                    avviso_extra += strumenti_social.AVVISO
+                    gs = strumenti_social.gestore(conn, agente_id)
+                    for s_ in strumenti_social.STRUMENTI:
                         gestori[s_["name"]] = gs
                 if email_tool:
                     extra.extend(brevo_email.STRUMENTI)
@@ -398,7 +398,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     avviso_extra += crm.AVVISO
                     gestori["crm_conta"] = crm.gestore(connessione, agente_id)
                 if spec_tool == "formatore":
-                    st_cas = casati.STRUMENTI + casati.STRUMENTI_ASSEGNA + ([casati.STRUMENTO_SCARICA] + casati.STRUMENTI_VIDEO if casati.FORMAZIONE.get() else [])
+                    st_cas = casati.STRUMENTI + casati.STRUMENTI_ASSEGNA + [casati.STRUMENTO_TRASCRIVI] + ([casati.STRUMENTO_SCARICA] + casati.STRUMENTI_VIDEO if casati.FORMAZIONE.get() else [])
                     extra.extend(st_cas)
                     avviso_extra += casati.AVVISO + "\n\nBIBLIOTECA ORA: " + _elenco_biblioteca(a_f)
                     gc = casati.gestore(a_f, agente_id, connessione)

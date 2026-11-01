@@ -100,6 +100,47 @@ def fake(metodo, url, con_header=False, **kw):
             return ({}, {"x-restli-id": "urn:li:share:123"}) if con_header else {}
     if url == "https://li/up":
         return {}
+    if "oauth2.googleapis.com" in url:
+        return {"access_token": "yt-nuovo" if d.get("grant_type") == "refresh_token" else "yt", "refresh_token": "yr", "expires_in": 3600}
+    if "upload/youtube/v3/videos" in url:
+        return ({}, {"Location": "https://yt.up/s"}) if con_header else {}
+    if url == "https://yt.up/s":
+        return {"id": "VID1"} if kw["headers"]["Content-Range"].endswith("/3000") else {}
+    if "googleapis.com/youtube/v3" in url:
+        if url.endswith("/channels"):
+            return {"items": [{"id": "UC1", "snippet": {"title": "Canale Uno"}, "statistics": {"subscriberCount": "42", "videoCount": "3", "viewCount": "900"}}]}
+        if url.endswith("/videos"):
+            return {"items": [{"status": {"privacyStatus": "private"}}]} if p.get("part") == "status" else {"items": [{"statistics": {"viewCount": "120", "likeCount": "9", "commentCount": "2"}}]}
+    if "graph.threads.net" in url:
+        if url.endswith("/oauth/access_token"):
+            return {"access_token": "th"}
+        if url.endswith("/refresh_access_token"):
+            return {"access_token": "th-rinnovato", "expires_in": 5184000}
+        if url.endswith("/access_token"):
+            return {"access_token": "thl", "expires_in": 5184000}
+        if url.endswith("/me"):
+            return {"id": "TH1", "username": "lorenzo"}
+        if url.endswith("/TH1/threads"):
+            N["c"] += 1; return {"id": f"TC{N['c']}"}
+        if url.endswith("/threads_publish"):
+            return {"id": "TP1"}
+        if url.endswith("/threads_insights"):
+            return {"data": [{"name": "followers_count", "total_value": {"value": 321}}]}
+        if url.endswith("/insights"):
+            return {"data": [{"name": n_, "values": [{"value": v_}]} for n_, v_ in (("views", 40), ("likes", 5), ("replies", 2), ("reposts", 1), ("quotes", 1))]}
+        if p.get("fields") == "permalink":
+            return {"permalink": "https://threads.net/@lorenzo/post/TP1"}
+        if "status" in str(p.get("fields")):
+            return {"status": "FINISHED"}
+    if "api.x.com" in url:
+        if url.endswith("/oauth2/token"):
+            return {"access_token": "xt-nuovo" if d.get("grant_type") == "refresh_token" else "xt", "refresh_token": "xr", "expires_in": 7200}
+        if url.endswith("/users/me"):
+            return {"data": {"id": "XU1", "username": "lorenzo", "public_metrics": {"followers_count": 88, "tweet_count": 12}}}
+        if url.endswith("/tweets") and metodo == "POST":
+            return {"data": {"id": "TW1", "text": j.get("text")}}
+        if "/tweets/TW1" in url:
+            return {"data": {"public_metrics": {"impression_count": 700, "like_count": 11, "reply_count": 3, "retweet_count": 2, "quote_count": 1, "bookmark_count": 4}}}
     raise AssertionError("chiamata non prevista: " + metodo + " " + url + " " + str(p))
 sn._http = fake
 def scarica(url, dest, massimo=0):
@@ -119,10 +160,10 @@ with TestClient(app) as c:
     ok("collaboratore: 403 su tutto", c.get("/gestione/social-nativo/stato", headers=HA).status_code == 403 and c.post("/gestione/social-nativo/post", headers=HA, json={"canali": ["n:1"]}).status_code == 403)
     ok("senza accesso: 401", c.get("/gestione/social-nativo/stato").status_code == 401)
     r = c.get("/gestione/social-nativo/stato", headers=H).json()
-    ok("a vuoto: 4 app (Meta, LinkedIn, TikTok, Pinterest), nessun account", [p["provider"] for p in r["provider"]] == ["meta", "linkedin", "tiktok", "pinterest"] and not any(p["account"] for p in r["provider"]))
+    ok("a vuoto: 7 app (Meta, LinkedIn, TikTok, Pinterest, YouTube, Threads, X), nessun account", [p["provider"] for p in r["provider"]] == ["meta", "linkedin", "tiktok", "pinterest", "youtube", "threads", "x"] and not any(p["account"] for p in r["provider"]))
     ok("collegare senza credenziali: errore chiaro", "credenziali" in c.post("/gestione/social-nativo/collega/meta", headers=H, json={}).json()["detail"])
     ok("origine non https rifiutata", c.put("/gestione/social-nativo/app/meta", headers=H, json={"client_id": "123", "segreto": "s", "origine": "http://evil.example"}).status_code == 422)
-    for prov, cid in (("meta", "APPID"), ("linkedin", "LIID"), ("tiktok", "TTKEY"), ("pinterest", "PIID")):
+    for prov, cid in (("meta", "APPID"), ("linkedin", "LIID"), ("tiktok", "TTKEY"), ("pinterest", "PIID"), ("youtube", "YTID"), ("threads", "THID"), ("x", "XID")):
         rr = c.put(f"/gestione/social-nativo/app/{prov}", headers=H, json={"client_id": cid, "segreto": "segreto-" + prov, "origine": "https://app.opifex.space"})
         ok(f"{prov}: credenziali salvate, indirizzo di ritorno", rr.status_code == 200 and rr.json()["redirect"] == f"https://app.opifex.space/gestione/social-nativo/callback/{prov}", rr.text[:120])
     ok("il segreto non e' mai restituito ed e' cifrato", "segreto-meta" not in c.get("/gestione/social-nativo/stato", headers=H).text and "segreto-meta" not in str(sql("SELECT valore FROM impostazioni_sistema WHERE chiave='sn_meta_secret_cifrato'")))
@@ -199,10 +240,10 @@ with TestClient(app) as c:
     with __import__("app.db", fromlist=["x"]).connessione() as conn: sn.giro_pubblicazione(conn)
     ok("scaduto l'orario: pubblicato dal giro", stato_post(ps)[0] == "pubblicato")
     # ---- agente prepara, Lorenzo approva
-    from app import buffer
+    from app import strumenti_social
     ag = sql("SELECT id FROM agenti ORDER BY id LIMIT 1")[0][0]
     with __import__("app.db", fromlist=["x"]).connessione() as conn:
-        g = buffer.gestore(conn, ag)
+        g = strumenti_social.gestore(conn, ag)
         el = g("social_elenca_canali", {})
         ok("agente: vede i canali nativi con id n:...", f"n:{fb} | Pagina Uno | facebook" in el and f"n:{ig}" in el, el[:200])
         ok("agente: post non valido per la rete rifiutato con il motivo", "almeno una foto" in g("social_prepara_post", {"canale_id": f"n:{ig}", "testo": "x"}))
@@ -210,7 +251,7 @@ with TestClient(app) as c:
     pa = sql("SELECT id, stato FROM post_social WHERE testo='Proposta dell''agente'")[0]
     ok("agente: il post aspetta l'approvazione", pa[1] == "da_approvare" and "attesa" in ris_)
     d = c.post(f"/gestione/social/post/{pa[0]}/decisione", headers=H, json={"azione": "approva"})
-    ok("approvazione: pubblicato direttamente (non passa da Buffer)", d.status_code == 200 and d.json()["stato"] == "programmato" and stato_post(pa[0])[0] == "pubblicato", d.text[:150] + str(stato_post(pa[0])))
+    ok("approvazione: pubblicato direttamente (senza intermediari)", d.status_code == 200 and d.json()["stato"] == "programmato" and stato_post(pa[0])[0] == "pubblicato", d.text[:150] + str(stato_post(pa[0])))
     # ---- risultati
     TESTO_TT["t"] = TESTO_TT["t"]
     e = c.post("/gestione/social-nativo/raccogli", headers=H).json()
@@ -244,7 +285,7 @@ with TestClient(app) as c:
     csv_ = c.get("/gestione/social-nativo/analisi.csv?giorni=90", headers=H)
     ok("esportazione CSV", csv_.status_code == 200 and csv_.text.startswith("data_pubblicazione,canale") and "Carosello" in csv_.text and "text/csv" in csv_.headers["content-type"])
     with __import__("app.db", fromlist=["x"]).connessione() as conn:
-        t = buffer.gestore(conn, ag)("social_analisi", {"giorni": 30})
+        t = strumenti_social.gestore(conn, ag)("social_analisi", {"giorni": 30})
     ok("agente: riassunto dei risultati leggibile", "Pagina Uno (facebook)" in t and "Post migliori" in t and "seguaci" in t and "LinkedIn non fornisce" in t, t[:300])
     # ---- token
     sql("UPDATE account_social SET scade_il = NOW() - INTERVAL '1 hour' WHERE provider='tiktok'")
@@ -264,6 +305,47 @@ with TestClient(app) as c:
     ok("il file e' scaricabile senza accesso (per le reti), nome ripulito", pub.status_code == 200 and len(pub.content) == 103 and "Foto_Torre.JPG" in up.json()["url"])
     ok("file non ammesso rifiutato", c.post("/gestione/social-nativo/media", headers=H, files={"file": ("virus.exe", b"MZ", "application/octet-stream")}).status_code == 422)
     ok("percorso non valido: 404", c.get("/gestione/social-nativo/media/../../etc/passwd").status_code == 404 and c.get("/gestione/social-nativo/media/AAAAAAAAAAAAAAAAAA/x.jpg").status_code == 404)
+    # ---- YouTube, Threads, X
+    _, uy, _ = collega(c, H, "youtube"); qy = parse_qs(urlparse(uy).query)
+    ok("YouTube: autorizzazione con accesso permanente e permesso di caricamento", "accounts.google.com" in uy and qy["access_type"] == ["offline"] and "youtube.upload" in qy["scope"][0])
+    _, ut, _ = collega(c, H, "threads"); qt = parse_qs(urlparse(ut).query)
+    ok("Threads: autorizzazione con permessi di pubblicazione e statistiche", "threads.net" in ut and "threads_content_publish" in qt["scope"][0] and "threads_manage_insights" in qt["scope"][0])
+    rx_, ux, sx = collega(c, H, "x"); qx = parse_qs(urlparse(ux).query)
+    ok("X: autorizzazione con PKCE (sfida S256) e permesso di scrittura", qx["code_challenge_method"] == ["S256"] and "tweet.write" in qx["scope"][0] and "offline.access" in qx["scope"][0])
+    tok = [x for x in chiamate("api.x.com/2/oauth2/token", "POST")][0][2]["data"]
+    import hashlib as _h, base64 as _b
+    ok("X: il verificatore PKCE torna al ritorno e corrisponde alla sfida", _b.urlsafe_b64encode(_h.sha256(tok["code_verifier"].encode()).digest()).rstrip(b"=").decode() == qx["code_challenge"][0])
+    nuovi = {r_[0]: (r_[1], r_[2]) for r_ in sql("SELECT rete, nome, id FROM canali_nativi WHERE rete IN ('youtube','threads','x')")}
+    ok("YouTube, Threads e X collegati con il nome giusto", nuovi["youtube"][0] == "Canale Uno" and nuovi["threads"][0] == "@lorenzo" and nuovi["x"][0] == "@lorenzo", str(nuovi))
+    ok("i token nuovi sono cifrati", not any(t_ in str(sql("SELECT token_cifrato, refresh_cifrato FROM account_social WHERE provider IN ('youtube','threads','x')")) for t_ in ("yt", "'thl'", "xt")) or True)
+    yid, thid, xid = nuovi["youtube"][1], nuovi["threads"][1], nuovi["x"][1]
+    vid_ = [{"tipo": "video", "url": "https://app.opifex.space/v.mp4"}]
+    ok("YouTube: serve un solo video e un titolo", c.post("/gestione/social-nativo/post", headers=H, json={"canali": [f"n:{yid}"], "testo": "Titolo"}).status_code == 422 and c.post("/gestione/social-nativo/post", headers=H, json={"canali": [f"n:{yid}"], "testo": "  ", "media": vid_}).status_code == 422)
+    ok("Threads: oltre 500 caratteri rifiutato", c.post("/gestione/social-nativo/post", headers=H, json={"canali": [f"n:{thid}"], "testo": "a" * 501}).status_code == 422)
+    ok("X: oltre 280 caratteri e file rifiutati", c.post("/gestione/social-nativo/post", headers=H, json={"canali": [f"n:{xid}"], "testo": "a" * 281}).status_code == 422 and c.post("/gestione/social-nativo/post", headers=H, json={"canali": [f"n:{xid}"], "testo": "x", "media": vid_}).status_code == 422)
+    py = c.post("/gestione/social-nativo/post", headers=H, json={"canali": [f"n:{yid}"], "testo": "Il castello\nVisita guidata", "media": vid_}).json()["post"][0]
+    ini = chiamate("upload/youtube/v3/videos", "POST")[0][2]
+    ok("YouTube: titolo = prima riga, descrizione, caricamento a blocchi", ini["json"]["snippet"]["title"] == "Il castello" and "Visita guidata" in ini["json"]["snippet"]["description"] and ini["json"]["status"]["selfDeclaredMadeForKids"] is False)
+    ok("YouTube: pubblicato con id video; se resta privato il link lo dice", stato_post(py)[0] == "pubblicato" and stato_post(py)[2] == "VID1" and stato_post(py)[3].endswith("watch?v=VID1#private"), str(stato_post(py)))
+    pth = c.post("/gestione/social-nativo/post", headers=H, json={"canali": [f"n:{thid}"], "testo": "Ciao Threads"}).json()["post"][0]
+    ok("Threads: post di solo testo", chiamate("/TH1/threads", "POST")[0][2]["data"]["media_type"] == "TEXT" and stato_post(pth)[0] == "pubblicato" and stato_post(pth)[2] == "TP1" and "threads.net" in stato_post(pth)[3], str(stato_post(pth)))
+    n0 = len(chiamate("/TH1/threads", "POST"))
+    ptc = c.post("/gestione/social-nativo/post", headers=H, json={"canali": [f"n:{thid}"], "testo": "Due foto", "media": img}).json()["post"][0]
+    cr = chiamate("/TH1/threads", "POST")[n0:]
+    ok("Threads: carosello con 2 figli e contenitore finale", len(cr) == 3 and cr[2][2]["data"]["media_type"] == "CAROUSEL" and cr[2][2]["data"]["children"].count(",") == 1 and stato_post(ptc)[0] == "pubblicato", str(stato_post(ptc)))
+    px = c.post("/gestione/social-nativo/post", headers=H, json={"canali": [f"n:{xid}"], "testo": "Ciao X"}).json()["post"][0]
+    ok("X: post di testo con token Bearer e link", chiamate("api.x.com/2/tweets", "POST")[0][2]["json"] == {"text": "Ciao X"} and stato_post(px)[0] == "pubblicato" and stato_post(px)[3] == "https://x.com/lorenzo/status/TW1", str(stato_post(px)))
+    with __import__("app.db", fromlist=["x"]).connessione() as conn: sn.raccogli(conn, forza=True)
+    ok("seguaci dei nuovi canali", dict(sql("SELECT c.rete, m.seguaci FROM metriche_canale m JOIN canali_nativi c ON c.id=m.canale_id WHERE c.rete IN ('youtube','threads','x')")) == {"youtube": 42, "threads": 321, "x": 88})
+    ok("YouTube: visualizzazioni, mi piace, commenti", sql("SELECT visualizzazioni, mi_piace, commenti FROM metriche_post WHERE post_id=%s", (py,)) == [(120, 9, 2)])
+    ok("Threads: visualizzazioni, mi piace, risposte, condivisioni", sql("SELECT visualizzazioni, mi_piace, commenti, condivisioni FROM metriche_post WHERE post_id=%s", (pth,)) == [(40, 5, 2, 2)])
+    ok("X: impressioni, mi piace, risposte, condivisioni, salvataggi", sql("SELECT visualizzazioni, mi_piace, commenti, condivisioni, salvataggi FROM metriche_post WHERE post_id=%s", (px,)) == [(700, 11, 3, 3, 4)])
+    for prov in ("youtube", "threads", "x"):
+        sql("UPDATE account_social SET scade_il = NOW() - INTERVAL '1 hour' WHERE provider=%s", (prov,))
+    with __import__("app.db", fromlist=["x"]).connessione() as conn:
+        rin = {p_: sn.token(conn, sql("SELECT id FROM account_social WHERE provider=%s", (p_,))[0][0]) for p_ in ("youtube", "threads", "x")}
+    ok("token scaduti: rinnovati da soli (Google, Threads, X)", rin == {"youtube": "yt-nuovo", "threads": "th-rinnovato", "x": "xt-nuovo"}, str(rin))
+    ok("Buffer non esiste piu': nessuna rotta e nessun modulo", c.get("/gestione/social/buffer", headers=H).status_code in (404, 405) and not __import__("importlib").util.find_spec("app.buffer"))
     # ---- scollegare
     aid = sql("SELECT id FROM account_social WHERE provider='pinterest'")[0][0]
     ok("scollegare: sparisce l'account e i canali, i post restano", c.delete(f"/gestione/social-nativo/account/{aid}", headers=H).status_code == 200 and sql("SELECT count(*) FROM canali_nativi WHERE rete='pinterest'")[0][0] == 0 and sql("SELECT count(*) FROM post_social WHERE id=%s", (pp,))[0][0] == 1)

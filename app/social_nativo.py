@@ -18,10 +18,13 @@ import httpx
 
 from . import cassaforte
 
-RETI = ("instagram", "facebook", "linkedin", "tiktok", "pinterest")
-ETICHETTE = {"instagram": "Instagram", "facebook": "Facebook", "linkedin": "LinkedIn", "tiktok": "TikTok", "pinterest": "Pinterest"}
-PROVIDER_DI = {"instagram": "meta", "facebook": "meta", "linkedin": "linkedin", "tiktok": "tiktok", "pinterest": "pinterest"}
-ETICHETTE_PROVIDER = {"meta": "Instagram e Facebook (Meta)", "linkedin": "LinkedIn", "tiktok": "TikTok", "pinterest": "Pinterest"}
+RETI = ("instagram", "facebook", "linkedin", "tiktok", "pinterest", "youtube", "threads", "x")
+ETICHETTE = {"instagram": "Instagram", "facebook": "Facebook", "linkedin": "LinkedIn", "tiktok": "TikTok", "pinterest": "Pinterest", "youtube": "YouTube",
+             "threads": "Threads", "x": "X"}
+PROVIDER_DI = {"instagram": "meta", "facebook": "meta", "linkedin": "linkedin", "tiktok": "tiktok", "pinterest": "pinterest", "youtube": "youtube",
+               "threads": "threads", "x": "x"}
+ETICHETTE_PROVIDER = {"meta": "Instagram e Facebook (Meta)", "linkedin": "LinkedIn", "tiktok": "TikTok", "pinterest": "Pinterest", "youtube": "YouTube",
+                      "threads": "Threads", "x": "X (Twitter)"}
 PAUSA = 5.0           # secondi tra un controllo e l'altro durante la pubblicazione (le prove la azzerano)
 MAX_VIDEO = 1024 * 1024 * 1024
 SINCRONO = False
@@ -127,6 +130,12 @@ def _scope(provider: str, opzioni: dict) -> str:
         return s + (" r_organization_social w_organization_social rw_organization_admin" if opzioni.get("pagine") else "")
     if provider == "tiktok":
         return "user.info.basic,user.info.stats,video.publish,video.upload,video.list"
+    if provider == "youtube":
+        return "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
+    if provider == "threads":
+        return "threads_basic,threads_content_publish,threads_manage_insights"
+    if provider == "x":
+        return "tweet.read tweet.write users.read offline.access"
     return "boards:read,pins:read,pins:write,user_accounts:read"
 
 
@@ -135,8 +144,10 @@ def url_autorizzazione(conn, provider: str, opzioni: dict | None = None) -> str:
     ru = redirect_uri(conn, provider)
     if not ru:
         raise ErroreSocial("Salva prima le credenziali dell'app: serve l'indirizzo di ritorno")
-    opzioni = opzioni or {}
+    opzioni = dict(opzioni or {})
     stato = secrets.token_urlsafe(32)
+    if provider == "x":   # PKCE: il segreto temporaneo resta sul server finche' non torna il codice
+        opzioni["verifier"] = secrets.token_urlsafe(64)
     conn.execute("DELETE FROM social_oauth_stati WHERE creato_il < NOW() - INTERVAL '15 minutes'")
     conn.execute("INSERT INTO social_oauth_stati (stato_hash, rete, opzioni) VALUES (%s,%s,%s::jsonb)",
                  (hashlib.sha256(stato.encode()).hexdigest(), provider, json.dumps(opzioni)))
@@ -149,6 +160,18 @@ def url_autorizzazione(conn, provider: str, opzioni: dict | None = None) -> str:
     if provider == "tiktok":
         return "https://www.tiktok.com/v2/auth/authorize/?" + urlencode(
             {"client_key": cid, "scope": _scope(provider, opzioni), "response_type": "code", "redirect_uri": ru, "state": stato})
+    if provider == "youtube":
+        return "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(
+            {"client_id": cid, "redirect_uri": ru, "response_type": "code", "scope": _scope(provider, opzioni), "access_type": "offline",
+             "prompt": "consent select_account", "state": stato})
+    if provider == "threads":
+        return "https://threads.net/oauth/authorize?" + urlencode(
+            {"client_id": cid, "redirect_uri": ru, "scope": _scope(provider, opzioni), "response_type": "code", "state": stato})
+    if provider == "x":
+        sfida = __import__("base64").urlsafe_b64encode(hashlib.sha256(opzioni["verifier"].encode()).digest()).rstrip(b"=").decode()
+        return "https://x.com/i/oauth2/authorize?" + urlencode(
+            {"response_type": "code", "client_id": cid, "redirect_uri": ru, "scope": _scope(provider, opzioni), "state": stato,
+             "code_challenge": sfida, "code_challenge_method": "S256"})
     return "https://www.pinterest.com/oauth/?" + urlencode(
         {"client_id": cid, "redirect_uri": ru, "response_type": "code", "scope": _scope(provider, opzioni), "state": stato})
 
@@ -218,6 +241,34 @@ def completa_autorizzazione(conn, provider: str, codice: str, stato: str) -> dic
         nome = u.get("display_name") or u.get("username") or t.get("open_id", "TikTok")
         aid = _salva_account(conn, "tiktok", t["open_id"], nome, t["access_token"], t.get("refresh_token"), _scade(t))
         canali.append(_salva_canale(conn, aid, "tiktok", t["open_id"], nome))
+    elif provider == "youtube":
+        t = _http("POST", "https://oauth2.googleapis.com/token", data={"code": codice, "client_id": cid, "client_secret": sec, "grant_type": "authorization_code", "redirect_uri": ru})
+        if not t.get("refresh_token"):
+            raise ErroreSocial("Google non ha dato il permesso permanente: riprova e accetta tutti i permessi")
+        ch = (_http("GET", "https://www.googleapis.com/youtube/v3/channels", params={"part": "snippet", "mine": "true"},
+                    headers={"Authorization": "Bearer " + t["access_token"]}).get("items") or [])
+        if not ch:
+            raise ErroreSocial("Questo account Google non ha un canale YouTube: sceglilo nel consenso o creane uno su youtube.com")
+        aid = _salva_account(conn, "youtube", ch[0]["id"], ch[0]["snippet"]["title"], t["access_token"], t["refresh_token"], _scade(t))
+        canali.append(_salva_canale(conn, aid, "youtube", ch[0]["id"], ch[0]["snippet"]["title"]))
+    elif provider == "threads":
+        t = _http("POST", "https://graph.threads.net/oauth/access_token", data={"client_id": cid, "client_secret": sec, "grant_type": "authorization_code",
+                                                                              "redirect_uri": ru, "code": codice})
+        lungo = _http("GET", "https://graph.threads.net/access_token", params={"grant_type": "th_exchange_token", "client_secret": sec, "access_token": t["access_token"]})
+        me = _http("GET", "https://graph.threads.net/v1.0/me", params={"fields": "id,username", "access_token": lungo["access_token"]})
+        nome = "@" + (me.get("username") or me["id"])
+        # Threads si rinnova con lo stesso token (nessun refresh token separato): lo conserviamo anche come «rinnovo»
+        aid = _salva_account(conn, "threads", me["id"], nome, lungo["access_token"], lungo["access_token"], _scade(lungo))
+        canali.append(_salva_canale(conn, aid, "threads", me["id"], nome))
+    elif provider == "x":
+        base = {"Authorization": "Basic " + __import__("base64").b64encode(f"{cid}:{sec}".encode()).decode()}
+        t = _http("POST", "https://api.x.com/2/oauth2/token", headers=base, data={"code": codice, "grant_type": "authorization_code", "client_id": cid,
+                                                                                  "redirect_uri": ru, "code_verifier": opz.get("verifier", "")})
+        me = (_http("GET", "https://api.x.com/2/users/me", params={"user.fields": "username"}, headers={"Authorization": "Bearer " + t["access_token"]}).get("data") or {})
+        if not me.get("id"):
+            raise ErroreSocial("X non ha restituito l'account")
+        aid = _salva_account(conn, "x", me["id"], "@" + me["username"], t["access_token"], t.get("refresh_token"), _scade(t))
+        canali.append(_salva_canale(conn, aid, "x", me["id"], "@" + me["username"], {"username": me["username"]}))
     else:
         base = {"Authorization": "Basic " + __import__("base64").b64encode(f"{cid}:{sec}".encode()).decode()}
         t = _http("POST", "https://api.pinterest.com/v5/oauth/token", headers=base,
@@ -269,6 +320,14 @@ def token(conn, account_id: int) -> str:
             elif a["provider"] == "pinterest":
                 t = _http("POST", "https://api.pinterest.com/v5/oauth/token", headers={"Authorization": "Basic " + __import__("base64").b64encode(f"{cid}:{sec}".encode()).decode()},
                           data={"grant_type": "refresh_token", "refresh_token": rt})
+            elif a["provider"] == "youtube":
+                t = _http("POST", "https://oauth2.googleapis.com/token", data={"grant_type": "refresh_token", "refresh_token": rt, "client_id": cid, "client_secret": sec})
+            elif a["provider"] == "threads":
+                t = _http("GET", "https://graph.threads.net/refresh_access_token", params={"grant_type": "th_refresh_token", "access_token": rt})
+                t["refresh_token"] = t.get("access_token")
+            elif a["provider"] == "x":
+                t = _http("POST", "https://api.x.com/2/oauth2/token", headers={"Authorization": "Basic " + __import__("base64").b64encode(f"{cid}:{sec}".encode()).decode()},
+                          data={"grant_type": "refresh_token", "refresh_token": rt, "client_id": cid})
             else:
                 t = _http("POST", "https://www.linkedin.com/oauth/v2/accessToken", data={"grant_type": "refresh_token", "refresh_token": rt, "client_id": cid, "client_secret": sec})
             if "access_token" not in t:
@@ -296,21 +355,14 @@ def ha_canali(conn) -> bool:
 
 
 def id_canale(cid: str) -> int | None:
-    """Gli id dei canali nativi nei post sono del tipo 'n:5' (quelli di Buffer sono testi senza prefisso)."""
+    """Gli id dei canali nativi nei post sono del tipo 'n:5'."""
     m = re.fullmatch(r"n:(\d+)", str(cid))
     return int(m.group(1)) if m else None
 
 
 def canali_unificati(conn) -> list[dict]:
-    """Canali nativi + canali Buffer (se collegato), nel formato usato dai post: id, name, service."""
-    out = [{"id": f"n:{c['id']}", "name": c["nome"], "service": c["rete"], "nativo": True} for c in canali_elenco(conn)]
-    try:
-        from . import buffer
-        if buffer.collegato(conn):
-            out += [dict(x, nativo=False) for x in buffer.canali(conn)]
-    except Exception:  # noqa: BLE001 - Buffer spento o irraggiungibile non deve nascondere i canali nativi
-        pass
-    return out
+    """Canali collegati, nel formato usato dai post: id, name, service."""
+    return [{"id": f"n:{c['id']}", "name": c["nome"], "service": c["rete"], "nativo": True} for c in canali_elenco(conn)]
 
 
 # ---------- pubblicazione ----------
@@ -346,7 +398,19 @@ def verifica_post(rete: str, testo: str, media: list[dict]):
         raise ErroreSocial("LinkedIn: per ora testo con al massimo una immagine (i video non sono ancora supportati)")
     if rete == "facebook" and vid and (img or len(vid) > 1):
         raise ErroreSocial("Facebook: un solo video, oppure solo immagini")
-    if not testo.strip() and rete not in ("instagram", "tiktok"):
+    if rete == "youtube" and not (len(vid) == 1 and not img):
+        raise ErroreSocial("YouTube vuole un solo video")
+    if rete == "youtube" and not testo.strip():
+        raise ErroreSocial("Per YouTube la prima riga del testo e' il titolo del video")
+    if rete == "threads" and len(testo) > 500:
+        raise ErroreSocial("Su Threads il testo puo' avere al massimo 500 caratteri")
+    if rete == "threads" and not testo.strip() and not m:
+        raise ErroreSocial("Threads vuole del testo o almeno un file")
+    if rete == "x" and m:
+        raise ErroreSocial("X: per ora solo testo (foto e video non ancora supportati)")
+    if rete == "x" and len(testo) > 280:
+        raise ErroreSocial("Su X il testo puo' avere al massimo 280 caratteri")
+    if not testo.strip() and rete not in ("instagram", "tiktok", "threads"):
         raise ErroreSocial("Il testo e' vuoto")
 
 
@@ -488,6 +552,82 @@ def _pub_tiktok(conn, tk, canale, testo, media):
 
 
 PUBBLICA = {"instagram": _pub_instagram, "facebook": _pub_facebook, "linkedin": _pub_linkedin, "pinterest": _pub_pinterest, "tiktok": _pub_tiktok}
+
+
+def _pub_youtube(conn, tk, canale, testo, media):
+    """Carica il video con invio a blocchi. Chiede «pubblico»: se il progetto Google non e' ancora verificato YouTube lo rende privato da solo, e lo segnaliamo."""
+    h = {"Authorization": "Bearer " + tk}
+    righe = [r for r in testo.strip().splitlines() if r.strip()]
+    titolo = (righe[0] if righe else "Video")[:100]
+    with tempfile.TemporaryDirectory() as tmp:
+        f = os.path.join(tmp, "v.mp4")
+        n = _scarica(media[0]["url"], f)
+        if n < 1024:
+            raise ErroreSocial("Il video scaricato e' vuoto o non valido")
+        _, hd = _http("POST", "https://www.googleapis.com/upload/youtube/v3/videos", con_header=True, params={"uploadType": "resumable", "part": "snippet,status"},
+                      headers=dict(h, **{"X-Upload-Content-Length": str(n), "X-Upload-Content-Type": "video/*", "Content-Type": "application/json; charset=UTF-8"}),
+                      json={"snippet": {"title": titolo, "description": testo[:5000], "categoryId": "22"},
+                            "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False}})
+        url = {k.lower(): v for k, v in hd.items()}.get("location")
+        if not url:
+            raise ErroreSocial("YouTube non ha avviato il caricamento")
+        blocco = 16 * 1024 * 1024   # multiplo di 256 KB, come richiesto
+        r = {}
+        with open(f, "rb") as fh:
+            inizio = 0
+            while inizio < n:
+                dati = fh.read(blocco)
+                fine = inizio + len(dati)
+                r = _http("PUT", url, headers={"Content-Range": f"bytes {inizio}-{fine - 1}/{n}", "Content-Length": str(len(dati))}, content=dati, timeout=900)
+                inizio = fine
+    if not r.get("id"):
+        raise ErroreSocial("YouTube non ha confermato il caricamento")
+    st = _prova(_http, "GET", "https://www.googleapis.com/youtube/v3/videos", headers=h, params={"part": "status", "id": r["id"]}) or {}
+    priv = (((st.get("items") or [{}])[0]).get("status") or {}).get("privacyStatus")
+    return r["id"], f"https://www.youtube.com/watch?v={r['id']}" + ("" if priv in (None, "public") else "#" + priv)
+
+
+def _pub_threads(conn, tk, canale, testo, media):
+    g, uid = "https://graph.threads.net/v1.0", canale["ext_id"]
+    p = {"access_token": tk}
+
+    def contenitore(**d):
+        return _http("POST", f"{g}/{uid}/threads", data=dict(p, **d))["id"]
+
+    def pronto(cid):
+        def f():
+            s = _http("GET", f"{g}/{cid}", params=dict(p, fields="status,error_message")).get("status")
+            if s in ("ERROR", "EXPIRED"):
+                raise ErroreSocial("Threads non ha elaborato il file")
+            return True if s in ("FINISHED", "PUBLISHED", None) else None
+        _attendi(f, 90, "Elaborazione Threads")
+
+    def file_(m, **extra):
+        return contenitore(media_type="IMAGE" if m["tipo"] == "image" else "VIDEO", **({"image_url": m["url"]} if m["tipo"] == "image" else {"video_url": m["url"]}), **extra)
+    if not media:
+        cid = contenitore(media_type="TEXT", text=testo)
+    elif len(media) == 1:
+        cid = file_(media[0], **({"text": testo} if testo else {}))
+    else:
+        figli = [file_(m, is_carousel_item="true") for m in media]
+        for x in figli:
+            pronto(x)
+        cid = contenitore(media_type="CAROUSEL", children=",".join(figli), **({"text": testo} if testo else {}))
+    pronto(cid)
+    pid = _http("POST", f"{g}/{uid}/threads_publish", data=dict(p, creation_id=cid))["id"]
+    link = (_prova(_http, "GET", f"{g}/{pid}", params=dict(p, fields="permalink")) or {}).get("permalink")
+    return pid, link
+
+
+def _pub_x(conn, tk, canale, testo, media):
+    r = _http("POST", "https://api.x.com/2/tweets", headers={"Authorization": "Bearer " + tk, "Content-Type": "application/json"}, json={"text": testo})
+    tid = (r.get("data") or {}).get("id")
+    if not tid:
+        raise ErroreSocial("X non ha confermato il post")
+    return tid, f"https://x.com/{canale['extra'].get('username', 'i')}/status/{tid}"
+
+
+PUBBLICA.update({"youtube": _pub_youtube, "threads": _pub_threads, "x": _pub_x})
 
 
 def pubblica_post(conn, pid: int):
@@ -642,6 +782,38 @@ def _metriche_tiktok(conn, tk, canale, post, video=None):
 METRICHE_POST = {"instagram": _metriche_instagram, "facebook": _metriche_facebook, "pinterest": _metriche_pinterest, "tiktok": _metriche_tiktok}
 
 
+def _metriche_youtube(conn, tk, canale, post):
+    r = _prova(_http, "GET", "https://www.googleapis.com/youtube/v3/videos", headers={"Authorization": "Bearer " + tk}, params={"part": "statistics", "id": post["ext_post_id"]}) or {}
+    s = ((r.get("items") or [{}])[0]).get("statistics") or {}
+    return {"visualizzazioni": _n(s.get("viewCount")), "mi_piace": _n(s.get("likeCount")), "commenti": _n(s.get("commentCount"))} if s else {}
+
+
+def _metriche_threads(conn, tk, canale, post):
+    r = _prova(_http, "GET", f"https://graph.threads.net/v1.0/{post['ext_post_id']}/insights", params={"metric": "views,likes,replies,reposts,quotes", "access_token": tk}) or {}
+    v = {}
+    for x in r.get("data") or []:
+        val = ((x.get("values") or [{}])[0]).get("value")
+        if val is None:
+            val = (x.get("total_value") or {}).get("value")
+        v[x.get("name")] = _n(val)
+    if not v:
+        return {}
+    rip = (v.get("reposts") or 0) + (v.get("quotes") or 0) if ("reposts" in v or "quotes" in v) else None
+    return {"visualizzazioni": v.get("views"), "mi_piace": v.get("likes"), "commenti": v.get("replies"), "condivisioni": rip}
+
+
+def _metriche_x(conn, tk, canale, post):
+    r = _prova(_http, "GET", f"https://api.x.com/2/tweets/{post['ext_post_id']}", headers={"Authorization": "Bearer " + tk}, params={"tweet.fields": "public_metrics"}) or {}
+    m = (r.get("data") or {}).get("public_metrics") or {}
+    if not m:
+        return {}
+    return {"visualizzazioni": _n(m.get("impression_count")), "mi_piace": _n(m.get("like_count")), "commenti": _n(m.get("reply_count")),
+            "condivisioni": (_n(m.get("retweet_count")) or 0) + (_n(m.get("quote_count")) or 0), "salvataggi": _n(m.get("bookmark_count"))}
+
+
+METRICHE_POST.update({"youtube": _metriche_youtube, "threads": _metriche_threads, "x": _metriche_x})
+
+
 def _snapshot_canale(conn, tk, c) -> dict:
     """Seguaci e contenuti del canale oggi. Restituisce {} se la rete non li fornisce."""
     g, p = _graph(conn), {"access_token": tk}
@@ -658,6 +830,17 @@ def _snapshot_canale(conn, tk, c) -> dict:
         u = ((_http("GET", "https://open.tiktokapis.com/v2/user/info/", params={"fields": "follower_count,likes_count,video_count"},
                     headers={"Authorization": "Bearer " + tk}).get("data") or {}).get("user")) or {}
         return {"seguaci": _n(u.get("follower_count")), "contenuti": _n(u.get("video_count"))}
+    if c["rete"] == "youtube":
+        st = (((_http("GET", "https://www.googleapis.com/youtube/v3/channels", headers={"Authorization": "Bearer " + tk}, params={"part": "statistics", "mine": "true"})
+                .get("items") or [{}])[0]).get("statistics")) or {}
+        return {"seguaci": _n(st.get("subscriberCount")), "contenuti": _n(st.get("videoCount")), "visualizzazioni": _n(st.get("viewCount"))}
+    if c["rete"] == "threads":
+        r = _http("GET", f"https://graph.threads.net/v1.0/{c['ext_id']}/threads_insights", params={"metric": "followers_count", "access_token": tk})
+        x = (r.get("data") or [{}])[0]
+        return {"seguaci": _n(((x.get("values") or [{}])[0]).get("value") if x.get("values") else (x.get("total_value") or {}).get("value"))}
+    if c["rete"] == "x":
+        u = (_http("GET", "https://api.x.com/2/users/me", headers={"Authorization": "Bearer " + tk}, params={"user.fields": "public_metrics"}).get("data") or {}).get("public_metrics") or {}
+        return {"seguaci": _n(u.get("followers_count")), "contenuti": _n(u.get("tweet_count"))}
     return {}   # LinkedIn non fornisce questi dati senza l'approvazione del programma partner
 
 

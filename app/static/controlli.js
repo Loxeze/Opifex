@@ -321,7 +321,7 @@ function vistaMonitorSocial() {
       riempi(rapporti, d.rapporti.map(r => h("div", { class: "sotto" }, new Date(r.creato_il).toLocaleString("it-IT") + " · " + ({ in_corso: "in preparazione…", pronto: "pronto", errore: "errore" })[r.stato] + " (" + r.origine + ") ", h("a", { href: "#", onclick: ev => { ev.preventDefault(); apriRapporto(r.id); } }, "apri"))));
     } catch (e) { err(e); }
   };
-  const rapp = h("button", { class: "p", type: "button" }, "Prepara il rapporto ora"), imp = h("button", { class: "s", type: "button" }, "Aggiungi i canali collegati a Buffer");
+  const rapp = h("button", { class: "p", type: "button" }, "Prepara il rapporto ora"), imp = h("button", { class: "s", type: "button" }, "Aggiungi i canali social collegati");
   rapp.addEventListener("click", async () => { try { await api("POST", "/gestione/social-monitor/rapporto"); msg.replaceChildren(avviso("Rapporto in preparazione: compare qui sotto fra poco.", "ok")); setTimeout(carica, 4000); } catch (e) { err(e); } });
   imp.addEventListener("click", async () => { try { const r = await api("POST", "/gestione/social-monitor/importa-canali"); msg.replaceChildren(avviso(r.aggiunti + " canali aggiunti come «nostri».", "ok")); carica(); } catch (e) { err(e); } });
   carica();

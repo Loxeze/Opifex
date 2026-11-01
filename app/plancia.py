@@ -97,7 +97,7 @@ def consumi(conn) -> dict:
 
 def social(conn) -> dict:
     """Mese in corso fino a oggi contro lo stesso numero di giorni del mese precedente."""
-    q = """SELECT servizio, count(*) AS creati, count(*) FILTER (WHERE stato = 'inviato') AS inviati FROM post_social
+    q = """SELECT servizio, count(*) AS creati, count(*) FILTER (WHERE stato IN ('inviato', 'pubblicato')) AS inviati FROM post_social
            WHERE creato_il >= %s::timestamptz AND creato_il < %s::timestamptz GROUP BY servizio"""
     ora = conn.execute("""SELECT date_trunc('month', NOW()) AS m0, date_trunc('month', NOW()) - INTERVAL '1 month' AS m1,
                                  date_trunc('month', NOW()) - INTERVAL '1 month' + (NOW() - date_trunc('month', NOW())) AS fine1, NOW() AS adesso""").fetchone()

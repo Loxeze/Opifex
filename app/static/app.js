@@ -431,7 +431,7 @@ function modulo(a) {
       h("div", { class: "interruttore" }, dialoga, h("span", {}, "Può fare domande a superiore, subordinati e altri manager mentre lavora")),
       h("div", { class: "interruttore" }, vedeTutto, h("span", {}, "Vede cosa fai e cosa ti dicono gli altri agenti (sintesi recente, nei limiti di riservatezza)")),
       h("label", {}, "Casella di posta che gestisce (legge e prepara bozze, non invia)", gmailSel),
-      h("div", { class: "interruttore" }, socialAttivo, h("span", {}, "Può preparare post per i social via Buffer (non pubblica: li approvi tu dalla pagina Social)")),
+      h("div", { class: "interruttore" }, socialAttivo, h("span", {}, "Può preparare post per i social (non pubblica: li approvi tu dalla pagina Social)")),
       h("div", { class: "interruttore" }, archivioAttivo, h("span", {}, "Può cercare foto e video nell'Archivio NAS e chiedere foto pronte o trascrizioni (serve il connettore sul NAS)")),
       h("div", { class: "interruttore" }, canvaAttivo, h("span", {}, "Può creare ed esportare design su Canva (serve Canva collegato in Collegamenti)")),
       h("div", { class: "interruttore" }, crmAttivo, h("span", {}, "Può consultare i conteggi del CRM (solo numeri aggregati, mai nomi o recapiti)")),

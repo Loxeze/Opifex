@@ -378,14 +378,11 @@ def collega(d: Collegamenti, _: dict = Depends(solo_titolare)):
 
 @router.post("/importa-canali")
 def importa(_: dict = Depends(solo_titolare)):
-    """Aggiunge come «propri» i canali collegati a Buffer (con il nome del canale come identificativo)."""
-    from . import buffer
+    """Aggiunge come «propri» i canali collegati a Opifex (con il nome del canale come identificativo)."""
+    from . import social_nativo
     mappa = {"instagram": "instagram", "facebook": "facebook", "youtube": "youtube", "linkedin": "linkedin"}
     with connessione() as conn:
-        try:
-            canali = buffer.canali(conn)
-        except buffer.ErroreBuffer as e:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
+        canali = [{"service": c["rete"], "name": c["nome"]} for c in social_nativo.canali_elenco(conn)]
         nuovi = 0
         for c in canali:
             pf = mappa.get(str(c.get("service", "")).lower(), "altro")

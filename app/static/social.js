@@ -1,9 +1,9 @@
 "use strict";
-// Social: collegamento a Buffer e coda dei post preparati dagli agenti, da approvare prima della pubblicazione.
+// Social: collegamento diretto alle reti e coda dei post preparati dagli agenti, da approvare prima della pubblicazione.
 // Tutti i testi arrivano dall'API e vengono inseriti come testo, mai come HTML.
 
-const STATI_POST = { da_approvare: ["Da approvare", "avv"], inviato: ["Inviato a Buffer", "ok"], programmato: ["Programmato", "avv"], in_pubblicazione: ["In pubblicazione…", "avv"], pubblicato: ["Pubblicato", "ok"], rifiutato: ["Rifiutato", "no"], errore: ["Errore", "no"] };
-const quandoS = (t) => t ? new Date(t).toLocaleString("it-IT", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "appena approvato (o alla prima occasione libera in coda di Buffer)";
+const STATI_POST = { da_approvare: ["Da approvare", "avv"], inviato: ["Inviato", "ok"], programmato: ["Programmato", "avv"], in_pubblicazione: ["In pubblicazione…", "avv"], pubblicato: ["Pubblicato", "ok"], rifiutato: ["Rifiutato", "no"], errore: ["Errore", "no"] };
+const quandoS = (t) => t ? new Date(t).toLocaleString("it-IT", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "appena approvato";
 const perInput = (t) => { const d = new Date(t); const p = (n) => String(n).padStart(2, "0"); return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes()); };
 
 let schedaSocial = null;
@@ -25,7 +25,7 @@ function vistaSocial() {
 }
 
 async function schedaPost(corpo) {
-  const [bf, lista] = await Promise.all([api("GET", "/gestione/social/buffer"), api("GET", "/gestione/social/post")]);
+  const lista = await api("GET", "/gestione/social/post");
   const riepilogo = h("div", { class: "bt-plancia", style: "margin-bottom:18px" });
   riassuntoSocial(riepilogo);
   const ricarica = () => schedaPost(corpo);
@@ -37,6 +37,9 @@ const GUIDA_APP = {
   meta: ["Instagram e Facebook", "developers.facebook.com → «Crea app» (tipo Business) → aggiungi «Facebook Login» e «Instagram» → in Impostazioni app copia ID app e Chiave segreta → in Facebook Login → Impostazioni incolla l'indirizzo di ritorno qui sotto. Finché l'app resta in modalità sviluppo funziona per le Pagine e gli account di cui sei amministratore: non serve la revisione di Meta. L'account Instagram deve essere professionale e collegato a una Pagina Facebook."],
   linkedin: ["LinkedIn", "linkedin.com/developers → «Create app» (chiede una Pagina LinkedIn da associare) → scheda Products: aggiungi «Share on LinkedIn» e «Sign In with LinkedIn using OpenID Connect» → scheda Auth: copia Client ID e Primary Client Secret e incolla l'indirizzo di ritorno tra i Redirect URLs. Il tuo profilo personale funziona subito. Le pagine aziendali e le statistiche richiedono un'approvazione di LinkedIn (programma Community Management): puoi chiederla più avanti."],
   tiktok: ["TikTok", "developers.tiktok.com → «Manage apps» → «Connect an app» → aggiungi i prodotti «Login Kit» e «Content Posting API» → copia Client key e Client secret e incolla l'indirizzo di ritorno in Login Kit. Se TikTok chiede degli utenti di prova, aggiungi il tuo account. Finché l'app non e' verificata da TikTok i video escono solo in privato: e' proprio quello che facciamo, poi li rendi pubblici dall'app di TikTok."],
+  youtube: ["YouTube", "console.cloud.google.com → crea un progetto → «API e servizi» → abilita «YouTube Data API v3» → Schermata consenso OAuth (tipo Esterno, aggiungi il tuo account tra gli utenti di prova) → Credenziali → «ID client OAuth» di tipo Applicazione web → incolla l'indirizzo di ritorno qui sotto tra gli URI di reindirizzamento e copia ID e segreto. Finché il progetto non e' verificato da Google i video caricati dall'API possono restare privati (e' un limite di YouTube): chiedi la verifica dal modulo «API Services Audit» quando vuoi pubblicare in pubblico. Quota iniziale: circa 100 caricamenti al giorno. Il testo del post: la prima riga e' il titolo del video, il resto la descrizione."],
+  threads: ["Threads", "developers.facebook.com → la stessa app usata per Instagram (o una nuova) → aggiungi il caso d'uso «Accedi a Threads API» → in Impostazioni di Threads copia ID app Threads e Chiave segreta (sono diversi da quelli di Facebook) → incolla l'indirizzo di ritorno tra gli URL di reindirizzamento e aggiungi il tuo account Threads come tester. Il testo puo' avere fino a 500 caratteri."],
+  x: ["X (Twitter)", "developer.x.com → crea un progetto e un'app → «User authentication settings»: Read and write, tipo «Web App», incolla l'indirizzo di ritorno come Callback URI → copia Client ID e Client Secret (OAuth 2.0, non le chiavi API). ATTENZIONE: l'API di X e' a consumo, senza piano gratuito per i nuovi sviluppatori (circa 0,015 $ per post, 0,20 $ se il post contiene un link): carica credito dal portale e imposta un limite di spesa. Per ora Opifex pubblica solo testo (max 280 caratteri)."],
   pinterest: ["Pinterest", "developers.pinterest.com → «My apps» → «Connect app» → copia App id e App secret e incolla l'indirizzo di ritorno in Redirect URIs. Con l'accesso iniziale («Trial») Pinterest puo' limitare la visibilita' dei pin creati dall'API: se vedi che non sono pubblici, richiedi l'accesso «Standard» dal portale."],
 };
 function copiabile(testo) {
@@ -83,10 +86,8 @@ async function schedaCanali(corpo, apri) {
   const st = await api("GET", "/gestione/social-nativo/stato");
   const ricarica = () => schedaCanali(corpo, apri);
   const esito = st.esito ? (st.esito.startsWith("ok:") ? avviso(st.esito.slice(3), "ok") : avviso(st.esito, "no")) : null;
-  const bf = await api("GET", "/gestione/social/buffer");
   riempi(corpo, [esito, h("p", { class: "aiuto" }, "Ogni rete richiede una piccola app registrata sul suo portale per sviluppatori (una volta sola, gratuita). Opifex pubblica e raccoglie i risultati direttamente, senza limiti di canali. Gli agenti preparano i post, ma pubblichi solo tu con l'approvazione."),
     st.provider.map(p => schedaApp(p, ricarica)),
-    h("details", { style: "margin-top:16px" }, h("summary", {}, "Buffer (alternativa per le reti non collegate qui)"), schedaBuffer(bf, ricarica)),
     h("h3", {}, "A chi serve ogni canale"), boxCanali(ricarica)]);
 }
 
@@ -197,28 +198,6 @@ function boxCanali(ricarica) {
   return box;
 }
 
-function schedaBuffer(bf, ricarica) {
-  const msg = h("div");
-  if (bf.collegato) {
-    return h("div", { class: "carta" }, h("div", { class: "nome" }, "Buffer collegato"),
-      bf.errore ? avviso(bf.errore, "no") : null,
-      bf.canali.length ? boxCanali(ricarica)
-        : h("p", { class: "aiuto" }, "Nessun canale: collegali dentro Buffer (Instagram, Facebook, LinkedIn, TikTok…)."),
-      h("p", { class: "aiuto" }, "Per far preparare post a un agente, accendi «Può preparare post per i social» nella sua scheda. I post restano qui in attesa del tuo OK."),
-      msg, h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => {
-        if (!confirm("Scollegare Buffer?")) return;
-        try { await api("DELETE", "/gestione/social/buffer"); ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Scollega Buffer")));
-  }
-  const chiave = h("input", { type: "password", autocomplete: "off", placeholder: "Chiave API di Buffer" });
-  return h("div", { class: "carta" }, h("div", { class: "nome" }, "Collega Buffer"),
-    h("p", { class: "aiuto" }, "Non basta il login a Buffer: serve una chiave API. In Buffer clicca l'icona del profilo in basso a sinistra → «API» (oppure vai su publish.buffer.com/settings/api) → scheda «Personal Access» → «+ New Key» (la crea il proprietario dell'organizzazione). Incollala qui sotto: viene cifrata e non verrà più mostrata. Gli agenti non pubblicano mai da soli."),
-    h("label", {}, "Chiave API", chiave), msg,
-    h("div", { class: "azioni" }, h("button", { class: "p", onclick: async (ev) => {
-      const b = ev.currentTarget; b.disabled = true; msg.replaceChildren();
-      try { await api("PUT", "/gestione/social/buffer", { chiave: chiave.value.trim() }); ricarica(); }
-      catch (e) { msg.replaceChildren(avviso(e.message, "no")); b.disabled = false; } } }, "Collega e verifica")));
-}
-
 function listaPost(lista, ricarica) {
   if (!lista.length) return h("p", { class: "sotto" }, "Nessun post ancora.");
   return lista.map(p => {
@@ -241,7 +220,7 @@ function listaPost(lista, ricarica) {
       h("div", { class: "nome" }, p.canale_nome + " · " + p.servizio),
       h("div", { class: "sotto" }, (p.agente ? "Preparato da " + p.agente + " · " : "") + "pubblicazione: " + quandoS(p.programmato_il)),
       h("div", {}, h("span", { class: "etichetta " + cl }, t)),
-      modificabile ? [h("label", {}, "Testo", testo), h("label", {}, "Data e ora (vuoto = subito dopo l'approvazione; su Buffer = prima occasione libera in coda)", quando)]
+      modificabile ? [h("label", {}, "Testo", testo), h("label", {}, "Data e ora (vuoto = subito dopo l'approvazione)", quando)]
         : h("div", { class: "risposta", style: "margin-top:8px" }, p.testo),
       (p.media || []).length ? h("div", { class: "sotto" }, "File: " + p.media.map(m => m.tipo + " " + m.url).join(", ")) : null,
       p.permalink ? h("div", { class: "sotto" }, h("a", { href: p.permalink, target: "_blank", rel: "noopener noreferrer" }, "Apri il post")) : null,
@@ -270,6 +249,6 @@ async function riassuntoSocial(box) {
         h("article", { class: "bt-card bt-s6" }, h("div", { class: "bt-testa" }, h("h2", {}, "I tuoi profili")), prof ? h("table", { class: "bt-tab" }, h("thead", {}, h("tr", {}, h("th", {}, "Profilo"), h("th", {}, "Seguaci"), h("th", {}, "4 sett."), h("th", {}, "Visualizzazioni"))), h("tbody", {}, prof))
           : h("p", { class: "bt-sotto" }, "Nessun profilo tuo monitorato. Aggiungilo in Impostazioni, Profili social monitorati, e qui vedrai seguaci e visualizzazioni a confronto.")),
       ),
-      h("p", { class: "bt-nota" }, "Mi piace e commenti per singolo post non sono ancora disponibili: Buffer non li restituisce. Qui contano i post preparati dagli agenti e i dati dei profili monitorati.")]);
+      h("p", { class: "bt-nota" }, "Mi piace e commenti per singolo post dipendono da cosa la rete restituisce. Qui contano i post preparati dagli agenti e i dati dei profili monitorati.")]);
   } catch (e) { box.replaceChildren(avviso(e.message, "no")); }
 }
