@@ -101,6 +101,7 @@ fermo.set(); ponte.VISTO_ENTRO = 1; time.sleep(3.5)
 ok("PC spento: risulta scollegato", c.get("/ponte/stato", headers=hd).json()["collegato"] is False)
 ok("PC spento: errore chiaro dalla rotta", c.get("/finestre", headers=hd).status_code == 422 and "non e' collegato" in c.get("/finestre", headers=hd).text)
 ok("si puo' tornare al server", c.put("/finestre/dove", headers=hd, json={"destinazione": "server"}).status_code == 200 and finestre.destinazione() == "server")
+ok("ponte: poche attese contemporanee", ponte._attese._value == 4)
 finestre._locale.spegni()
 # --- il modulo gira da solo (come sul computer)
 import subprocess, shutil

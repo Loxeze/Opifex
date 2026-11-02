@@ -28,7 +28,7 @@ function vistaFinestre() {
     try { S.schede = (await api("GET", "/finestre")).schede; if (!corrente()) S.attiva = S.schede.length ? S.schede[0].id : null; disegnaSchede(); }
     catch (e) { stampa(e.message, true); }
   };
-  const scegli = (id) => { S.attiva = id; disegnaSchede(); aggiorna(true); };
+  const scegli = (id) => { S.attiva = id; disegnaSchede(); aggiorna(); };
   const apri = async () => {
     const u = indirizzo.value.trim(); if (!u) return;
     stampa("Apro…");
@@ -36,19 +36,19 @@ function vistaFinestre() {
       const c = corrente();
       if (c && c.url && !c.url.startsWith("about:")) { await api("POST", "/finestre", { url: u }).then(r => { S.attiva = r.id; }); }
       else S.attiva = (await api("POST", "/finestre", { url: u })).id;
-      stampa(""); await carica(); aggiorna(true);
+      stampa(""); await carica(); aggiorna();
     } catch (e) { stampa(e.message, true); }
   };
   const naviga = async () => {
     const c = corrente(); const u = indirizzo.value.trim(); if (!u) return;
     if (!c) return apri();
     stampa("Carico…");
-    try { await api("POST", "/finestre/" + c.id + "/vai", { url: u }); stampa(""); await carica(); aggiorna(true); } catch (e) { stampa(e.message, true); }
+    try { await api("POST", "/finestre/" + c.id + "/vai", { url: u }); stampa(""); await carica(); aggiorna(); } catch (e) { stampa(e.message, true); }
   };
   const chiudi = async (id) => { try { await api("DELETE", "/finestre/" + id); if (S.attiva === id) S.attiva = null; await carica(); } catch (e) { stampa(e.message, true); } };
   const azione = async (corpo) => {
     const c = corrente(); if (!c) return;
-    try { await api("POST", "/finestre/" + c.id + "/azione", corpo); setTimeout(() => aggiorna(true), 350); } catch (e) { stampa(e.message, true); }
+    try { await api("POST", "/finestre/" + c.id + "/azione", corpo); setTimeout(() => aggiorna(), 350); } catch (e) { stampa(e.message, true); }
   };
   const punto = (e) => { const r = img.getBoundingClientRect(); return { x: Math.round((e.clientX - r.left) / r.width * L), y: Math.round((e.clientY - r.top) / r.height * A) }; };
   img.addEventListener("click", (e) => { quadro.focus({ preventScroll: true }); azione({ tipo: "click", ...punto(e) }); });
@@ -67,7 +67,7 @@ function vistaFinestre() {
     try {
       if (t) await api("POST", "/finestre/" + c.id + "/azione", { tipo: "testo", testo: t });
       if (premiInvio) await api("POST", "/finestre/" + c.id + "/azione", { tipo: "tasto", testo: "Enter" });
-      scrivi.value = ""; setTimeout(() => aggiorna(true), 400);
+      scrivi.value = ""; setTimeout(() => aggiorna(), 400);
     } catch (e) { stampa(e.message, true); }
   };
   cond.addEventListener("change", async () => {
@@ -86,33 +86,39 @@ function vistaFinestre() {
     } catch (e) { /* non disponibile */ }
   };
   dove.addEventListener("change", async () => {
-    try { await api("PUT", "/finestre/dove", { destinazione: dove.value }); S.attiva = null; await caricaDove(); await carica(); aggiorna(true); }
+    try { await api("PUT", "/finestre/dove", { destinazione: dove.value }); S.attiva = null; await caricaDove(); await carica(); aggiorna(); }
     catch (e) { stampa(e.message, true); await caricaDove(); }
   });
   caricaDove();
   const scarFile = h("span", {}, "—");
   const caricaScar = async () => { try { const r = await api("GET", "/finestre/scaricati/elenco"); scarFile.replaceChildren(...(r.file.length ? r.file.slice(0, 8).flatMap(f => [h("a", { href: "#", onclick: async (e) => { e.preventDefault(); const x = await fetch("/finestre/scaricati/" + encodeURIComponent(f.nome), { headers: { Authorization: "Bearer " + token } }); const b = await x.blob(); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = f.nome; a.click(); } }, f.nome + " (" + f.kb + " KB)"), " · "]) : ["nessun file"])); } catch (e) { /* elenco non disponibile */ } };
   caricaScar();
-  let url0 = null, volo = false;
-  const aggiorna = async (subito) => {
-    if (volo || !quadro.isConnected) return; const c = corrente(); if (!c || document.hidden) return;
+  let url0 = null, volo = false, errori = 0, ct = 0;
+  const aggiorna = async () => {
+    if (volo || !quadro.isConnected) return; const c = corrente(); if (!c) return;
     volo = true;
     try {
       const r = await fetch("/finestre/" + c.id + "/schermo?t=" + Date.now(), { headers: { Authorization: "Bearer " + token } });
-      if (r.ok) { const b = await r.blob(); const nuovo = URL.createObjectURL(b); img.src = nuovo; if (url0) URL.revokeObjectURL(url0); url0 = nuovo; }
-      else if (r.status === 422) { await carica(); }
-    } catch (e) { /* riprovo al prossimo giro */ }
+      if (r.ok) { const b = await r.blob(); const nuovo = URL.createObjectURL(b); img.src = nuovo; if (url0) URL.revokeObjectURL(url0); url0 = nuovo; errori = 0; }
+      else { errori++; if (r.status === 422) await carica(); }
+    } catch (e) { errori++; }
     volo = false;
   };
-  const giro = async () => { if (!quadro.isConnected) { if (url0) URL.revokeObjectURL(url0); return; } await aggiorna(); setTimeout(giro, 900); };
-  let ct = 0;
-  const giroElenco = () => { if (!quadro.isConnected) return; if (++ct % 4 === 0) { carica(); caricaScar(); caricaDove(); } setTimeout(giroElenco, 1500); };
+  // un solo giro alla volta (mai richieste in parallelo), fermo se la scheda del browser e' nascosta, piu' lento se il server fatica
+  const giro = async () => {
+    if (!quadro.isConnected) { if (url0) URL.revokeObjectURL(url0); return; }
+    if (!document.hidden) {
+      await aggiorna();
+      if (++ct % 6 === 0) { await carica(); await caricaScar(); await caricaDove(); }
+    }
+    setTimeout(giro, Math.min(900 * (1 + errori * 2), 10000));
+  };
 
   const bApri = h("button", { type: "button", class: "p", onclick: apri, title: "Apri in una nuova scheda" }, "Apri");
   indirizzo.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); naviga(); } });
   scrivi.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); invia(true)(); } });
   const bt = (t, titolo, tipo) => h("button", { type: "button", class: "s", title: titolo, onclick: () => azione({ tipo }) }, t);
-  carica().then(() => { aggiorna(true); giro(); giroElenco(); });
+  carica().then(() => { aggiorna(); giro(); });
 
   return [h("h2", {}, "Finestre"),
     h("p", { class: "sotto" }, "Un browser vero dentro Opifex: apri ChatGPT, Claude, i tuoi social o qualunque sito e usalo da qui; gli accessi restano salvati sul tuo server. Gli agenti abilitati (Agenti → modifica) leggono le schede che condividi con 👁 e possono cliccare, scrivere, cercare e scaricare solo nei siti che elenchi per loro (🤖 = scheda aperta da un agente); non fanno pagamenti, eliminazioni, pubblicazioni né inseriscono password. Disponibile solo da computer."),

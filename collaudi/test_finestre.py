@@ -107,5 +107,21 @@ ok("dopo la chiusura non e' leggibile", g("finestra_leggi", {"numero": sid}).sta
 src = open("app/esecuzione.py").read()
 ok("esecuzione: strumenti agganciati solo con finestre_attivo", 'a["finestre_attivo"]' in src and "finestre.strumenti_per" in src)
 ok("front-end: vista PC e voce di menu", "vistaFinestre" in open("app/static/app.js").read() and "soloPC" in open("app/static/app.js").read())
+
+# --- carico: un browser lento non deve mai bloccare il server
+import time as _t
+esiti = []
+def _lento():
+    t0 = _t.time()
+    try:
+        finestre._locale._esegui(lambda: _t.sleep(2), 45); esiti.append(("ok", _t.time() - t0))
+    except finestre.ErroreFinestre as e:
+        esiti.append(("occupato" if "occupato" in str(e) else "altro", _t.time() - t0))
+fili = [threading.Thread(target=_lento) for _ in range(12)]
+[f.start() for f in fili]; [f.join(30) for f in fili]
+ok("carico: tutte le richieste finiscono", len(esiti) == 12)
+ok("carico: la maggior parte e' respinta subito (max 4 in attesa)", sum(1 for e in esiti if e[0] == "occupato") >= 6 and all(e[1] < 2.6 for e in esiti if e[0] == "occupato"), str(esiti))
+ok("carico: nessuna attesa lunga", max(e[1] for e in esiti) < 12, str(esiti))
+ok("front-end: un solo giro sequenziale e pausa se nascosta", "giroElenco" not in open("app/static/finestre.js").read() and "document.hidden" in open("app/static/finestre.js").read())
 finestre.gestore_finestre.spegni()
 print(f"TOTALE {sum(ris)}/{len(ris)}")

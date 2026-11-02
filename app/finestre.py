@@ -38,6 +38,7 @@ INATTIVITA = 20 * 60
 LARGHEZZA, ALTEZZA = 1280, 800
 PARTE = 6000
 MAX_SCHEDE_AGENTE = 5
+MAX_ATTESE = 4
 AZIONI_ORA = 150
 DOWNLOAD_MAX = 25 * 1024 * 1024
 ESTENSIONI = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".txt", ".pptx", ".odt", ".ods", ".png", ".jpg", ".jpeg", ".zip"}
@@ -105,6 +106,8 @@ class _Gestore:
         self._prossimo = 1
         self._ultimo_uso = time.time()
         self._azioni: dict[int, list] = {}
+        self._attese = threading.BoundedSemaphore(MAX_ATTESE)   # al massimo poche richieste in attesa: mai bloccare il server
+        self._foto: dict[int, tuple] = {}
 
     # --- filo di lavoro
     def _ciclo(self):
@@ -119,6 +122,8 @@ class _Gestore:
                 self._chiudi_browser()
                 return
             fn, esito = voce
+            if esito.get("annulla"):
+                continue   # chi aspettava se n'e' gia' andato: non lavoro per nessuno
             try:
                 esito["ok"] = fn()
             except ErroreFinestre as e:
@@ -128,18 +133,24 @@ class _Gestore:
             esito["ev"].set()
 
     def _esegui(self, fn, attesa=45):
-        with self._lock:
-            if self._filo is None or not self._filo.is_alive():
-                self._filo = threading.Thread(target=self._ciclo, daemon=True)
-                self._filo.start()
-        esito = {"ev": threading.Event()}
-        self._coda.put((fn, esito))
-        if not esito["ev"].wait(attesa):
-            raise ErroreFinestre("Il browser non risponde")
-        self._ultimo_uso = time.time()
-        if "err" in esito:
-            raise ErroreFinestre(esito["err"])
-        return esito["ok"]
+        if not self._attese.acquire(timeout=1.5):
+            raise ErroreFinestre("Il browser e' occupato: riprova tra un attimo")
+        try:
+            with self._lock:
+                if self._filo is None or not self._filo.is_alive():
+                    self._filo = threading.Thread(target=self._ciclo, daemon=True)
+                    self._filo.start()
+            esito = {"ev": threading.Event()}
+            self._coda.put((fn, esito))
+            if not esito["ev"].wait(attesa):
+                esito["annulla"] = True
+                raise ErroreFinestre("Il browser non risponde")
+            self._ultimo_uso = time.time()
+            if "err" in esito:
+                raise ErroreFinestre(esito["err"])
+            return esito["ok"]
+        finally:
+            self._attese.release()
 
     def _chiudi_browser(self):
         for o in (self._ctx,):
@@ -232,7 +243,12 @@ class _Gestore:
         self._esegui(f)
 
     def schermo(self, sid: int) -> bytes:
-        return self._esegui(lambda: self._scheda(sid)["page"].screenshot(type="jpeg", quality=62), 20)
+        t, b = self._foto.get(sid, (0, None))
+        if b is not None and time.time() - t < 0.7:
+            return b   # piu' richieste ravvicinate: una sola fotografia
+        b = self._esegui(lambda: self._scheda(sid)["page"].screenshot(type="jpeg", quality=62), 15)
+        self._foto[sid] = (time.time(), b)
+        return b
 
     def vai(self, sid: int, url: str):
         u = normalizza(url)
@@ -484,7 +500,7 @@ class _Instradatore:
 
         def remoto(*a, **k):
             from . import ponte
-            return ponte.esegui_pc("finestre", {"metodo": nome, "args": list(a), "kw": k})
+            return ponte.esegui_pc("finestre", {"metodo": nome, "args": list(a), "kw": k}, 15 if nome in ("schermo", "elenco", "scaricati") else 45)
         return remoto
 
 

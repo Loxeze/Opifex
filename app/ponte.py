@@ -3,6 +3,7 @@ e consegna i risultati. Il PC si collega verso Opifex (nessuna porta da aprire);
 Il PC e' considerato collegato se ha chiesto lavori negli ultimi 40 secondi."""
 import base64
 import json
+import threading
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -14,6 +15,7 @@ from .permessi import solo_titolare
 router = APIRouter(prefix="/ponte", dependencies=[Depends(solo_titolare)])
 VISTO_ENTRO = 40
 ATTESA_RISPOSTA = 45
+_attese = threading.BoundedSemaphore(4)   # poche richieste in attesa del PC: mai bloccare il server
 
 
 def stato_pc() -> dict:
@@ -29,6 +31,16 @@ def destinazione() -> str:
 
 def esegui_pc(tipo: str, parametri: dict, attesa: int = ATTESA_RISPOSTA):
     """Mette un lavoro in coda per il PC e aspetta il risultato. Solleva ErroreFinestre se il PC non risponde."""
+    from .finestre import ErroreFinestre
+    if not _attese.acquire(timeout=1.5):
+        raise ErroreFinestre("Il computer e' occupato: riprova tra un attimo")
+    try:
+        return _esegui_pc(tipo, parametri, attesa)
+    finally:
+        _attese.release()
+
+
+def _esegui_pc(tipo, parametri, attesa):
     from .finestre import ErroreFinestre
     if not stato_pc()["collegato"]:
         raise ErroreFinestre("Il computer non e' collegato: apri l'app Archivio sul PC e accedi a Opifex")
