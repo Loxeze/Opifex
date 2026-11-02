@@ -364,3 +364,4 @@ table.anteprima{border-collapse:collapse;font-size:12px}table.anteprima th,table
 .fin-quadro{outline:none;border:1px solid var(--bordo);border-radius:12px;overflow:hidden;background:#fff;line-height:0}.fin-quadro:focus{border-color:var(--accento,#1f4d3f)}
 .fin-schermo{width:100%;height:auto;display:block;cursor:pointer;user-select:none;-webkit-user-drag:none}
 .fin-vuoto{padding:30px;border:1px dashed var(--bordo);border-radius:12px;color:var(--sotto,#666)}
+.fin-riga select{width:auto;min-width:200px;flex:0 0 auto}

@@ -32,11 +32,21 @@ function messaggioErrore(d) {
 
 async function api(metodo, percorso, corpo) {
   const modulo = corpo instanceof FormData;
-  const r = await fetch(percorso, {
-    method: metodo,
-    headers: { ...(modulo ? {} : { "Content-Type": "application/json" }), ...(token ? { Authorization: "Bearer " + token } : {}) },
-    body: corpo === undefined ? undefined : (modulo ? corpo : JSON.stringify(corpo)),
-  });
+  // le richieste di lettura e l'accesso non restano mai appese in silenzio: dopo 45 secondi si dice che il server non risponde
+  const ctl = new AbortController();
+  const scadenza = (metodo === "GET" || percorso.startsWith("/login")) ? setTimeout(() => ctl.abort(), 45000) : null;
+  let r;
+  try {
+    r = await fetch(percorso, {
+      method: metodo,
+      headers: { ...(modulo ? {} : { "Content-Type": "application/json" }), ...(token ? { Authorization: "Bearer " + token } : {}) },
+      body: corpo === undefined ? undefined : (modulo ? corpo : JSON.stringify(corpo)),
+      signal: ctl.signal,
+    });
+  } catch (e) {
+    if (e && e.name === "AbortError") throw new Error("Il server non risponde (" + percorso.split("?")[0] + "). Riprova tra un minuto; se continua, avvisa chi gestisce il server.");
+    throw new Error("Connessione al server non riuscita. Controlla la rete e riprova.");
+  } finally { if (scadenza) clearTimeout(scadenza); }
   let dati = null;
   try { dati = await r.json(); } catch (e) { /* risposta vuota */ }
   if (r.status === 401 && percorso !== "/login" && percorso !== "/v1/accesso") { esci(); throw new Error("Sessione scaduta: rientra"); }
