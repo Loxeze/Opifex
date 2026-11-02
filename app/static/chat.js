@@ -86,6 +86,8 @@ function conversazioniChat() {
   allegati.addEventListener("change", () => { elencoAll.textContent = allegati.files.length ? [...allegati.files].map(x => x.name).join(", ") : ""; });
   const bAllega = h("button", { class: "s", type: "button", title: "Allega file (fino a 5, 10 MB ciascuno)", onclick: () => allegati.click() }, "📎");
   const bInvia = h("button", { class: "p" }, "Invia");
+  const crescita = () => { testo.style.height = "auto"; testo.style.height = Math.min(testo.scrollHeight + 2, Math.round(innerHeight * 0.45)) + "px"; };
+  testo.addEventListener("input", crescita);
   const bMic = h("button", { class: "s", type: "button", title: "Detta il messaggio con la voce" }, "🎤");
   const stile = (ascolto) => { bMic.textContent = ascolto ? "⏹" : "🎤"; bMic.classList.toggle("p", !!ascolto); };
   const modoVoce = h("select", {}, h("option", { value: "browser" }, "Browser (gratuito)"), h("option", { value: "server" }, "Server con OpenAI (più affidabile)"));
@@ -250,7 +252,7 @@ function conversazioniChat() {
         for (const x of allegati.files) fd.append("file", x);
         await api("POST", "/agenti/" + id + "/chat-allegati", fd);
       } else await api("POST", "/agenti/" + id + "/chat", { messaggio: testo.value, fascia_dati: f.value, asincrono: true });
-      testo.value = ""; allegati.value = ""; elencoAll.textContent = ""; clearTimeout(timerBozza); stato.bozzaSospesa = null;
+      testo.value = ""; crescita(); allegati.value = ""; elencoAll.textContent = ""; clearTimeout(timerBozza); stato.bozzaSospesa = null;
       api("PUT", "/chat/conversazioni/" + id + "/bozza", { testo: "", fascia: f.value }).catch(() => {});
       await aggiornaConversazione(false); S.firma = ""; await aggiornaConversazione(false);
       messaggiEl.scrollTop = messaggiEl.scrollHeight;
@@ -263,7 +265,7 @@ function conversazioniChat() {
 
   // ----- voce -----
   const ascolta = () => {
-    const fineAscolto = (t) => { stile(false); if (Voce.viva && t) invia(); else if (Voce.viva && stato.vista === "chat") setTimeout(() => Voce.viva && Voce.avviaAscolto && Voce.avviaAscolto(), 400); };
+    const fineAscolto = (t) => { stile(false); crescita(); if (Voce.viva && t) invia(); else if (Voce.viva && stato.vista === "chat") setTimeout(() => Voce.viva && Voce.avviaAscolto && Voce.avviaAscolto(), 400); };
     const statoAscolto = (s) => { if (s === null) stile(false); else if (s === "ascolto") { stile(true); msg.replaceChildren(); } else if (s === "trascrivo") msg.replaceChildren(avviso("Trascrivo la registrazione…", "ok")); else if (s) msg.replaceChildren(avviso(s, "avv")); };
     if (Voce.modo === "server") {
       if (!Voce.registra(testo, fineAscolto, statoAscolto, f.value)) msg.replaceChildren(avviso("Questo browser non può registrare dal microfono.", "avv"));

@@ -8,6 +8,24 @@ from .riservatezza import puo_uscire
 MAX_BYTE = 10 * 1024 * 1024
 FORMATI = {"webm", "ogg", "oga", "opus", "mp4", "m4a", "wav", "mp3", "mpeg", "mpga"}
 MAX_ORA = 60
+MODELLI = ("gpt-4o-transcribe", "whisper-1")   # il primo e' piu' preciso; se non risponde si ripiega sul secondo
+PAROLE_FISSE = ("Opifex", "Renovatio", "Logos", "Evidens", "Aquilia", "FARO", "Montarrenti", "Simposia", "Sovicille", "Masone", "Ginnasio", "Padre Casati", "Buffer", "Canva", "NAS", "CRM", "Drive", "Interreg", "PNRR", "europrogettazione")
+
+
+def vocabolario(conn) -> str:
+    """Nomi propri che i modelli di trascrizione storpiano (agenti, progetti, reparti): aiutano a scriverli giusti."""
+    nomi = list(PAROLE_FISSE)
+    try:
+        for q in ("SELECT nome FROM agenti WHERE attivo ORDER BY id LIMIT 60", "SELECT nome FROM progetti WHERE NOT archiviato ORDER BY id DESC LIMIT 40", "SELECT nome FROM divisioni ORDER BY id LIMIT 20"):
+            nomi += [r["nome"] for r in conn.execute(q).fetchall() if r["nome"]]
+    except Exception:  # noqa: BLE001
+        pass
+    visti, out, n = set(), [], 0
+    for x in nomi:
+        k = x.strip().lower()
+        if k and k not in visti and n + len(x) < 700:
+            visti.add(k); out.append(x.strip()); n += len(x) + 2
+    return "Dettatura in italiano. Nomi e termini che possono comparire: " + ", ".join(out) + "."
 
 
 class ErroreTrascrizione(Exception):
@@ -38,17 +56,27 @@ def trascrivi(dati: bytes, estensione: str, fascia_dati: str, utente_id: int | N
     chiave = fornitori.chiave("openai")
     if not chiave:
         raise ErroreTrascrizione("Chiave OpenAI non configurata: inseriscila in Impostazioni → Sicurezza e garanzie", 409)
-    try:
-        r = httpx.post("https://api.openai.com/v1/audio/transcriptions", headers={"Authorization": "Bearer " + chiave},
-                       data={"model": "whisper-1", "language": "it", "response_format": "json"},
-                       files={"file": ("voce." + ext_whisper, dati, tipo_contenuto)}, timeout=60)
-    except httpx.HTTPError as e:
-        raise ErroreTrascrizione(f"OpenAI non raggiungibile ({type(e).__name__})", 502) from None
+    with connessione() as conn:
+        guida = vocabolario(conn)
+    r = None
+    for modello in MODELLI:
+        dati_ = {"model": modello, "language": "it", "response_format": "json", "prompt": guida}
+        if modello == "whisper-1":
+            dati_["temperature"] = "0"
+        try:
+            r = httpx.post("https://api.openai.com/v1/audio/transcriptions", headers={"Authorization": "Bearer " + chiave}, data=dati_,
+                           files={"file": ("voce." + ext_whisper, dati, tipo_contenuto)}, timeout=60)
+        except httpx.HTTPError as e:
+            if modello == MODELLI[-1]:
+                raise ErroreTrascrizione(f"OpenAI non raggiungibile ({type(e).__name__})", 502) from None
+            continue
+        if r.status_code == 200 or r.status_code in (401, 429):
+            break
     if r.status_code != 200:
         raise ErroreTrascrizione(f"OpenAI ha risposto {r.status_code}", 502)
     testo = (r.json().get("text") or "").strip()
     with connessione() as conn:
         conn.execute("INSERT INTO registro_azioni (azione, dettagli, utente_id) VALUES ('voce_trascritta', %s::jsonb, %s)", ('{"byte": %d}' % len(dati), utente_id))
-    if not testo:
+    if not testo or "Nomi e termini che possono comparire" in testo:   # su audio vuoto alcuni modelli restituiscono la guida
         raise ErroreTrascrizione("Non ho capito nulla nella registrazione: riprova parlando piu' vicino al microfono", 422)
     return testo

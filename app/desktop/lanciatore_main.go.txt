@@ -27,7 +27,7 @@ import (
 var indicePy []byte
 
 const (
-	versione   = 2 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
+	versione   = 3 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
 	urlPredef  = "https://app.opifex.space"
 	porta      = "8765"
 	pyZipURL   = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip"
@@ -264,10 +264,22 @@ func inAscolto() bool {
 func apriFinestra(base string) {
 	u := "http://127.0.0.1:" + porta + "/"
 	if b := browserApp(); b != "" {
-		exec.Command(b, "--app="+u, "--user-data-dir="+filepath.Join(base, "finestra"), "--window-size=1180,860", "--no-first-run", "--no-default-browser-check").Start()
+		exec.Command(b, "--app="+u, "--user-data-dir="+filepath.Join(base, "finestra"), "--window-size=1180,860", "--window-position=90,70", "--no-first-run", "--no-default-browser-check").Start()
 		return
 	}
 	exec.Command("rundll32", "url.dll,FileProtocolHandler", u).Start()
+}
+
+// apriPlancia apre la plancia di Opifex in una finestra propria (con un profilo suo, cosi' l'accesso resta salvato).
+func apriPlancia(base, url string) {
+	if url == "" {
+		url = urlPredef
+	}
+	if b := browserApp(); b != "" {
+		exec.Command(b, "--app="+url, "--user-data-dir="+filepath.Join(base, "plancia"), "--window-size=1280,860", "--window-position=20,20", "--no-first-run", "--no-default-browser-check").Start()
+		return
+	}
+	exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 }
 
 func main() {
@@ -373,9 +385,13 @@ func main() {
 		if !pronto {
 			muori("il programma non e' partito (dettagli in "+filepath.Join(base, "ultimo-avvio.log")+")", nil)
 		}
+		apriPlancia(base, url)
+		time.Sleep(700 * time.Millisecond)
 		apriFinestra(base)
 		c.Wait() // si ferma da solo quando la finestra viene chiusa
 		return
 	}
-	apriFinestra(base) // gia' avviato: riapro solo la finestra
+	apriPlancia(base, url) // gia' avviato: riapro le due finestre
+	time.Sleep(700 * time.Millisecond)
+	apriFinestra(base)
 }

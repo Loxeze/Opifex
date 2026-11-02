@@ -7,13 +7,14 @@ const Voce = (() => {
   const leggiPref = (k) => { try { return localStorage.getItem(chiave(k)) === "1"; } catch (e) { return false; } };
   const scriviPref = (k, v) => { try { localStorage.setItem(chiave(k), v ? "1" : "0"); } catch (e) { /* ignora */ } };
   let rec = null, reg = null;
+  const SILENZIO_MS = 2800;   // pausa che chiude la dettatura: 2,8 s, cosi' una pausa per pensare non taglia la frase a meta'
   const SERVER = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
   const v = {
     supportoDettatura: !!SR || SERVER,
     supportoBrowser: !!SR,
     supportoServer: SERVER,
     // modo: "browser" (riconoscimento del browser) oppure "server" (registra e trascrive OpenAI dal server)
-    get modo() { try { const m = localStorage.getItem(chiave("modo")); if (m === "server" && SERVER) return "server"; if (m === "browser" && SR) return "browser"; } catch (e) { /* ignora */ } return SR ? "browser" : "server"; },
+    get modo() { try { const m = localStorage.getItem(chiave("modo")); if (m === "server" && SERVER) return "server"; if (m === "browser" && SR) return "browser"; } catch (e) { /* ignora */ } const tocco = !!(window.matchMedia && matchMedia("(pointer:coarse)").matches); return SERVER && (tocco || !SR) ? "server" : SR ? "browser" : "server"; },
     set modo(x) { try { localStorage.setItem(chiave("modo"), x); } catch (e) { /* ignora */ } },
     supportoLettura: "speechSynthesis" in window,
     get leggiRisposte() { return leggiPref("leggi"); },
@@ -89,11 +90,11 @@ const Voce = (() => {
       const me = { annulla: false, stop() { chiuso = true; try { if (mr && mr.state !== "inactive") mr.stop(); else if (!mr) { me.annulla = true; } } catch (e) { /* ignora */ } } };
       reg = me;
       const avviso_ = (t) => quandoStato && quandoStato(t);
-      navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => {
+      navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } }).catch(() => navigator.mediaDevices.getUserMedia({ audio: true })).then((s) => {
         flusso = s;
         if (chiuso) { s.getTracks().forEach(t => t.stop()); return; }
         const tipo = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"].find(t => MediaRecorder.isTypeSupported(t)) || "";
-        mr = new MediaRecorder(s, tipo ? { mimeType: tipo } : undefined);
+        mr = new MediaRecorder(s, tipo ? { mimeType: tipo, audioBitsPerSecond: 96000 } : { audioBitsPerSecond: 96000 });
         const pezzi = [];
         mr.ondataavailable = (e) => { if (e.data && e.data.size) pezzi.push(e.data); };
         let parlato = false, picco = 0;
@@ -107,7 +108,7 @@ const Voce = (() => {
             picco = Math.max(picco, max);
             if (max > 8) { parlato = true; ultimaVoce = Date.now(); }
             const ora = Date.now();
-            if (!chiuso && ((parlato && ora - ultimaVoce > 1600) || ora - inizio > 90000 || (!parlato && ora - inizio > 8000))) me.stop();
+            if (!chiuso && ((parlato && ora - ultimaVoce > SILENZIO_MS) || ora - inizio > 180000 || (!parlato && ora - inizio > 10000))) me.stop();
           }, 100);
         } catch (e) { parlato = true; /* niente analisi del livello: si fida del pulsante di stop */ }
         mr.onstop = async () => {
