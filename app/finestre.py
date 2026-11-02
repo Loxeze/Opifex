@@ -176,7 +176,8 @@ class _Gestore:
             ultimo = None
             for canale in ("msedge", "chrome"):
                 try:
-                    self._ctx = self._pw.chromium.launch_persistent_context(str(PROFILO), channel=canale, headless=bool(os.environ.get("OPIFEX_INVISIBILE")), **opz)
+                    self._ctx = self._pw.chromium.launch_persistent_context(str(PROFILO), channel=canale, headless=bool(os.environ.get("OPIFEX_INVISIBILE")),
+                                                                       ignore_default_args=["--enable-automation"], args=["--disable-blink-features=AutomationControlled"], **opz)
                     break
                 except Exception as e:
                     ultimo = e
