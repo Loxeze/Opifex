@@ -63,7 +63,7 @@ def pc():
         if r.get("nessuno"): continue
         p = r["parametri"]; esito = {"ok": True, "dati": None, "errore": ""}
         try:
-            assert r["tipo"] == "finestre" and p["metodo"] in {"elenco", "apri", "chiudi", "schermo", "vai", "azione", "condividi", "leggi", "agente_apri", "agente_chiudi", "agente_leggi", "agente_clic", "agente_scrivi", "agente_scarica"}
+            assert r["tipo"] == "finestre" and p["metodo"] in {"elenco", "apri", "chiudi", "schermo", "vai", "azione", "condividi", "leggi", "agente_apri", "agente_chiudi", "agente_leggi", "agente_clic", "agente_scrivi", "agente_scarica", "agente_lunghezza", "agente_tasto"}
             v = getattr(finestre._locale, p["metodo"])(*p["args"], **p["kw"])
             if isinstance(v, (bytes, bytearray)):
                 import base64; v = {"_bytes": base64.b64encode(bytes(v)).decode()}

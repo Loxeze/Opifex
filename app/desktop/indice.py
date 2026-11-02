@@ -697,7 +697,7 @@ def opifex_api(db, metodo, percorso, q, corpo):
 
 
 PONTE = {"stato": "in attesa dell'accesso a Opifex", "modulo": None}
-PONTE_METODI = {"elenco", "apri", "chiudi", "schermo", "vai", "azione", "condividi", "leggi", "agente_apri", "agente_chiudi", "agente_leggi", "agente_clic", "agente_scrivi", "agente_scarica"}
+PONTE_METODI = {"elenco", "apri", "chiudi", "schermo", "vai", "azione", "condividi", "leggi", "agente_apri", "agente_chiudi", "agente_leggi", "agente_clic", "agente_scrivi", "agente_scarica", "agente_lunghezza", "agente_tasto"}
 
 
 def _ponte_modulo(db):
