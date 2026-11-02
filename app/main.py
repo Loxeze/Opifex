@@ -16,6 +16,7 @@ from .permessi import divisioni_visibili, solo_titolare, utente_corrente
 from .rotte_agenti import router as router_agenti
 from .rotte_briefing import router as router_briefing
 from .rotte_accessi import router as router_accessi
+from .rotte_finestre import router as router_finestre
 from .rotte_progetti import router as router_progetti
 from .rotte_scheda import router as router_scheda
 from .rotte_ginnasio import router as router_ginnasio
@@ -285,6 +286,7 @@ app.include_router(router_briefing)
 app.include_router(router_gestione)
 app.include_router(router_documenti)
 app.include_router(router_accessi)
+app.include_router(router_finestre)
 app.include_router(router_utenti)
 app.include_router(router_progetti)
 app.include_router(router_scheda)

@@ -15,7 +15,7 @@ import contextvars
 PROVA_ISTRUZIONI = contextvars.ContextVar('prova_istruzioni', default=None)   # (agente_id, testo): prova di istruzioni non ancora applicate
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
 from . import banco, creativi, best_practice, archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
-from . import brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta
+from . import finestre, brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta
 from . import strumenti_social
 from . import vademecum, note_aurora, scheda_impresa
 from .navigatore import ErroreNavigazione, Navigatore
@@ -41,7 +41,7 @@ def _carica_agente(conn, agente_id: int) -> dict:
         """
         SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.tipo, a.fascia_dati_max, a.attivo,
                a.modello AS modello_richiesto,
-               a.max_token_risposta, a.sforzo, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.invio_posta, a.crm_attivo, a.canva_attivo, a.archivio_attivo, a.ruolo_speciale, a.usa_biblioteca, a.sandbox_attivo, a.controllore_id, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
+               a.max_token_risposta, a.sforzo, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.invio_posta, a.crm_attivo, a.canva_attivo, a.finestre_attivo, a.finestre_siti, a.archivio_attivo, a.ruolo_speciale, a.usa_biblioteca, a.sandbox_attivo, a.controllore_id, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
                m.id AS modello_id, m.nome AS modello_nome,
                m.costo_input_per_milione, m.costo_output_per_milione,
                f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
@@ -305,6 +305,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             email_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["email_attivo"] and brevo_email.collegato(conn))
             crm_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["crm_attivo"])
             archivio_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["archivio_attivo"])
+            finestre_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["finestre_attivo"])
             canva_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["canva_attivo"] and canva.collegato(conn))
             iniz_tool = bool(ok_int and colleghi_ok and a["livello"] in ("manager", "referente")
                              and not conn.execute("SELECT sentinella FROM agenti WHERE id = %s", (agente_id,)).fetchone()["sentinella"])
@@ -323,7 +324,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             prog_crea = bool(scheda_progetto.strumenti_abilitati() and ok_int and a["livello"] in ("manager", "referente") and not _sent)
             sq_pm = bool(form_tool and pm_tool)
             sq_val = bool(form_tool and not _sent)
-            if creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val:
+            if creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -426,6 +427,13 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     gar = archivio_nas.gestore(connessione, agente_id)
                     for s_ in archivio_nas.STRUMENTI:
                         gestori[s_["name"]] = gar
+                if finestre_tool:
+                    strumenti_fin = finestre.strumenti_per(list(a["finestre_siti"] or []))
+                    extra.extend(strumenti_fin)
+                    avviso_extra += finestre.AVVISO
+                    gfi = finestre.gestore(connessione, agente_id)
+                    for s_ in strumenti_fin:
+                        gestori[s_["name"]] = gfi
                 if canva_tool:
                     extra.extend(canva.STRUMENTI)
                     avviso_extra += canva.AVVISO

@@ -73,10 +73,10 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Plancia"], ["chat", "Chat"], ["task", "Task"], ["riunioni", "Riunioni"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["crm", "CRM"], ["social", "Social"], ["briefing", "Briefing"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["impostazioni", "Impostazioni"]];
+const VISTE = [["dashboard", "Plancia"], ["chat", "Chat"], ["task", "Task"], ["riunioni", "Riunioni"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["crm", "CRM"], ["social", "Social"], ["finestre", "Finestre"], ["briefing", "Briefing"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["impostazioni", "Impostazioni"]];
 // il menu laterale: dopo queste voci comincia un nuovo gruppo con la sua intestazione
 const GRUPPO_MENU = { progetti: "Lavoro", agenti: "Laboratorio" };
-const ICONE = { dashboard: "M4 11l8-7 8 7v9H4z", chat: "M4 5h16v11H9l-5 4z", task: "M5 12l4 4 10-10", riunioni: "M12 3a3 3 0 013 3v5a3 3 0 01-6 0V6a3 3 0 013-3zM5 11a7 7 0 0014 0M12 18v3",
+const ICONE = { finestre: "M3 5h18v14H3zM3 9h18M7 7h.01", dashboard: "M4 11l8-7 8 7v9H4z", chat: "M4 5h16v11H9l-5 4z", task: "M5 12l4 4 10-10", riunioni: "M12 3a3 3 0 013 3v5a3 3 0 01-6 0V6a3 3 0 013-3zM5 11a7 7 0 0014 0M12 18v3",
   progetti: "M3 7h6l2 2h10v10H3z", documenti: "M7 3h8l4 4v14H7z", crm: "M9 4.5a3.5 3.5 0 110 7 3.5 3.5 0 010-7zM3 20c0-3.5 3-6 6-6s6 2.5 6 6M16 5a3.5 3.5 0 010 7", social: "M4 20V10M10 20V4M16 20v-7M22 20H2",
   briefing: "M5 4h14v16H5zM9 8h6M9 12h6M9 16h3", agenti: "M12 4a4 4 0 110 8 4 4 0 010-8zM4 21c0-4.4 3.6-7 8-7s8 2.6 8 7", ginnasio: "M3 9l9-5 9 5-9 5zM7 11.5V16c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.5",
   impostazioni: "M12 9a3 3 0 110 6 3 3 0 010-6zM12 3v3M12 18v3M3 12h3M18 12h3", iniziative: "M5 12l4 4 10-10", percorsi: "M3 7h6l2 2h10v10H3z", account: "M12 4a4 4 0 110 8 4 4 0 010-8zM4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" };
@@ -99,7 +99,8 @@ function cornice(contenuto) {
   if (window.name === "opifex-organigramma" || location.hash === "#organigramma") {   // finestra a parte: solo l'organigramma
     radice.replaceChildren(h("main", { class: "largo org-finestra" }, contenuto)); return;
   }
-  const voci = (stato.ruolo === "titolare" ? VISTE : VISTE_COLLABORATORE);
+  const soloPC = matchMedia("(max-width:800px), (pointer:coarse)").matches;   // le Finestre servono il PC: da telefono non compaiono
+  const voci = (stato.ruolo === "titolare" ? VISTE : VISTE_COLLABORATORE).filter(v => !(soloPC && v[0] === "finestre"));
   const attiva = (id) => stato.vista === id || (id === "dashboard" && (stato.vista === "richieste" || stato.vista === "organigramma")) || (id === "progetti" && stato.vista === "progetto") || (id === "crm" && stato.vista === "contatto");
   const nav = [];
   for (const [id, nome] of voci) {
@@ -153,7 +154,7 @@ function disegna() {
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
   if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
   let contenuto;
   try { contenuto = vista(); }
   catch (e) {   // una schermata che si rompe non deve bloccare il menu: si mostra l'errore e si puo' andare altrove
@@ -344,6 +345,8 @@ function modulo(a) {
   const emailAttivo = h("input", { type: "checkbox" }); emailAttivo.checked = !!d.email_attivo;
   const crmAttivo = h("input", { type: "checkbox" }); crmAttivo.checked = !!d.crm_attivo;
   const canvaAttivo = h("input", { type: "checkbox" }); canvaAttivo.checked = !!d.canva_attivo;
+  const finestreAttivo = h("input", { type: "checkbox" }); finestreAttivo.checked = !!d.finestre_attivo;
+  const finestreSiti = h("textarea", { rows: 3, placeholder: "Siti in cui può cliccare, scrivere e scaricare (uno per riga, es. chatgpt.com). Vuoto = solo lettura delle schede condivise." }); finestreSiti.value = (d.finestre_siti || []).join("\n");
   const archivioAttivo = h("input", { type: "checkbox" }); archivioAttivo.checked = !!d.archivio_attivo;
   const driveAttivo = h("input", { type: "checkbox" }); driveAttivo.checked = !!d.drive_attivo;
   const conn = stato.connessioni.map(c => {
@@ -392,7 +395,7 @@ function modulo(a) {
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,
       fasi: fasi.filter(f => f.titolo.trim()).map(f => ({ ...f, titolo: f.titolo.trim() })),
-      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, email_attivo: emailAttivo.checked, crm_attivo: crmAttivo.checked, canva_attivo: canvaAttivo.checked, archivio_attivo: archivioAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null, invio_posta: invioScelto(),
+      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, email_attivo: emailAttivo.checked, crm_attivo: crmAttivo.checked, canva_attivo: canvaAttivo.checked, finestre_attivo: finestreAttivo.checked, finestre_siti: finestreSiti.value.split("\n").map(x => x.trim()).filter(Boolean), archivio_attivo: archivioAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null, invio_posta: invioScelto(),
       connessioni: conn.filter(([, cb]) => cb.checked).map(([c]) => c.id),
     };
     try {
@@ -490,6 +493,8 @@ function modulo(a) {
       ...radiInvio,
       h("div", { class: "interruttore" }, socialAttivo, h("span", {}, "Può preparare post per i social (non pubblica: li approvi tu dalla pagina Social)")),
       h("div", { class: "interruttore" }, archivioAttivo, h("span", {}, "Può cercare foto e video nell'Archivio NAS e chiedere foto pronte o trascrizioni (serve il connettore sul NAS)")),
+      h("div", { class: "interruttore" }, finestreAttivo, h("span", {}, "Può usare il browser (Finestre): leggere le schede che condividi e agire solo nei siti elencati qui sotto")),
+      finestreSiti,
       h("div", { class: "interruttore" }, canvaAttivo, h("span", {}, "Può creare ed esportare design su Canva (serve Canva collegato in Collegamenti)")),
       h("div", { class: "interruttore" }, crmAttivo, h("span", {}, "Può consultare i conteggi del CRM (solo numeri aggregati, mai nomi o recapiti)")),
       h("div", { class: "interruttore" }, emailAttivo, h("span", {}, "Può preparare campagne email via Brevo (non invia: le approvi tu dalla pagina Email)")),

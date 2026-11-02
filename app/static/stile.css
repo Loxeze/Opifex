@@ -355,3 +355,12 @@ table.anteprima{border-collapse:collapse;font-size:12px}table.anteprima th,table
 @keyframes micpolso{0%,100%{box-shadow:0 0 0 0 rgba(192,57,43,.55)}50%{box-shadow:0 0 0 9px rgba(192,57,43,0)}}
 @media (pointer:coarse){.mic-campo{width:44px;height:44px;font-size:21px}textarea,input[type=text],input[type=search],input:not([type]){font-size:16px}}
 @media (prefers-reduced-motion:reduce){.mic-campo.ascolto{animation:none}}
+
+/* Finestre (browser nella plancia, solo PC) */
+.fin-riga{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}.fin-riga input{flex:1;min-width:200px}
+.fin-schede{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.fin-scheda{display:inline-flex;align-items:center;border:1px solid var(--bordo);border-radius:10px;overflow:hidden}.fin-scheda.attiva{border-color:var(--accento,#1f4d3f);box-shadow:0 0 0 1px var(--accento,#1f4d3f) inset}
+.fin-scheda button{border:0;background:transparent;padding:6px 10px;cursor:pointer;color:inherit;font:inherit}.fin-x{opacity:.6}
+.fin-quadro{outline:none;border:1px solid var(--bordo);border-radius:12px;overflow:hidden;background:#fff;line-height:0}.fin-quadro:focus{border-color:var(--accento,#1f4d3f)}
+.fin-schermo{width:100%;height:auto;display:block;cursor:pointer;user-select:none;-webkit-user-drag:none}
+.fin-vuoto{padding:30px;border:1px dashed var(--bordo);border-radius:12px;color:var(--sotto,#666)}
