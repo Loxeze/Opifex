@@ -76,6 +76,20 @@ function vistaFinestre() {
     catch (e) { stampa(e.message, true); cond.checked = !cond.checked; }
   });
 
+  const dove = h("select", { title: "Dove gira il browser" }, h("option", { value: "server" }, "☁ Sul server"), h("option", { value: "pc" }, "🖥 Sul mio computer"));
+  const doveMsg = h("span", { class: "sotto" });
+  const caricaDove = async () => {
+    try {
+      const r = await api("GET", "/finestre/dove");
+      dove.value = r.destinazione;
+      doveMsg.textContent = r.collegato ? (r.capacita && r.capacita.finestre ? "Computer collegato: browser pronto." : "Computer collegato, ma il browser non è ancora pronto (si prepara da solo alla prossima apertura dell'app Archivio).") : "Computer non collegato: apri l'app Archivio e accedi a Opifex.";
+    } catch (e) { /* non disponibile */ }
+  };
+  dove.addEventListener("change", async () => {
+    try { await api("PUT", "/finestre/dove", { destinazione: dove.value }); S.attiva = null; await caricaDove(); await carica(); aggiorna(true); }
+    catch (e) { stampa(e.message, true); await caricaDove(); }
+  });
+  caricaDove();
   const scarFile = h("span", {}, "—");
   const caricaScar = async () => { try { const r = await api("GET", "/finestre/scaricati/elenco"); scarFile.replaceChildren(...(r.file.length ? r.file.slice(0, 8).flatMap(f => [h("a", { href: "#", onclick: async (e) => { e.preventDefault(); const x = await fetch("/finestre/scaricati/" + encodeURIComponent(f.nome), { headers: { Authorization: "Bearer " + token } }); const b = await x.blob(); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = f.nome; a.click(); } }, f.nome + " (" + f.kb + " KB)"), " · "]) : ["nessun file"])); } catch (e) { /* elenco non disponibile */ } };
   caricaScar();
@@ -92,7 +106,7 @@ function vistaFinestre() {
   };
   const giro = async () => { if (!quadro.isConnected) { if (url0) URL.revokeObjectURL(url0); return; } await aggiorna(); setTimeout(giro, 900); };
   let ct = 0;
-  const giroElenco = () => { if (!quadro.isConnected) return; if (++ct % 4 === 0) { carica(); caricaScar(); } setTimeout(giroElenco, 1500); };
+  const giroElenco = () => { if (!quadro.isConnected) return; if (++ct % 4 === 0) { carica(); caricaScar(); caricaDove(); } setTimeout(giroElenco, 1500); };
 
   const bApri = h("button", { type: "button", class: "p", onclick: apri, title: "Apri in una nuova scheda" }, "Apri");
   indirizzo.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); naviga(); } });
@@ -102,6 +116,7 @@ function vistaFinestre() {
 
   return [h("h2", {}, "Finestre"),
     h("p", { class: "sotto" }, "Un browser vero dentro Opifex: apri ChatGPT, Claude, i tuoi social o qualunque sito e usalo da qui; gli accessi restano salvati sul tuo server. Gli agenti abilitati (Agenti → modifica) leggono le schede che condividi con 👁 e possono cliccare, scrivere, cercare e scaricare solo nei siti che elenchi per loro (🤖 = scheda aperta da un agente); non fanno pagamenti, eliminazioni, pubblicazioni né inseriscono password. Disponibile solo da computer."),
+    h("div", { class: "fin-riga" }, h("span", {}, "Browser:"), dove, doveMsg),
     h("div", { class: "fin-riga" }, bt("◀", "Indietro", "indietro"), bt("▶", "Avanti", "avanti"), bt("⟳", "Ricarica", "ricarica"), indirizzo, h("button", { type: "button", class: "s", onclick: naviga, title: "Vai a questo indirizzo nella scheda corrente" }, "Vai"), bApri),
     barra, msg, vuoto, quadro,
     h("div", { class: "fin-riga" }, scrivi, h("button", { type: "button", class: "s", onclick: invia(false) }, "Scrivi nella pagina"), h("button", { type: "button", class: "s", onclick: invia(true) }, "Scrivi e premi Invio")),

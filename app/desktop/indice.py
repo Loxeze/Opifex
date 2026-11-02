@@ -537,7 +537,7 @@ button{background:var(--ac);color:#2a1608;font-weight:600;border:0;border-radius
 <div id="v2" hidden>
 <section id="ac"><h2>Collegati a Opifex</h2><div class="m">Le stesse credenziali con cui entri dal sito. La password non viene salvata: resta collegato finche' tieni aperta la finestra.</div>
 <input id="ou" placeholder="Indirizzo di Opifex" style="margin-top:10px"><input id="oe" placeholder="Email" style="margin-top:8px"><input id="op" type="password" placeholder="Password" style="margin-top:8px">
-<input id="oc" placeholder="Codice a 6 cifre (secondo fattore)" style="margin-top:8px" hidden><button id="ol">Entra</button><div class="m" id="om"></div></section>
+<input id="oc" placeholder="Codice a 6 cifre (secondo fattore)" style="margin-top:8px" hidden><button id="ol">Entra</button><div class="m" id="om"></div><div class="m" id="pn" style="margin-top:6px"></div></section>
 <section id="dl" hidden><h2>Dialogo <span class="m" id="on"></span></h2>
 <div style="display:flex;gap:8px"><select id="oa" style="flex:1;padding:9px;border-radius:7px;border:1px solid var(--li);background:var(--bg);color:var(--fg)"></select>
 <select id="of" style="padding:9px;border-radius:7px;border:1px solid var(--li);background:var(--bg);color:var(--fg)"><option value="pubblico">Solo dati pubblici</option><option value="interno" selected>Dati interni</option><option value="riservato">Riservato</option></select></div>
@@ -571,7 +571,8 @@ $('t1').onclick=()=>sc(1);$('t2').onclick=()=>sc(2);
 function sc(n){$('v1').hidden=n!==1;$('v2').hidden=n!==2;$('t1').className=n===1?'':'g';$('t2').className=n===2?'':'g';if(n===2)opStato()}
 let passo2=false;
 async function opStato(){const r=await j('/api/opifex/stato');$('ou').value=$('ou').value||r.url||'https://app.opifex.space';$('oe').value=$('oe').value||r.email||'';
- $('ac').hidden=!!r.collegato;$('dl').hidden=!r.collegato;if(r.collegato){$('on').textContent='· '+(r.nome||'');if(!$('oa').options.length)opAgenti()}}
+ $('ac').hidden=!!r.collegato;$('dl').hidden=!r.collegato;if(r.collegato){$('on').textContent='· '+(r.nome||'');if(!$('oa').options.length)opAgenti()}$('pn').textContent=r.collegato?('Browser per Opifex sul tuo computer: '+(r.ponte||'')):''}
+setInterval(()=>{if(!$('dl').hidden)opStato()},6000);
 async function opAgenti(){const r=await j('/api/opifex/agenti');if(r.errore){$('om').textContent=r.errore;return}
  $('oa').innerHTML=(r.agenti||[]).map(a=>`<option value="${a.id}">${E(a.nome)} - ${E(a.ruolo||'')}</option>`).join('')}
 $('ol').onclick=async()=>{$('om').textContent='Accedo…';let r;
@@ -658,7 +659,7 @@ def opifex_api(db, metodo, percorso, q, corpo):
                 cf = json.loads(_conf_file(db).read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 pass
-            return {"collegato": bool(OPI["token"]), "nome": OPI["nome"], "url": OPI["url"] or cf.get("url", ""), "email": OPI["email"] or cf.get("email", "")}
+            return {"ponte": PONTE["stato"], "collegato": bool(OPI["token"]), "nome": OPI["nome"], "url": OPI["url"] or cf.get("url", ""), "email": OPI["email"] or cf.get("email", "")}
         if percorso == "/api/opifex/login":
             OPI.update(url=_url_valido(str(corpo.get("url", ""))), email=str(corpo.get("email", "")).strip(), token="", sfida="")
             try:
@@ -693,6 +694,87 @@ def opifex_api(db, metodo, percorso, q, corpo):
     except (ValueError, TypeError, KeyError) as e:
         return {"errore": str(e)[:200]}
     return {"errore": "?"}
+
+
+PONTE = {"stato": "in attesa dell'accesso a Opifex", "modulo": None}
+PONTE_METODI = {"elenco", "apri", "chiudi", "schermo", "vai", "azione", "condividi", "leggi", "agente_apri", "agente_chiudi", "agente_leggi", "agente_clic", "agente_scrivi", "agente_scarica"}
+
+
+def _ponte_modulo(db):
+    """Scarica da Opifex il modulo del browser (lo stesso che gira sul server) e lo carica; None se non si puo' (es. Playwright mancante)."""
+    import importlib.util
+    import urllib.request
+    if PONTE["modulo"] is not None:
+        return PONTE["modulo"]
+    if importlib.util.find_spec("playwright") is None:
+        PONTE["stato"] = "manca il componente Playwright (si installa da solo alla prossima apertura dell'app)"
+        return None
+    try:
+        m = _opifex("GET", "/desktop/manifesto", auth=False, timeout=15)
+        f = (m or {}).get("finestre")
+        if not f or not str(f.get("url", "")).startswith("/desktop/"):
+            PONTE["stato"] = "Opifex non offre ancora il browser per il computer"
+            return None
+        dest = Path(db).with_name("finestre_pc.py")
+        if not dest.exists() or hashlib.sha256(dest.read_bytes()).hexdigest() != f["sha256"]:
+            with urllib.request.urlopen(urllib.request.Request(OPI["url"] + f["url"], headers={"User-Agent": "Opifex-Archivio"}), timeout=30) as r:
+                dati = r.read()
+            if hashlib.sha256(dati).hexdigest() != f["sha256"]:
+                PONTE["stato"] = "aggiornamento del browser non verificato"
+                return None
+            dest.write_bytes(dati)
+        os.environ["OPIFEX_PC"] = "1"
+        spec = importlib.util.spec_from_file_location("finestre_pc", dest)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        PONTE["modulo"] = mod
+        return mod
+    except Exception as e:  # noqa: BLE001
+        PONTE["stato"] = "browser non pronto (" + type(e).__name__ + ")"
+        return None
+
+
+def _ponte_esegui(mod, p):
+    import base64
+    if p.get("metodo") not in PONTE_METODI:
+        raise ValueError("Operazione non ammessa")
+    r = getattr(mod._locale, p["metodo"])(*(p.get("args") or []), **(p.get("kw") or {}))
+    if isinstance(r, (bytes, bytearray)):
+        return {"_bytes": base64.b64encode(bytes(r)).decode()}
+    return r
+
+
+def ponte_ciclo(db):
+    """Chiede a Opifex i lavori da fare su questo computer (browser delle Finestre) e consegna i risultati."""
+    while True:
+        try:
+            if not OPI["token"]:
+                PONTE["stato"] = "in attesa dell'accesso a Opifex"
+                time.sleep(3)
+                continue
+            mod = _ponte_modulo(db)
+            PONTE["stato"] = "pronto" if mod else PONTE["stato"]
+            lavoro = _opifex("GET", "/ponte/prossimo?attesa=20&finestre=" + ("true" if mod else "false"), timeout=40)
+            if not lavoro or lavoro.get("nessuno"):
+                continue
+            esito = {"ok": True, "dati": None, "errore": ""}
+            try:
+                if lavoro["tipo"] != "finestre" or mod is None:
+                    raise ValueError("Questo computer non puo' eseguire il lavoro")
+                PONTE["stato"] = "al lavoro"
+                esito["dati"] = _ponte_esegui(mod, lavoro["parametri"])
+                PONTE["stato"] = "pronto"
+            except Exception as e:  # noqa: BLE001
+                esito.update(ok=False, errore=(str(e) if mod and isinstance(e, mod.ErroreFinestre) or isinstance(e, ValueError) else "Operazione non riuscita (" + type(e).__name__ + ")")[:400])
+            try:
+                _opifex("POST", f"/ponte/{lavoro['id']}/risultato", esito, timeout=30)
+            except ValueError:
+                pass
+        except ValueError as e:
+            PONTE["stato"] = str(e)[:120]
+            time.sleep(4)
+        except Exception:  # noqa: BLE001
+            time.sleep(4)
 
 
 def servi(db, porta, ascolta, chiave, finto=False, interfaccia=False, finestra=False):
@@ -795,6 +877,8 @@ def servi(db, porta, ascolta, chiave, finto=False, interfaccia=False, finestra=F
                     os._exit(0)
         threading.Thread(target=guardiano, daemon=True).start()
     log.info("Servizio su http://%s:%d", ascolta, porta)
+    if interfaccia:
+        threading.Thread(target=ponte_ciclo, args=(db,), daemon=True).start()
     ThreadingHTTPServer((ascolta, porta), H).serve_forever()
 
 

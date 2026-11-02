@@ -29,6 +29,29 @@ class Condividi(BaseModel):
     si: bool
 
 
+class Dove(BaseModel):
+    destinazione: str = Field(pattern="^(server|pc)$")
+
+
+@router.get("/dove")
+def dove():
+    from .ponte import stato_pc
+    return stato_pc()
+
+
+@router.put("/dove")
+def imposta_dove(d: Dove):
+    from .db import connessione
+    if d.destinazione == "pc":
+        from .ponte import stato_pc
+        if not stato_pc()["collegato"]:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Il computer non e' collegato: apri l'app Archivio sul PC e accedi a Opifex")
+    with connessione() as c:
+        c.execute("UPDATE ponte_pc SET destinazione = %s WHERE id = 1", (d.destinazione,))
+        c.commit()
+    return {"destinazione": d.destinazione}
+
+
 @router.get("")
 def elenco():
     try:

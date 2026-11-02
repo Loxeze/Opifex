@@ -16,10 +16,24 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .config import impostazioni
-from .navigatore import _host_ammesso
+IN_PC = os.environ.get("OPIFEX_PC") == "1"   # impostato dall'app Archivio quando questo modulo gira sul computer di Lorenzo
+try:
+    from .config import impostazioni
+    from .navigatore import _host_ammesso
+except ImportError:   # sul computer: il modulo viaggia da solo
+    class _Imp:
+        consenti_localhost_prova = False
+    impostazioni = _Imp()
 
-PROFILO = Path(os.environ.get("FINESTRE_DIR", "/opt/agenti/finestre"))
+    def _host_ammesso(host: str) -> bool:
+        if not host or host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+            return False
+        try:
+            return ipaddress.ip_address(host).is_global
+        except ValueError:
+            return "." in host
+
+PROFILO = Path(os.environ.get("FINESTRE_DIR") or ((os.environ.get("LOCALAPPDATA") or str(Path.home())) + "/IndiceArchivio/finestre" if IN_PC else "/opt/agenti/finestre"))
 INATTIVITA = 20 * 60
 LARGHEZZA, ALTEZZA = 1280, 800
 PARTE = 6000
@@ -146,9 +160,19 @@ class _Gestore:
         from playwright.sync_api import sync_playwright
         PROFILO.mkdir(parents=True, exist_ok=True)
         self._pw = sync_playwright().start()
-        self._ctx = self._pw.chromium.launch_persistent_context(
-            str(PROFILO), headless=True, viewport={"width": LARGHEZZA, "height": ALTEZZA}, locale="it-IT",
-            accept_downloads=True, args=["--disable-blink-features=AutomationControlled"])
+        opz = dict(viewport={"width": LARGHEZZA, "height": ALTEZZA}, locale="it-IT", accept_downloads=True)
+        if IN_PC:   # sul computer: il TUO Edge o Chrome, con una finestra visibile e un profilo dedicato a Opifex
+            ultimo = None
+            for canale in ("msedge", "chrome"):
+                try:
+                    self._ctx = self._pw.chromium.launch_persistent_context(str(PROFILO), channel=canale, headless=bool(os.environ.get("OPIFEX_INVISIBILE")), **opz)
+                    break
+                except Exception as e:
+                    ultimo = e
+            if self._ctx is None:
+                raise ErroreFinestre("Sul computer non trovo Edge o Chrome")
+        else:
+            self._ctx = self._pw.chromium.launch_persistent_context(str(PROFILO), headless=True, args=["--disable-blink-features=AutomationControlled"], **opz)
         self._ctx.set_default_timeout(20000)
 
         def filtro(route):
@@ -445,7 +469,36 @@ class _Gestore:
             self._coda.put(None)
 
 
-gestore_finestre = _Gestore()
+_locale = _Gestore()
+
+
+class _Instradatore:
+    """Stesse operazioni di _Gestore, ma eseguite dove Lorenzo ha scelto: sul server oppure sul suo computer (tramite l'app Archivio)."""
+    def __getattr__(self, nome):
+        if IN_PC:
+            return getattr(_locale, nome)
+        if nome in ("scaricati",) and destinazione() != "pc":
+            return getattr(_locale, nome)
+        if destinazione() != "pc":
+            return getattr(_locale, nome)
+
+        def remoto(*a, **k):
+            from . import ponte
+            return ponte.esegui_pc("finestre", {"metodo": nome, "args": list(a), "kw": k})
+        return remoto
+
+
+def destinazione() -> str:
+    if IN_PC:
+        return "pc"
+    try:
+        from . import ponte
+        return ponte.destinazione()
+    except Exception:
+        return "server"
+
+
+gestore_finestre = _Instradatore()
 
 
 # --- strumenti per gli agenti

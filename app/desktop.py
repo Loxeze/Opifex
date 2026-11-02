@@ -10,9 +10,10 @@ from .versione import versione_corrente
 
 router = APIRouter(prefix="/desktop", tags=["desktop"])
 CARTELLA = Path(__file__).resolve().parent / "desktop"
+FINESTRE = Path(__file__).resolve().parent / "finestre.py"   # lo stesso modulo gira sul server e sul computer
 # pacchetti Python dell'app per computer: se cambia questo elenco, aumenta REQUISITI_REV e l'app li reinstalla da sola
-REQUISITI_REV = 1
-REQUISITI = ["numpy", "pillow", "pypdf", "imageio-ffmpeg", "faster-whisper", "open_clip_torch"]
+REQUISITI_REV = 2
+REQUISITI = ["numpy", "pillow", "pypdf", "imageio-ffmpeg", "faster-whisper", "open_clip_torch", "playwright"]
 
 
 def _sha(p: Path) -> str:
@@ -28,6 +29,7 @@ def manifesto() -> dict:
         lv = 0
     m = {"opifex": versione_corrente(), "requisiti": {"rev": REQUISITI_REV, "pacchetti": REQUISITI},
          "indice": {"sha256": _sha(ind), "url": "/desktop/indice.py"} if ind.exists() else None,
+         "finestre": {"sha256": _sha(FINESTRE), "url": "/desktop/finestre.py"} if FINESTRE.exists() else None,
          "lanciatore": {"versione": lv, "sha256": _sha(exe), "url": "/desktop/IndiceArchivio.exe"} if exe.exists() else None}
     return m
 
@@ -43,6 +45,13 @@ def file_indice():
     if not p.exists():
         raise HTTPException(404, "Non disponibile")
     return Response(p.read_bytes(), media_type="text/x-python; charset=utf-8")
+
+
+@router.get("/finestre.py")
+def file_finestre():
+    if not FINESTRE.exists():
+        raise HTTPException(404, "Non disponibile")
+    return Response(FINESTRE.read_bytes(), media_type="text/x-python; charset=utf-8")
 
 
 @router.get("/IndiceArchivio.exe")
