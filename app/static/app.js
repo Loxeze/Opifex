@@ -396,6 +396,15 @@ function modulo(a) {
   };
   disegnaFasi();
   const msg = h("div");
+  const nasBox = h("div", { class: "sotto", style: "margin:4px 0 10px 28px" }), nasScelte = [];
+  if (!nuovo) {
+    api("GET", "/gestione/archivio/cartelle-agente/" + a.id).then(r => {
+      if (!r.cartelle.length) return;
+      r.cartelle.forEach(k => { const cb = h("input", { type: "checkbox" }); cb.checked = r.scelte.includes(k.id); nasScelte.push([k.id, cb]); });
+      nasBox.replaceChildren(h("div", {}, "Cartelle del NAS che può consultare (nessuna selezionata = tutte):"),
+        h("div", { class: "riga", style: "flex-wrap:wrap" }, nasScelte.map(([id, cb], i) => h("label", { style: "flex:0 0 auto;margin-right:14px" }, cb, " " + r.cartelle[i].nome))));
+    }).catch(() => {});
+  }
 
   const salva = async () => {
     msg.replaceChildren();
@@ -413,6 +422,7 @@ function modulo(a) {
     try {
       const esito = await api(nuovo ? "POST" : "PUT", nuovo ? "/gestione/agenti" : "/gestione/agenti/" + a.id, corpo);
       await api("PUT", "/gestione/agenti/" + (nuovo ? esito.id : a.id) + "/aziende", { aziende: azCb.filter(([, cb]) => cb.checked).map(([z]) => z.id) });
+      if (!nuovo && nasScelte.length) await api("PUT", "/gestione/archivio/cartelle-agente/" + a.id, { cartelle: nasScelte.filter(([, cb]) => cb.checked).map(([id]) => id) });
       chiudi(); await ricarica();
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
   };
@@ -505,6 +515,7 @@ function modulo(a) {
       ...radiInvio,
       h("div", { class: "interruttore" }, socialAttivo, h("span", {}, "Può preparare post per i social (non pubblica: li approvi tu dalla pagina Social)")),
       h("div", { class: "interruttore" }, archivioAttivo, h("span", {}, "Può cercare foto e video nell'Archivio NAS e chiedere foto pronte o trascrizioni (serve il connettore sul NAS)")),
+      nasBox,
       h("div", { class: "interruttore" }, finestreAttivo, h("span", {}, "Può usare il browser (Finestre): leggere le schede che condividi e agire solo nei siti elencati qui sotto")),
       finestreSiti,
       h("div", { class: "interruttore" }, canvaAttivo, h("span", {}, "Può creare ed esportare design su Canva (serve Canva collegato in Collegamenti)")),
@@ -794,7 +805,7 @@ function pannelloRichieste(dopo) {
       const ris = h("textarea", { style: "min-height:70px", placeholder: "La tua risposta (Invio per inviare, Maiusc+Invio per andare a capo)" });
       ris.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); invia(r, ris); } });
       const d = h("details", { class: "richiesta" + (r.bloccante ? " bloccante" : "") },
-        h("summary", {}, (r.bloccante ? "BLOCCANTE · " : "") + (r.domanda.length > 110 ? r.domanda.slice(0, 110) + "…" : r.domanda)),
+        h("summary", {}, (r.bloccante ? "BLOCCANTE · " : "") + (r.progetto ? "[" + r.progetto + "] " : "") + (r.domanda.length > 110 ? r.domanda.slice(0, 110) + "…" : r.domanda)),
         h("div", { class: "risposta" }, r.domanda),
         h("div", { class: "sotto" }, new Date(r.creata_il).toLocaleString("it-IT")), ris,
         h("div", { class: "azioni" }, bottoneMic(ris, msg), h("button", { class: "p", onclick: () => invia(r, ris) }, "Rispondi"),
@@ -934,3 +945,21 @@ setInterval(async () => {
     if (b) { b.textContent = String(n); b.style.display = n ? "" : "none"; }
   } catch (e) { /* ignora */ }
 }, 60000);
+
+// Avviso in alto quando il NAS ha indicizzato un gruppo di file nuovi: chi e' collegato lo vede e puo' aprire l'elenco
+async function controllaNovitaArchivio() {
+  if (document.hidden || stato.ruolo !== "titolare" || !localStorage.getItem) return;
+  let el = [];
+  try { el = await api("GET", "/gestione/archivio/novita"); } catch (e) { return; }
+  let box = document.getElementById("avviso-nas");
+  if (!el.length) { if (box) box.remove(); return; }
+  if (!box) { box = h("div", { id: "avviso-nas", role: "status", style: "position:fixed;left:50%;transform:translateX(-50%);top:calc(10px + env(safe-area-inset-top,0px));z-index:60;max-width:min(560px,92vw);background:var(--carta,#fff);color:var(--testo,#222);border:2px solid #C4502A;border-radius:12px;padding:10px 14px;box-shadow:0 6px 24px rgba(0,0,0,.25)" }); document.body.appendChild(box); }
+  const n = el[0];
+  box.replaceChildren(h("div", { style: "font-weight:700" }, "Nel NAS sono stati aggiunti " + n.nuovi + " file nuovi"),
+    h("div", { class: "sotto" }, "Cartella «" + n.cartella + "»: " + n.esempi.join(", ") + (n.nuovi > n.esempi.length ? "…" : "")),
+    h("div", { class: "azioni" },
+      h("button", { class: "p", onclick: () => { stato.archivioNovita = n.id; box.remove(); api("POST", "/gestione/archivio/novita/" + n.id + "/vista").catch(() => {}); vai("impostazioni", "archivio"); } }, "Guarda cosa è stato aggiunto"),
+      h("button", { class: "s", onclick: () => { box.remove(); api("POST", "/gestione/archivio/novita/" + n.id + "/vista").catch(() => {}); } }, "Ok")));
+}
+setInterval(controllaNovitaArchivio, 60000);
+setTimeout(controllaNovitaArchivio, 8000);

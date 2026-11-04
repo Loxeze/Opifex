@@ -90,6 +90,15 @@ def decisioni_note(conn, max_voci: int = 20) -> str:
             + "\n".join(f"- {r['domanda'][:250]} -> {r['risposta'][:400]}" for r in righe))
 
 
+def progetto_di(conn, agente_id: int):
+    """Il progetto a cui si riferisce una domanda dell'agente: la sua task aperta piu' recente con un progetto, altrimenti l'unico progetto attivo di cui fa parte."""
+    r = conn.execute("""SELECT progetto_id FROM task WHERE assegnato_agente_id = %s AND progetto_id IS NOT NULL AND stato <> 'completata' ORDER BY aggiornata_il DESC LIMIT 1""", (agente_id,)).fetchone()
+    if r:
+        return r["progetto_id"]
+    ps = conn.execute("""SELECT pa.progetto_id FROM progetti_agenti pa JOIN progetti p ON p.id = pa.progetto_id WHERE pa.agente_id = %s AND NOT p.archiviato""", (agente_id,)).fetchall()
+    return ps[0]["progetto_id"] if len(ps) == 1 else None
+
+
 def estrai_e_salva(conn, agente_id: int, testo: str) -> int:
     """Registra le richieste contenute nel testo. Ritorna quante nuove ne ha create."""
     nuove = 0
@@ -100,8 +109,8 @@ def estrai_e_salva(conn, agente_id: int, testo: str) -> int:
         bloccante = bool(m.group(1))
         if _gia_chiesta(conn, domanda):
             continue
-        conn.execute("INSERT INTO richieste_informazioni (agente_id, domanda, bloccante) VALUES (%s,%s,%s)",
-                     (agente_id, domanda, bloccante))
+        conn.execute("INSERT INTO richieste_informazioni (agente_id, domanda, bloccante, progetto_id) VALUES (%s,%s,%s,%s)",
+                     (agente_id, domanda, bloccante, progetto_di(conn, agente_id)))
         if bloccante:
             nome = conn.execute("SELECT nome FROM agenti WHERE id = %s", (agente_id,)).fetchone()["nome"]
             conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, TRUE)",

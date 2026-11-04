@@ -20,7 +20,15 @@ function vistaProgetto() {
   const carica = async () => {
     try {
       const d = await api("GET", "/progetti/" + stato.progettoAperto + "/dashboard");
+      let domande = [];
+      if (d.puo_modificare) { try { domande = await api("GET", "/gestione/richieste?stato=aperta&progetto_id=" + stato.progettoAperto); } catch (e) { /* senza domande */ } }
       const p = d.progetto, col = p.colore || "#f3b54a", tot = d.task.length, fatte = d.conteggi.completata;
+      const bloccoDomande = !domande.length ? null : h("div", { class: "carta", style: "border-left:6px solid #C4502A;margin-bottom:12px" },
+        h("div", { class: "nome" }, "Domande degli agenti per questo progetto ", h("span", { class: "badge-chat" }, String(domande.length))),
+        domande.map(r => { const ris = h("textarea", { rows: 2, maxlength: 4000, placeholder: "La tua risposta", style: "width:100%" });
+          return h("div", { style: "padding:8px 0;border-top:1px solid var(--bordo)" },
+            h("div", { class: "sotto" }, r.agente + (r.bloccante ? " · BLOCCATO" : "")), h("div", {}, r.domanda), ris,
+            h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { if (!ris.value.trim()) return; try { await api("POST", "/gestione/richieste/" + r.id + "/risposta", { risposta: ris.value }); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Rispondi"))); }));
       const perc = tot ? Math.round(100 * fatte / tot) : 0;
       const tit = d.puo_modificare;
       const nuovaMs = h("input", { type: "text", maxlength: 200, placeholder: "Nuova milestone" }), scadMs = h("input", { type: "date" });
@@ -38,6 +46,7 @@ function vistaProgetto() {
           h("div", { style: "margin:10px 0 4px;height:8px;border-radius:99px;background:var(--bordo);overflow:hidden" }, h("div", { style: "height:100%;width:" + perc + "%;background:linear-gradient(90deg,#f3b54a,#e58bd0)" })),
           h("div", { class: "sotto" }, perc + "% completato · " + fatte + " task chiuse su " + tot + (d.in_ritardo ? " · ⚠ " + d.in_ritardo + " in ritardo" : "")),
           p.allineamento ? h("details", { style: "margin-top:8px" }, h("summary", {}, "Documento di allineamento"), h("pre", { style: "white-space:pre-wrap" }, p.allineamento)) : null),
+        bloccoDomande,
         bloccoScheda(p.id),
         bloccoSquadra(p.id),
         tit ? [h("h3", {}, "Manager di riferimento"),

@@ -7,6 +7,8 @@ function vistaProgetti() {
   const carica = async () => {
     try {
       const d = await api("GET", "/gestione/progetti");
+      let attesa = {};
+      try { attesa = (await api("GET", "/gestione/richieste/conteggio")).per_progetto || {}; } catch (e) { /* senza numerini */ }
       const nome = h("input", { type: "text", maxlength: 100, placeholder: "Es. Bando Interreg 2027" });
       const desc = h("input", { type: "text", maxlength: 500, placeholder: "Di cosa si tratta (facoltativo)" });
       const azi = h("select", {}, h("option", { value: "" }, "— scegli l'impresa —"), d.aziende.map(z => h("option", { value: z.id }, z.nome)));
@@ -18,7 +20,8 @@ function vistaProgetti() {
       tutti.addEventListener("change", () => { lista.style.display = tutti.checked ? "none" : ""; });
       const eliminati = d.progetti.filter(p => p.eliminato_il), attivi = d.progetti.filter(p => !p.archiviato && !p.eliminato_il), archiviati = d.progetti.filter(p => p.archiviato && !p.eliminato_il);
       const scheda = (p) => h("div", { class: "carta", style: "margin-bottom:12px;border-left:5px solid " + (p.colore || "#f3b54a") },
-        h("div", { class: "nome" }, h("span", { class: "punto-col", style: "background:" + (p.colore || "#f3b54a") }), p.nome),
+        h("div", { class: "nome" }, h("span", { class: "punto-col", style: "background:" + (p.colore || "#f3b54a") }), p.nome,
+          attesa[String(p.id)] ? h("span", { class: "badge-chat", style: "margin-left:10px", title: "Domande degli agenti e squadre da approvare per questo progetto" }, String(attesa[String(p.id)])) : null),
         h("div", { class: "sotto" }, "Impresa: " + (p.azienda || "—") + " · task: " + p.n_task),
         p.descrizione ? h("div", { class: "sotto" }, p.descrizione) : null,
         h("div", { class: "sotto" }, "Agenti coinvolti: " + p.agenti.length + " · Drive: " + ({ ok: "cartelle create", da_sincronizzare: "da creare", errore: "errore" })[p.drive_stato]),

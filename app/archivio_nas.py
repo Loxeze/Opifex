@@ -287,8 +287,24 @@ def fine_scansione(d: FineScansione, c: dict = Depends(connettore_corrente)):
             conn.execute("UPDATE archivio_cartelle SET errore = %s WHERE id = %s", (d.errore, d.cartella_id))
             return {"assenti": 0}
         n = conn.execute("UPDATE archivio_file SET assente = TRUE WHERE cartella_id = %s AND visto_scan <> %s AND NOT assente", (d.cartella_id, d.scan)).rowcount
+        prima = conn.execute("SELECT ultima_scansione, nome FROM archivio_cartelle WHERE id = %s", (d.cartella_id,)).fetchone()
         conn.execute("UPDATE archivio_cartelle SET ultima_scansione = NOW(), errore = NULL WHERE id = %s", (d.cartella_id,))
+        _avvisa_novita(conn, d.cartella_id, d.scan, prima["ultima_scansione"], prima["nome"])
         return {"assenti": n}
+
+
+SOGLIA_NOVITA = 20   # da quanti file nuovi in una cartella scatta l'avviso a chi e' collegato
+
+
+def _avvisa_novita(conn, cartella_id: int, scan: int, prima, nome_cartella: str):
+    """Se una scansione ha aggiunto un gruppo di file, lo registra: chi e' collegato lo vede in alto e puo' aprire l'elenco dei nuovi file; arriva anche su Telegram."""
+    dal = prima or datetime(1970, 1, 1, tzinfo=timezone.utc)
+    n = conn.execute("SELECT count(*) AS n FROM archivio_file WHERE cartella_id = %s AND visto_scan = %s AND NOT assente AND creato_il > %s", (cartella_id, scan, dal)).fetchone()["n"]
+    if n < SOGLIA_NOVITA:
+        return
+    inizio = conn.execute("SELECT min(creato_il) AS m FROM archivio_file WHERE cartella_id = %s AND visto_scan = %s AND creato_il > %s", (cartella_id, scan, dal)).fetchone()["m"]
+    conn.execute("INSERT INTO archivio_novita (cartella_id, nuovi, dal) VALUES (%s,%s,%s)", (cartella_id, n, inizio or dal))
+    conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"Archivio NAS: aggiunti {n} file nuovi nella cartella «{nome_cartella}». Li vedi in Opifex → Impostazioni → Collegamenti → Archivio NAS.",))
 
 
 def _richiesta_del(conn, conn_id: int, rid: int):
@@ -638,8 +654,18 @@ def _riga_file(f: dict) -> dict:
             "stato": f["stato"], "miniature": f["miniature"], "percorso_pc": percorso_pc(f["prefisso_pc"], f["rel"]), "trascritto": bool(f["trascritto"]), "assente": f["assente"]}
 
 
-def cerca(conn, testo: str = "", tipo: str = "", progetto_id: int | None = None, cartella_id: int | None = None, orientamento: str = "", dal: str = "", limite: int = 40) -> list[dict]:
+def cartelle_consentite(conn, agente_id: int) -> list[int]:
+    """Cartelle del NAS associate a questo agente. Vuoto = nessuna restrizione (vede tutto l'archivio)."""
+    return [r["cartella_id"] for r in conn.execute("SELECT cartella_id FROM archivio_cartelle_agenti WHERE agente_id = %s", (agente_id,)).fetchall()]
+
+
+def cerca(conn, testo: str = "", tipo: str = "", progetto_id: int | None = None, cartella_id: int | None = None, orientamento: str = "", dal: str = "", limite: int = 40,
+          solo_cartelle: list[int] | None = None, novita_id: int | None = None) -> list[dict]:
     cond, par = ["NOT f.assente"], []
+    if solo_cartelle:
+        cond.append("f.cartella_id = ANY(%s)"); par.append(list(solo_cartelle))
+    if novita_id:
+        cond.append("EXISTS (SELECT 1 FROM archivio_novita n WHERE n.id = %s AND n.cartella_id = f.cartella_id AND f.creato_il >= n.dal)"); par.append(int(novita_id))
     q = (testo or "").strip()[:200]
     if q:
         cond.append("(f.ricerca @@ websearch_to_tsquery('italian', %s) OR f.rel ILIKE %s)")
@@ -673,10 +699,55 @@ def cerca(conn, testo: str = "", tipo: str = "", progetto_id: int | None = None,
     return [_riga_file(f) for f in righe]
 
 
-@router.get("/cerca")
-def cerca_rotta(q: str = "", tipo: str = "", progetto_id: int | None = None, cartella_id: int | None = None, orientamento: str = "", dal: str = "", _: dict = Depends(solo_titolare)):
+@router.get("/novita")
+def novita(u: dict = Depends(solo_titolare)):
+    """Gruppi di file nuovi (ultimi 7 giorni) che questo utente non ha ancora chiuso."""
     with connessione() as conn:
-        return cerca(conn, q, tipo, progetto_id, cartella_id, orientamento, dal, 60)
+        righe = conn.execute(
+            """SELECT n.id, n.nuovi, n.creata_il, k.nome AS cartella FROM archivio_novita n JOIN archivio_cartelle k ON k.id = n.cartella_id
+               WHERE n.creata_il > NOW() - interval '7 days' AND NOT EXISTS (SELECT 1 FROM archivio_novita_viste v WHERE v.novita_id = n.id AND v.utente_id = %s)
+               ORDER BY n.id DESC LIMIT 5""", (u["id"],)).fetchall()
+        out = []
+        for r in righe:
+            esempi = conn.execute("""SELECT f.nome FROM archivio_file f JOIN archivio_novita n ON n.cartella_id = f.cartella_id AND f.creato_il >= n.dal
+                                     WHERE n.id = %s AND NOT f.assente ORDER BY f.id LIMIT 6""", (r["id"],)).fetchall()
+            out.append({**r, "esempi": [e["nome"] for e in esempi]})
+        return out
+
+
+@router.post("/novita/{nid}/vista")
+def novita_vista(nid: int, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        conn.execute("INSERT INTO archivio_novita_viste (utente_id, novita_id) SELECT %s, id FROM archivio_novita WHERE id = %s ON CONFLICT DO NOTHING", (u["id"], nid))
+    return {"ok": True}
+
+
+@router.get("/cartelle-agente/{agente_id}")
+def cartelle_agente(agente_id: int, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return {"cartelle": [{"id": k["id"], "nome": k["nome"]} for k in conn.execute("SELECT id, nome FROM archivio_cartelle WHERE attiva ORDER BY nome").fetchall()],
+                "scelte": cartelle_consentite(conn, agente_id)}
+
+
+class CartelleAgente(BaseModel):
+    cartelle: list[int] = Field(default_factory=list, max_length=200)
+
+
+@router.put("/cartelle-agente/{agente_id}")
+def imposta_cartelle_agente(agente_id: int, d: CartelleAgente, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        if not conn.execute("SELECT 1 FROM agenti WHERE id = %s", (agente_id,)).fetchone():
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Agente inesistente")
+        conn.execute("DELETE FROM archivio_cartelle_agenti WHERE agente_id = %s", (agente_id,))
+        for cid in set(d.cartelle):
+            conn.execute("INSERT INTO archivio_cartelle_agenti (agente_id, cartella_id) SELECT %s, id FROM archivio_cartelle WHERE id = %s", (agente_id, cid))
+    return {"ok": True}
+
+
+@router.get("/cerca")
+def cerca_rotta(q: str = "", tipo: str = "", progetto_id: int | None = None, cartella_id: int | None = None, orientamento: str = "", dal: str = "", novita_id: int | None = None, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return cerca(conn, q, tipo, progetto_id, cartella_id, orientamento, dal, 60, None, novita_id)
 
 
 @router.get("/file/{fid}")
@@ -782,10 +853,13 @@ def gestore(connessione_, agente_id: int):
                             return "Nessun progetto con quel nome."
                         pid = p["id"]
                     righe = cerca(conn, str(dati.get("testo") or ""), str(dati.get("tipo") or ""), pid, None, str(dati.get("orientamento") or ""), str(dati.get("dal") or ""),
-                                  int(dati.get("limite") or 10) if str(dati.get("limite") or "10").isdigit() else 10)[:15]
+                                  int(dati.get("limite") or 10) if str(dati.get("limite") or "10").isdigit() else 10, cartelle_consentite(conn, agente_id))[:15]
                     return "\n".join(_riga_agente(r) for r in righe) or "Nessun file trovato: prova altre parole o meno filtri."
                 if nome == "archivio_leggi":
                     fid = int(dati.get("id"))
+                    ok_c = cartelle_consentite(conn, agente_id)
+                    if ok_c and not conn.execute("SELECT 1 FROM archivio_file WHERE id = %s AND cartella_id = ANY(%s)", (fid, ok_c)).fetchone():
+                        return "ERRORE: questo file e' in una cartella del NAS che non ti e' stata associata"
                     r = conn.execute("""SELECT f.*, k.nome AS cartella, k.prefisso_pc, p.nome AS progetto, (f.trascrizione IS NOT NULL) AS trascritto, 0 AS miniature
                                         FROM archivio_file f JOIN archivio_cartelle k ON k.id = f.cartella_id LEFT JOIN progetti p ON p.id = f.progetto_id WHERE f.id = %s AND NOT f.assente""", (fid,)).fetchone()
                     if not r:
@@ -808,9 +882,12 @@ def gestore(connessione_, agente_id: int):
                         return "ERRORE: tipo non valido"
                     if conn.execute("SELECT count(*) AS n FROM archivio_richieste WHERE agente_id = %s AND creata_il > NOW() - interval '1 hour'", (agente_id,)).fetchone()["n"] >= MAX_RICHIESTE_ORA:
                         return f"ERRORE: al massimo {MAX_RICHIESTE_ORA} richieste all'ora"
-                    fl = conn.execute("SELECT tipo FROM archivio_file WHERE id = %s AND NOT assente", (fid,)).fetchone()
+                    fl = conn.execute("SELECT tipo, cartella_id FROM archivio_file WHERE id = %s AND NOT assente", (fid,)).fetchone()
                     if not fl:
                         return "ERRORE: file inesistente"
+                    ok_c = cartelle_consentite(conn, agente_id)
+                    if ok_c and fl["cartella_id"] not in ok_c:
+                        return "ERRORE: questo file e' in una cartella del NAS che non ti e' stata associata"
                     if (tipo == "foto") != (fl["tipo"] == "foto"):
                         return "ERRORE: la foto si chiede per le foto, la trascrizione per video e audio"
                     lato = min(6000, max(600, int(dati.get("lato_max") or 2400)))

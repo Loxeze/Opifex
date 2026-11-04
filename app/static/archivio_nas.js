@@ -73,8 +73,10 @@ function vistaArchivio() {
   const tipoQ = h("select", {}, [["", "Tutto"], ["foto", "Foto"], ["video", "Video"], ["audio", "Audio"], ["documento", "Documenti"]].map(([v, t]) => h("option", { value: v }, t)));
   const oriQ = h("select", {}, [["", "Ogni formato"], ["verticale", "Verticale"], ["orizzontale", "Orizzontale"], ["quadrata", "Quadrata"]].map(([v, t]) => h("option", { value: v }, t)));
   const cercaBtn = h("button", { class: "p", type: "button" }, "Cerca");
+  let filtroNovita = stato.archivioNovita || null; stato.archivioNovita = null;
   const lancia = async () => {
     try { const p = new URLSearchParams({ q: q.value, tipo: tipoQ.value, orientamento: oriQ.value });
+      if (filtroNovita) p.set("novita_id", filtroNovita);
       const r = await api("GET", "/gestione/archivio/cerca?" + p);
       riempi(esiti, r.length ? h("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px" }, r.map(f =>
         h("div", { class: "carta", style: "cursor:pointer;padding:6px", tabindex: 0, role: "button", onclick: () => apriFile(f.id), onkeydown: (e) => { if (e.key === "Enter") apriFile(f.id); } },
@@ -83,7 +85,8 @@ function vistaArchivio() {
           h("div", { class: "sotto" }, [f.tipo, _durataArch(f.durata_s), f.progetto].filter(Boolean).join(" · "))))) : h("div", { class: "sotto" }, "Nessun risultato."));
     } catch (e) { err(e); }
   };
-  cercaBtn.addEventListener("click", lancia); q.addEventListener("keydown", (e) => { if (e.key === "Enter") lancia(); });
+  cercaBtn.addEventListener("click", () => { filtroNovita = null; lancia(); }); q.addEventListener("keydown", (e) => { if (e.key === "Enter") { filtroNovita = null; lancia(); } });
+  if (filtroNovita) { q.placeholder = "Stai guardando i file appena aggiunti: cerca per tornare a tutto l'archivio"; setTimeout(lancia, 300); }
 
   async function apriFile(id) {
     try { const f = await api("GET", "/gestione/archivio/file/" + id);

@@ -10,12 +10,12 @@ router = APIRouter(prefix="/gestione/richieste")
 
 
 @router.get("")
-def elenco(stato: str = Query(default="aperta", pattern="^(aperta|risposta|annullata|tutte)$"), _: dict = Depends(solo_titolare)):
+def elenco(stato: str = Query(default="aperta", pattern="^(aperta|risposta|annullata|tutte)$"), progetto_id: int | None = None, _: dict = Depends(solo_titolare)):
     with connessione() as conn:
         return conn.execute(
-            """SELECT r.id, a.nome AS agente, r.domanda, r.bloccante, r.stato, r.risposta, r.creata_il, r.risposta_il
-               FROM richieste_informazioni r JOIN agenti a ON a.id = r.agente_id
-               WHERE (%s = 'tutte' OR r.stato = %s) ORDER BY r.bloccante DESC, r.id DESC LIMIT 200""", (stato, stato)).fetchall()
+            """SELECT r.id, a.nome AS agente, r.domanda, r.bloccante, r.stato, r.risposta, r.creata_il, r.risposta_il, r.progetto_id, p.nome AS progetto
+               FROM richieste_informazioni r JOIN agenti a ON a.id = r.agente_id LEFT JOIN progetti p ON p.id = r.progetto_id
+               WHERE (%s = 'tutte' OR r.stato = %s) AND (%s::int IS NULL OR r.progetto_id = %s::int) ORDER BY r.bloccante DESC, r.id DESC LIMIT 200""", (stato, stato, progetto_id, progetto_id)).fetchall()
 
 
 @router.get("/conteggio")
@@ -23,7 +23,12 @@ def conteggio(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         r = conn.execute("SELECT count(*) AS n, count(*) FILTER (WHERE bloccante) AS bloccanti FROM richieste_informazioni WHERE stato = 'aperta'").fetchone()
         sq = conn.execute("SELECT count(*) AS n FROM squadre_proposte WHERE stato = 'proposta'").fetchone()["n"]
-    return {"aperte": r["n"], "bloccanti": r["bloccanti"], "squadre": sq}
+        per = {}
+        for x in conn.execute("SELECT progetto_id, count(*) AS n FROM richieste_informazioni WHERE stato = 'aperta' AND progetto_id IS NOT NULL GROUP BY 1").fetchall():
+            per[str(x["progetto_id"])] = per.get(str(x["progetto_id"]), 0) + x["n"]
+        for x in conn.execute("SELECT progetto_id, count(*) AS n FROM squadre_proposte WHERE stato = 'proposta' GROUP BY 1").fetchall():
+            per[str(x["progetto_id"])] = per.get(str(x["progetto_id"]), 0) + x["n"]
+    return {"aperte": r["n"], "bloccanti": r["bloccanti"], "squadre": sq, "per_progetto": per}
 
 
 class Risposta(BaseModel):
