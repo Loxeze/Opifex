@@ -39,6 +39,10 @@ STRUMENTI = [
     {"name": "google_trascrivi_cartella", "description": "Trascrive TUTTI i video/audio di una cartella di Drive (es. i reel montati) in un colpo solo: per ognuno il parlato con un tempo [mm:ss] per ogni frase "
      "(ganci, citazioni, nomi, affermazioni da verificare). 3 file per chiamata: se in fondo c'e' «richiama con da_file=N» richiamalo finche' non finiscono. Usala invece di dire che l'audio non e' leggibile.",
      "input_schema": {"type": "object", "properties": {"cartella_id": {"type": "string"}, "da_file": {"type": "integer"}}, "required": ["cartella_id"]}},
+    {"name": "google_guarda_video", "description": "GUARDA un video su Drive (anche nelle cartelle di lavoro autorizzate): estrae fotogrammi equidistanti e li descrive, con il secondo di ognuno. "
+     "Serve a scegliere i momenti visivi forti, ganci, copertine, controllare inquadrature, luce, testo a schermo, persone e luoghi. 'domanda' dice cosa cercare; 'fotogrammi' 1-12 (default 8); "
+     "'da_secondo'/'a_secondo' restringono il tratto. Per il parlato usa google_trascrivi.",
+     "input_schema": {"type": "object", "properties": {"file_id": {"type": "string"}, "domanda": {"type": "string"}, "fotogrammi": {"type": "integer"}, "da_secondo": {"type": "integer"}, "a_secondo": {"type": "integer"}}, "required": ["file_id"]}},
     {"name": "immagine_analizza", "description": "Analizza un'immagine su Drive (cartelle autorizzate): dimensioni, proporzioni, peso, luminosita', contrasto, nitidezza, palette, formati social a cui si adatta; "
      "con 'domanda' la guarda e risponde (composizione, testo leggibile, difetti, coerenza con il brief). Usala prima di consegnare o usare una grafica/foto.",
      "input_schema": {"type": "object", "properties": {"file_id": {"type": "string"}, "domanda": {"type": "string"}}, "required": ["file_id"]}},
@@ -337,6 +341,28 @@ def _esegui(conn, agente_id: int, nome: str, d: dict) -> str:
         from . import trascrizione_drive
         dur = int(((m.get("videoMediaMetadata") or {}).get("durationMillis") or 0)) // 1000
         return trascrizione_drive.trascrivi(tok, fid, m["name"], dur or None, d.get("da_minuto") or 0, dettaglio=bool(dur and dur <= 900))
+    if nome == "google_guarda_video":
+        fid = str(d.get("file_id", ""))
+        if not _nell_albero(tok, fid, radici):
+            return "ERRORE: il file non e' dentro Opifex ne' in una cartella di lavoro autorizzata (usa google_elenca_cartella per vedere cosa c'e')"
+        m = _richiesta("GET", f"{_DRIVE}/{fid}", tok, params={"fields": "name,mimeType,videoMediaMetadata(durationMillis)"}).json()
+        if not m["mimeType"].startswith("video/"):
+            return "ERRORE: non e' un video"
+        from . import trascrizione_drive, visione
+        dur = int(((m.get("videoMediaMetadata") or {}).get("durationMillis") or 0)) // 1000
+        fot, err = trascrizione_drive.fotogrammi(tok, fid, dur or None, d.get("fotogrammi") or 8, int(d.get("da_secondo") or 0), int(d["a_secondo"]) if d.get("a_secondo") else None)
+        if not fot:
+            return "ERRORE: " + err
+        elenco = ", ".join(f"{i + 1}={t // 60:02d}:{t % 60:02d}" for i, (t, _) in enumerate(fot))
+        dom = str(d.get("domanda") or "Descrivi cosa si vede in ogni fotogramma e indica i momenti visivamente piu' forti per un gancio o una copertina.")[:600]
+        try:
+            ris = visione.chiedi([("image/jpeg", b) for _, b in fot],
+                                 "Sei un video editor e art director rigoroso. Ti arrivano fotogrammi in ordine di tempo di uno stesso video. Descrivi solo cio' che si vede: inquadratura, soggetto, luce, testo a schermo, azione. "
+                                 "Riferisci sempre al numero del fotogramma e al suo tempo. Niente invenzioni; se non si capisce, dillo. Non identificare persone dal volto.",
+                                 f"Fotogrammi (numero=tempo mm:ss): {elenco}. Richiesta: {dom}", "interno", "", 1200)
+        except Exception as e:  # noqa: BLE001
+            return f"ERRORE: non ho potuto guardare i fotogrammi ({type(e).__name__}: {str(e)[:120]})"
+        return f"«{m['name']}» ({dur // 60}:{dur % 60:02d}), {len(fot)} fotogrammi ({elenco}):\n{ris}\n(Sono letture di fotogrammi, non il video intero: i movimenti tra l'uno e l'altro non si vedono.)"
     if nome == "google_trascrivi_cartella":
         cid = str(d.get("cartella_id") or "")
         if not _nell_albero(tok, cid, radici):

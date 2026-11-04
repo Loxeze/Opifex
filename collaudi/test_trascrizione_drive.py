@@ -58,5 +58,10 @@ ok("cartella: 3 file per volta e continua", "=== File 1/5: reel01.mp4" in o4 and
 o5 = td.trascrivi_cartella("tok", [{"id": "ID", "name": f"reel{i:02d}.mp4", "mimeType": "video/mp4"} for i in range(1, 6)], "Reel", da_file=3)
 ok("cartella: finisce", "File 5/5" in o5 and "Finiti i 5 file" in o5, o5)
 ok("lo strumento cartella e' elencato", any(s["name"] == "google_trascrivi_cartella" for s in sg.STRUMENTI))
+fot, err = td.fotogrammi("tok", "ID", 60, n=4)
+ok("fotogrammi estratti dal video", len(fot) == 4 and all(b[:2] == b"\xff\xd8" for _, b in fot) and [t for t, _ in fot] == [7, 22, 37, 52], (len(fot), err, [t for t, _ in fot]))
+ok("strumento guarda video elencato", any(x["name"] == "google_guarda_video" for x in sg.STRUMENTI))
+from app import ricerca_profonda as rp, fornitori as _fo
+ok("ricerca: strumento e gestore", rp.STRUMENTI[0]["name"] == "ricerca_approfondita" and "ERRORE" in rp.gestore()("ricerca_approfondita", {"domanda": "x"}))
 ok("lo strumento e' elencato", any(s["name"] == "google_trascrivi" for s in sg.STRUMENTI))
 print(f"{sum(ris)}/{len(ris)}"); sys.exit(0 if all(ris) else 1)

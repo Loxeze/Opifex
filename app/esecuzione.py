@@ -15,7 +15,7 @@ import contextvars
 PROVA_ISTRUZIONI = contextvars.ContextVar('prova_istruzioni', default=None)   # (agente_id, testo): prova di istruzioni non ancora applicate
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
 from . import banco, creativi, best_practice, archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
-from . import finestre, brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta
+from . import ricerca_profonda, finestre, brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta
 from . import strumenti_social
 from . import vademecum, note_aurora, scheda_impresa
 from .navigatore import ErroreNavigazione, Navigatore
@@ -306,6 +306,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             crm_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["crm_attivo"])
             archivio_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["archivio_attivo"])
             finestre_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["finestre_attivo"])
+            ricerca_tool = bool(a["fornitore"] == "anthropic" and a["accesso_web"])
             canva_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["canva_attivo"] and canva.collegato(conn))
             iniz_tool = bool(ok_int and colleghi_ok and a["livello"] in ("manager", "referente")
                              and not conn.execute("SELECT sentinella FROM agenti WHERE id = %s", (agente_id,)).fetchone()["sentinella"])
@@ -324,7 +325,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             prog_crea = bool(scheda_progetto.strumenti_abilitati() and ok_int and a["livello"] in ("manager", "referente") and not _sent)
             sq_pm = bool(form_tool and pm_tool)
             sq_val = bool(form_tool and not _sent)
-            if creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val:
+            if creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or ricerca_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -427,6 +428,12 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     gar = archivio_nas.gestore(connessione, agente_id)
                     for s_ in archivio_nas.STRUMENTI:
                         gestori[s_["name"]] = gar
+                if ricerca_tool:
+                    extra.extend(ricerca_profonda.STRUMENTI)
+                    avviso_extra += ricerca_profonda.AVVISO
+                    grp = ricerca_profonda.gestore(list(a["siti_consentiti"] or []))
+                    for s_ in ricerca_profonda.STRUMENTI:
+                        gestori[s_["name"]] = grp
                 if finestre_tool:
                     strumenti_fin = finestre.strumenti_per(list(a["finestre_siti"] or []))
                     extra.extend(strumenti_fin)

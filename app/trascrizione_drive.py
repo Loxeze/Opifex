@@ -156,3 +156,30 @@ def trascrivi_cartella(tok: str, file_elenco: list[dict], nome_cartella: str, da
     nxt = da_file + per_chiamata
     coda = f"\n\n[Restano {len(media) - nxt} file: richiama google_trascrivi_cartella con da_file={nxt}]" if nxt < len(media) else f"\n\n[Finiti i {len(media)} file della cartella «{nome_cartella}»]"
     return "\n\n".join(out) + coda
+
+
+def fotogrammi(tok: str, fid: str, durata_s: int | None, n: int = 8, da_s: int = 0, a_s: int | None = None) -> tuple[list[tuple[int, bytes]], str]:
+    """Estrae n fotogrammi equidistanti (JPEG ridotti) da un video di Drive, leggendo solo i punti che servono. Ritorna ([(secondo, jpeg)], errore)."""
+    ff = _ffmpeg()
+    if not ff:
+        return [], "manca ffmpeg sul server (sudo apt-get install -y ffmpeg)"
+    fine = min(a_s or durata_s or 0, durata_s or (a_s or 0)) if (a_s or durata_s) else 0
+    if fine <= da_s:
+        fine = da_s + 60
+    n = max(1, min(int(n or 8), 12))
+    passo = (fine - da_s) / n
+    punti = [int(da_s + passo * (i + 0.5)) for i in range(n)]
+    out = []
+    with tempfile.TemporaryDirectory(prefix="fot_") as d:
+        for i, t in enumerate(punti):
+            dest = os.path.join(d, f"f{i:02d}.jpg")
+            cmd = [ff, "-v", "error", "-headers", f"Authorization: Bearer {tok}\r\n", "-ss", str(t), "-i", _URL.format(fid=fid), "-frames:v", "1",
+                   "-vf", "scale=768:-2", "-q:v", "4", "-y", dest]
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=150)
+            except subprocess.TimeoutExpired:
+                continue
+            if os.path.exists(dest) and os.path.getsize(dest) > 500:
+                with open(dest, "rb") as f:
+                    out.append((t, f.read()))
+    return out, ("" if out else "non sono riuscito a estrarre fotogrammi (formato non leggibile o file non raggiungibile)")
