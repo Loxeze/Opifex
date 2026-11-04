@@ -66,6 +66,7 @@ class DatiAgente(BaseModel):
     invio_posta: str = Field(default="bozze", pattern="^(bozze|approvazione|diretto)$")
     rimanda_a: str | None = Field(default=None, max_length=300)
     crm_attivo: bool = False
+    crm_nominativo: bool = False
     canva_attivo: bool = False
     finestre_attivo: bool = False
     finestre_siti: list[str] = []
@@ -102,6 +103,7 @@ class ModificaAgente(BaseModel):
     invio_posta: str | None = Field(default=None, pattern="^(bozze|approvazione|diretto)$")
     rimanda_a: str | None = Field(default=None, max_length=300)
     crm_attivo: bool | None = None
+    crm_nominativo: bool | None = None
     canva_attivo: bool | None = None
     finestre_attivo: bool | None = None
     finestre_siti: list[str] | None = None
@@ -163,7 +165,7 @@ SELECT a.id, a.nome, a.ruolo, a.livello, a.tipo, a.divisione_id, d.nome AS divis
        a.sentinella,
        CASE WHEN a.sentinella THEN 'sentinella' WHEN a.tipo = 'sistema' AND a.livello = 'referente' THEN 'referente' ELSE a.livello END AS categoria,
        a.modello, a.istruzioni, a.fascia_dati_max, a.max_token_risposta, a.sforzo, a.budget_token_mensile,
-       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.invio_posta, a.rimanda_a, a.crm_attivo, a.finestre_attivo, a.finestre_siti, a.canva_attivo, a.archivio_attivo, ETICHETTA_SQL AS etichetta,
+       a.accesso_web, a.siti_consentiti, a.max_ricerche, a.attivo, a.modello_dialogo, a.dialoghi_attivi, a.vede_tutto, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.invio_posta, a.rimanda_a, a.crm_attivo, a.crm_nominativo, a.finestre_attivo, a.finestre_siti, a.canva_attivo, a.archivio_attivo, ETICHETTA_SQL AS etichetta,
        COALESCE((SELECT json_agg(json_build_object('titolo', f.titolo, 'istruzioni', f.istruzioni, 'approvazione', f.approvazione,
                                                     'parere_superiore', f.parere_superiore) ORDER BY f.posizione)
                  FROM fasi_agente f WHERE f.agente_id = a.id), '[]'::json) AS fasi,
@@ -236,6 +238,8 @@ def crea(d: DatiAgente, utente: dict = Depends(solo_titolare)):
             conn.execute("UPDATE agenti SET email_attivo = TRUE WHERE id = %s", (riga["id"],))
         if d.crm_attivo:
             conn.execute("UPDATE agenti SET crm_attivo = TRUE WHERE id = %s", (riga["id"],))
+        if d.crm_nominativo:
+            conn.execute("UPDATE agenti SET crm_nominativo = TRUE WHERE id = %s", (riga["id"],))
         if d.finestre_attivo:
             conn.execute("UPDATE agenti SET finestre_attivo = TRUE, finestre_siti = %s WHERE id = %s", (_pulisci_siti(d.finestre_siti), riga["id"]))
         if d.canva_attivo:

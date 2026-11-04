@@ -355,6 +355,7 @@ function modulo(a) {
   const socialAttivo = h("input", { type: "checkbox" }); socialAttivo.checked = !!d.social_attivo;
   const emailAttivo = h("input", { type: "checkbox" }); emailAttivo.checked = !!d.email_attivo;
   const crmAttivo = h("input", { type: "checkbox" }); crmAttivo.checked = !!d.crm_attivo;
+  const crmNominativo = h("input", { type: "checkbox" }); crmNominativo.checked = !!d.crm_nominativo;
   const canvaAttivo = h("input", { type: "checkbox" }); canvaAttivo.checked = !!d.canva_attivo;
   const finestreAttivo = h("input", { type: "checkbox" }); finestreAttivo.checked = !!d.finestre_attivo;
   const finestreSiti = h("textarea", { rows: 3, placeholder: "Siti in cui può cliccare, scrivere e scaricare (uno per riga, es. chatgpt.com). Vuoto = solo lettura delle schede condivise." }); finestreSiti.value = (d.finestre_siti || []).join("\n");
@@ -406,7 +407,7 @@ function modulo(a) {
       accesso_web: web.checked, siti_consentiti: siti.value.split("\n").map(s => s.trim()).filter(Boolean),
       max_ricerche: Number(ricerche.value), attivo: attivo.checked,
       fasi: fasi.filter(f => f.titolo.trim()).map(f => ({ ...f, titolo: f.titolo.trim() })),
-      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, email_attivo: emailAttivo.checked, crm_attivo: crmAttivo.checked, canva_attivo: canvaAttivo.checked, finestre_attivo: finestreAttivo.checked, finestre_siti: finestreSiti.value.split("\n").map(x => x.trim()).filter(Boolean), archivio_attivo: archivioAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null, invio_posta: invioScelto(),
+      modello_dialogo: modDialogo.value || null, dialoghi_attivi: dialoga.checked, vede_tutto: vedeTutto.checked, drive_attivo: driveAttivo.checked, social_attivo: socialAttivo.checked, email_attivo: emailAttivo.checked, crm_attivo: crmAttivo.checked, crm_nominativo: crmNominativo.checked, canva_attivo: canvaAttivo.checked, finestre_attivo: finestreAttivo.checked, finestre_siti: finestreSiti.value.split("\n").map(x => x.trim()).filter(Boolean), archivio_attivo: archivioAttivo.checked, gmail_account_id: gmailSel.value ? Number(gmailSel.value) : null, invio_posta: invioScelto(),
       connessioni: conn.filter(([, cb]) => cb.checked).map(([c]) => c.id),
     };
     try {
@@ -508,6 +509,7 @@ function modulo(a) {
       finestreSiti,
       h("div", { class: "interruttore" }, canvaAttivo, h("span", {}, "Può creare ed esportare design su Canva (serve Canva collegato in Collegamenti)")),
       h("div", { class: "interruttore" }, crmAttivo, h("span", {}, "Può consultare i conteggi del CRM (solo numeri aggregati, mai nomi o recapiti)")),
+      h("div", { class: "interruttore" }, crmNominativo, h("span", {}, "Può vedere i singoli contatti del CRM, fare ricerche online su di loro e preparare email personalizzate (solo agenti Claude; segue il tuo «Invio email»: di norma va in coda da approvare)")),
       h("div", { class: "interruttore" }, emailAttivo, h("span", {}, "Può preparare campagne email via Brevo (non invia: le approvi tu dalla pagina Email)")),
       h("div", { class: "interruttore" }, driveAttivo, h("span", {}, "Può creare e modificare fogli e documenti Google nella cartella Opifex (non può cancellare)")),
       h("label", {}, "Modello per i dialoghi", h("p", { class: "aiuto" }, "Per parlare con i colleghi basta un modello semplice ed economico: il modello di lavoro sopra resta per pensare e svolgere i compiti."), modDialogo),
