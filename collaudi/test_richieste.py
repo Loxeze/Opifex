@@ -67,7 +67,7 @@ with TestClient(app) as c:
 
     lista = c.get("/gestione/richieste", headers=H).json()
     ok("elenco: la bloccante viene prima", len(lista) == 2 and lista[0]["bloccante"] is True and lista[0]["agente"] == "Scout")
-    ok("conteggio", c.get("/gestione/richieste/conteggio", headers=H).json() == {"aperte": 2, "bloccanti": 1})
+    ok("conteggio", c.get("/gestione/richieste/conteggio", headers=H).json() == {"aperte": 2, "bloccanti": 1, "squadre": 0})
     ok("il collaboratore non vede le richieste (403)", c.get("/gestione/richieste", headers=HS).status_code == 403)
     rid_bl = lista[0]["id"]; rid_n = lista[1]["id"]
     ok("risposta vuota -> 422", c.post(f"/gestione/richieste/{rid_bl}/risposta", headers=H, json={"risposta": ""}).status_code == 422)

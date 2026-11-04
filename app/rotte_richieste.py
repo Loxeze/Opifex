@@ -22,7 +22,8 @@ def elenco(stato: str = Query(default="aperta", pattern="^(aperta|risposta|annul
 def conteggio(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         r = conn.execute("SELECT count(*) AS n, count(*) FILTER (WHERE bloccante) AS bloccanti FROM richieste_informazioni WHERE stato = 'aperta'").fetchone()
-    return {"aperte": r["n"], "bloccanti": r["bloccanti"]}
+        sq = conn.execute("SELECT count(*) AS n FROM squadre_proposte WHERE stato = 'proposta'").fetchone()["n"]
+    return {"aperte": r["n"], "bloccanti": r["bloccanti"], "squadre": sq}
 
 
 class Risposta(BaseModel):

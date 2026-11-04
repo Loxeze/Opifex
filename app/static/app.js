@@ -117,6 +117,7 @@ function cornice(contenuto) {
     if (stato.ruolo === "titolare" && GRUPPO_MENU[id]) nav.push(h("div", { class: "bt-gruppo" }, GRUPPO_MENU[id]));
     nav.push(h("button", { class: attiva(id) ? "attivo" : "", "aria-current": attiva(id) ? "page" : null, onclick: () => vai(id) },
       icona(id), h("span", { class: "bt-et" }, nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : "")),
+      id === "progetti" && stato.ruolo === "titolare" ? h("span", { id: "badge-progetti", class: "badge-chat", title: "Domande degli agenti e squadre da approvare", style: (stato.richieste + (stato.squadreAttesa || 0)) ? "" : "display:none" }, String((stato.richieste || 0) + (stato.squadreAttesa || 0))) : null,
       id === "chat" ? h("span", { id: "badge-chat", class: "badge-chat", style: stato.chatNonLetti ? "" : "display:none" }, stato.chatNonLetti ? String(stato.chatNonLetti) : "") : null));
   }
   radice.replaceChildren(
@@ -142,7 +143,7 @@ async function avvia() {
     const [agenti, opzioni, connessioni, documenti, cont] = await Promise.all([
       api("GET", "/gestione/agenti"), api("GET", "/gestione/opzioni"), api("GET", "/gestione/connessioni"),
       api("GET", "/gestione/documenti"), api("GET", "/gestione/richieste/conteggio")]);
-    Object.assign(stato, { agenti, opzioni, connessioni, documenti, richieste: cont.aperte });
+    Object.assign(stato, { agenti, opzioni, connessioni, documenti, richieste: cont.aperte, squadreAttesa: cont.squadre || 0 });
     disegna();
   } catch (e) {
     if (token) { mostraAccesso(e.message); }
@@ -154,7 +155,7 @@ async function ricarica() {
   stato.connessioni = await api("GET", "/gestione/connessioni");
   stato.documenti = await api("GET", "/gestione/documenti");
   stato.opzioni = await api("GET", "/gestione/opzioni");
-  try { stato.richieste = (await api("GET", "/gestione/richieste/conteggio")).aperte; } catch (e) { /* ignora */ }
+  try { const c = await api("GET", "/gestione/richieste/conteggio"); stato.richieste = c.aperte; stato.squadreAttesa = c.squadre || 0; } catch (e) { /* ignora */ }
   disegna();
 }
 
@@ -921,3 +922,13 @@ function versioniPrecedenti(agente, campo) {
   } }, "Versioni precedenti");
   return h("div", { style: "margin:6px 0" }, bottone, box);
 }
+
+// il numerino su «Progetti» (domande degli agenti + squadre da approvare) si aggiorna da solo ogni minuto
+setInterval(async () => {
+  if (document.hidden || stato.ruolo !== "titolare") return;
+  try {
+    const c = await api("GET", "/gestione/richieste/conteggio"); stato.richieste = c.aperte; stato.squadreAttesa = c.squadre || 0;
+    const b = document.getElementById("badge-progetti"), n = (c.aperte || 0) + (c.squadre || 0);
+    if (b) { b.textContent = String(n); b.style.display = n ? "" : "none"; }
+  } catch (e) { /* ignora */ }
+}, 60000);
