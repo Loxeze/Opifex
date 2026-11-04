@@ -36,6 +36,9 @@ STRUMENTI = [
     {"name": "google_trascrivi", "description": "Trascrive l'AUDIO di un video o di un file audio su Drive (anche nelle cartelle di lavoro autorizzate), con i tempi [mm:ss]. "
      "Per file lunghi lavora a pezzi da 40 minuti: se in fondo c'e' «richiama con da_minuto=N» richiamalo. Salva poi la trascrizione in un documento nella cartella del progetto.",
      "input_schema": {"type": "object", "properties": {"file_id": {"type": "string"}, "da_minuto": {"type": "integer"}}, "required": ["file_id"]}},
+    {"name": "google_trascrivi_cartella", "description": "Trascrive TUTTI i video/audio di una cartella di Drive (es. i reel montati) in un colpo solo: per ognuno il parlato con un tempo [mm:ss] per ogni frase "
+     "(ganci, citazioni, nomi, affermazioni da verificare). 3 file per chiamata: se in fondo c'e' «richiama con da_file=N» richiamalo finche' non finiscono. Usala invece di dire che l'audio non e' leggibile.",
+     "input_schema": {"type": "object", "properties": {"cartella_id": {"type": "string"}, "da_file": {"type": "integer"}}, "required": ["cartella_id"]}},
     {"name": "immagine_analizza", "description": "Analizza un'immagine su Drive (cartelle autorizzate): dimensioni, proporzioni, peso, luminosita', contrasto, nitidezza, palette, formati social a cui si adatta; "
      "con 'domanda' la guarda e risponde (composizione, testo leggibile, difetti, coerenza con il brief). Usala prima di consegnare o usare una grafica/foto.",
      "input_schema": {"type": "object", "properties": {"file_id": {"type": "string"}, "domanda": {"type": "string"}}, "required": ["file_id"]}},
@@ -333,7 +336,16 @@ def _esegui(conn, agente_id: int, nome: str, d: dict) -> str:
             return "ERRORE: non e' un file audio o video: per i documenti usa google_leggi"
         from . import trascrizione_drive
         dur = int(((m.get("videoMediaMetadata") or {}).get("durationMillis") or 0)) // 1000
-        return trascrizione_drive.trascrivi(tok, fid, m["name"], dur or None, d.get("da_minuto") or 0)
+        return trascrizione_drive.trascrivi(tok, fid, m["name"], dur or None, d.get("da_minuto") or 0, dettaglio=bool(dur and dur <= 900))
+    if nome == "google_trascrivi_cartella":
+        cid = str(d.get("cartella_id") or "")
+        if not _nell_albero(tok, cid, radici):
+            return "ERRORE: la cartella non e' tra quelle autorizzate: va aggiunta in Collegamenti > Drive > Cartelle di lavoro autorizzate; segnalalo con [MANCA] indicando l'id."
+        from . import trascrizione_drive
+        c = _richiesta("GET", f"{_DRIVE}/{cid}", tok, params={"fields": "name"}).json()
+        f = _richiesta("GET", _DRIVE, tok, params={"q": f"'{_q(cid)}' in parents and trashed=false", "pageSize": 200,
+                                                   "fields": "files(id,name,mimeType,videoMediaMetadata(durationMillis))"}).json().get("files", [])
+        return trascrizione_drive.trascrivi_cartella(tok, f, c.get("name", ""), d.get("da_file") or 0)
     if nome == "google_leggi":
         fid = str(d.get("file_id", ""))
         if not _nell_albero(tok, fid, radici):

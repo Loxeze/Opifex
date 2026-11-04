@@ -34,7 +34,7 @@ class ErroreTrascrizione(Exception):
         self.codice = codice
 
 
-def trascrivi(dati: bytes, estensione: str, fascia_dati: str, utente_id: int | None, tipo_contenuto: str = "application/octet-stream", limite_ora: int = MAX_ORA) -> str:
+def trascrivi(dati: bytes, estensione: str, fascia_dati: str, utente_id: int | None, tipo_contenuto: str = "application/octet-stream", limite_ora: int = MAX_ORA, segmenti: bool = False):
     estensione = estensione.lower()
     if estensione not in FORMATI:
         raise ErroreTrascrizione("Formato audio non supportato", 422)
@@ -59,24 +59,26 @@ def trascrivi(dati: bytes, estensione: str, fascia_dati: str, utente_id: int | N
     with connessione() as conn:
         guida = vocabolario(conn)
     r = None
-    for modello in MODELLI:
-        dati_ = {"model": modello, "language": "it", "response_format": "json", "prompt": guida}
+    for modello in (("whisper-1",) if segmenti else MODELLI):   # i tempi per frase li da' solo whisper-1 (verbose_json)
+        dati_ = {"model": modello, "language": "it", "response_format": "verbose_json" if segmenti else "json", "prompt": guida}
         if modello == "whisper-1":
             dati_["temperature"] = "0"
         try:
             r = httpx.post("https://api.openai.com/v1/audio/transcriptions", headers={"Authorization": "Bearer " + chiave}, data=dati_,
                            files={"file": ("voce." + ext_whisper, dati, tipo_contenuto)}, timeout=60)
         except httpx.HTTPError as e:
-            if modello == MODELLI[-1]:
+            if segmenti or modello == MODELLI[-1]:
                 raise ErroreTrascrizione(f"OpenAI non raggiungibile ({type(e).__name__})", 502) from None
             continue
         if r.status_code == 200 or r.status_code in (401, 429):
             break
     if r.status_code != 200:
         raise ErroreTrascrizione(f"OpenAI ha risposto {r.status_code}", 502)
-    testo = (r.json().get("text") or "").strip()
+    js = r.json()
+    testo = (js.get("text") or "").strip()
+    segs = [(float(x.get("start") or 0), (x.get("text") or "").strip()) for x in (js.get("segments") or []) if (x.get("text") or "").strip()] if segmenti else []
     with connessione() as conn:
         conn.execute("INSERT INTO registro_azioni (azione, dettagli, utente_id) VALUES ('voce_trascritta', %s::jsonb, %s)", ('{"byte": %d}' % len(dati), utente_id))
     if not testo or "Nomi e termini che possono comparire" in testo:   # su audio vuoto alcuni modelli restituiscono la guida
         raise ErroreTrascrizione("Non ho capito nulla nella registrazione: riprova parlando piu' vicino al microfono", 422)
-    return testo
+    return (segs or [(0.0, testo)]) if segmenti else testo
