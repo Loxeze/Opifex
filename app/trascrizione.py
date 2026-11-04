@@ -36,6 +36,15 @@ class ErroreTrascrizione(Exception):
         self.codice = codice
 
 
+def _motivo(r) -> str:
+    """Il messaggio che OpenAI stesso da' (codice e testo), senza dati sensibili: serve a capire se e' credito, limite di richieste o modello non abilitato."""
+    try:
+        e = r.json().get("error") or {}
+        return f"{e.get('code') or e.get('type') or ''}: {str(e.get('message') or '')[:220]}".strip(": ")
+    except Exception:  # noqa: BLE001
+        return (r.text or "")[:200]
+
+
 def trascrivi(dati: bytes, estensione: str, fascia_dati: str, utente_id: int | None, tipo_contenuto: str = "application/octet-stream", limite_ora: int = MAX_ORA, segmenti: bool = False):
     estensione = estensione.lower()
     if estensione not in FORMATI:
@@ -80,16 +89,16 @@ def trascrivi(dati: bytes, estensione: str, fascia_dati: str, utente_id: int | N
             if segmenti or modello == MODELLI[-1]:
                 raise ErroreTrascrizione(f"OpenAI non raggiungibile ({type(e).__name__})", 502) from None
             continue
-        if r.status_code == 200 or r.status_code in (401, 429):
-            break
+        if r.status_code == 200 or r.status_code == 401 or (r.status_code == 429 and "insufficient_quota" in r.text):
+            break   # con 429 «troppo veloce» su un modello si prova l'altro: i limiti di OpenAI sono per modello
     if r.status_code == 429 and "insufficient_quota" in r.text:
-        raise ErroreTrascrizione("OpenAI rifiuta perche' sull'account OpenAI di Lorenzo il credito e' finito (insufficient_quota): serve ricaricare il credito su platform.openai.com → Billing. Non e' un errore di Opifex: segnalalo a Lorenzo", 502)
+        raise ErroreTrascrizione("OpenAI rifiuta perche' sull'account OpenAI di Lorenzo il credito e' finito (insufficient_quota: " + _motivo(r) + "): serve ricaricare il credito su platform.openai.com → Billing. Non e' un errore di Opifex: segnalalo a Lorenzo", 502)
     if r.status_code == 429:
-        raise ErroreTrascrizione("OpenAI limita le richieste (429) anche dopo 4 tentativi: riprova tra qualche minuto, un file alla volta", 502)
+        raise ErroreTrascrizione("OpenAI limita le richieste (429) anche dopo i nuovi tentativi e con entrambi i modelli. Motivo dato da OpenAI: " + _motivo(r), 502)
     if r.status_code == 401:
         raise ErroreTrascrizione("OpenAI non accetta la chiave (401): va controllata in Impostazioni → Sicurezza e garanzie", 502)
     if r.status_code != 200:
-        raise ErroreTrascrizione(f"OpenAI ha risposto {r.status_code}: {r.text[:160]}", 502)
+        raise ErroreTrascrizione(f"OpenAI ha risposto {r.status_code}: " + _motivo(r), 502)
     js = r.json()
     testo = (js.get("text") or "").strip()
     segs = [(float(x.get("start") or 0), (x.get("text") or "").strip()) for x in (js.get("segments") or []) if (x.get("text") or "").strip()] if segmenti else []
