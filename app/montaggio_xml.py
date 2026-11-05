@@ -3,7 +3,7 @@ e ne ricava un'impronta di stile: ritmo dei tagli, durata delle inquadrature, tr
 L'analisi e' calcolata dal programma (non inventata): serve a far capire agli agenti come monta Lorenzo."""
 import re
 import statistics
-import xml.etree.ElementTree as ET
+from .xml_sicuro import ET
 from fractions import Fraction
 
 MAX_BYTE = 60 * 1024 * 1024

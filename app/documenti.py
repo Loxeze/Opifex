@@ -2,7 +2,7 @@
 import io
 import re
 import zipfile
-import xml.etree.ElementTree as ET
+from .xml_sicuro import ET
 from html.parser import HTMLParser
 
 from pypdf import PdfReader

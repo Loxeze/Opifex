@@ -7,7 +7,7 @@ import json
 import ipaddress
 import re
 import socket
-import xml.etree.ElementTree as ET
+from .xml_sicuro import ET
 from urllib.parse import urlparse
 
 import httpx

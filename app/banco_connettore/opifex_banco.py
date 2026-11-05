@@ -91,7 +91,7 @@ def sonda(p: Path) -> dict:
 
 def impronta(p: Path) -> str:
     import hashlib
-    h = hashlib.sha1(str(p.stat().st_size).encode())
+    h = hashlib.sha1(str(p.stat().st_size).encode(), usedforsecurity=False)
     with open(p, "rb") as f:
         h.update(f.read(1 << 20))
     return h.hexdigest()[:10]

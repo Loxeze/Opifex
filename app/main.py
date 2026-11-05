@@ -268,6 +268,9 @@ async def intestazioni_sicure(richiesta, call_next):
     risposta.headers["X-Content-Type-Options"] = "nosniff"
     risposta.headers["Referrer-Policy"] = "no-referrer"
     risposta.headers["Permissions-Policy"] = "microphone=(self), camera=(), geolocation=()"
+    risposta.headers["Strict-Transport-Security"] = "max-age=31536000"
+    risposta.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    risposta.headers["Content-Security-Policy"] = "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
     if richiesta.url.path.startswith("/app"):
         risposta.headers["Cache-Control"] = "no-cache"   # il browser controlla sempre se c'e' una versione nuova (ETag): niente grafica vecchia dopo un aggiornamento
     return risposta

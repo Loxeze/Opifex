@@ -89,6 +89,10 @@ def _prossimo_passo(conn, u: dict) -> dict:
 def _sessione(conn, u: dict, extra: dict | None = None) -> dict:
     conn.execute("UPDATE utenti SET ultimo_accesso = NOW() WHERE id=%s", (u["id"],))
     conn.execute("DELETE FROM tentativi_accesso WHERE chiave=%s", (_impronta(u["email"]),))
+    if u["ruolo_globale"] == "titolare" and not u["totp_attivo"]:
+        T = "Sicurezza: il tuo account titolare non ha la verifica in due passaggi. Attivala da Il mio account: protegge tutto Opifex."
+        if not conn.execute("SELECT 1 FROM notifiche WHERE testo=%s AND creata_il > NOW() - INTERVAL '1 day'", (T,)).fetchone():
+            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, TRUE)", (T,))
     return {"passo": "ok", "token": crea_token(u["id"], u["ruolo_globale"]), "nome": u["nome"], "ruolo": u["ruolo_globale"],
             "secondo_fattore": u["totp_attivo"] or bool(extra), **(extra or {})}
 

@@ -99,7 +99,7 @@ MAX_XML = 150 * 1024 * 1024     # dimensione massima di un foglio una volta deco
 
 
 def _xml(z, nome: str):
-    import xml.etree.ElementTree as ET
+    from .xml_sicuro import ET
     info = z.getinfo(nome)
     if info.file_size > MAX_XML:
         raise ErroreCrm("Il foglio Excel e' troppo grande: salvalo in CSV o dividilo in piu' file")
