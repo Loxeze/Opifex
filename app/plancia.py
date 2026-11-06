@@ -132,3 +132,56 @@ def plancia(_: dict = Depends(solo_titolare)):
 def plancia_social(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         return social(conn)
+
+
+ATTIVO_MIN = 10          # un agente risulta al lavoro se ha iniziato da meno di 10 minuti o se ha fatto un passo (strumento) da meno di 10 minuti
+TETTO_ORE = 3            # oltre, un «inizio» senza «fine» e' considerato rimasto appeso (processo interrotto)
+
+
+def lavoro_adesso(conn) -> dict:
+    """Chi sta lavorando in questo momento, su che cosa, per quale impresa, reparto e progetto. Solo lettura del registro eventi: nessuna chiamata ai modelli, nessun costo."""
+    righe = conn.execute(
+        """SELECT i.agente_id, i.id AS eid, i.dettaglio AS richiesta, i.creato_il, EXTRACT(EPOCH FROM (NOW() - i.creato_il))::int AS secondi,
+                  a.nome, a.ruolo, a.livello, a.tipo, d.nome AS reparto,
+                  COALESCE(az.nome, (SELECT z.nome FROM agenti_aziende x JOIN aziende z ON z.id = x.azienda_id WHERE x.agente_id = a.id ORDER BY z.nome LIMIT 1)) AS impresa,
+                  COALESCE(az.colore, (SELECT z.colore FROM agenti_aziende x JOIN aziende z ON z.id = x.azienda_id WHERE x.agente_id = a.id ORDER BY z.nome LIMIT 1)) AS colore
+           FROM (SELECT DISTINCT ON (agente_id) agente_id, id, dettaglio, creato_il FROM eventi_lavoro
+                  WHERE tipo = 'inizio' AND creato_il > NOW() - make_interval(hours => %s) ORDER BY agente_id, id DESC) i
+           JOIN agenti a ON a.id = i.agente_id AND a.attivo
+           LEFT JOIN divisioni d ON d.id = a.divisione_id LEFT JOIN aziende az ON az.id = d.azienda_id
+           WHERE NOT EXISTS (SELECT 1 FROM eventi_lavoro f WHERE f.agente_id = i.agente_id AND f.tipo IN ('fine','errore') AND f.id > i.id)
+             AND (i.creato_il > NOW() - make_interval(mins => %s)
+                  OR EXISTS (SELECT 1 FROM eventi_lavoro s WHERE s.agente_id = i.agente_id AND s.id > i.id AND s.creato_il > NOW() - make_interval(mins => %s)))
+           ORDER BY i.creato_il""", (TETTO_ORE, ATTIVO_MIN, ATTIVO_MIN)).fetchall()
+    al_lavoro = []
+    for r in righe:
+        passo = conn.execute("""SELECT dettaglio FROM eventi_lavoro WHERE agente_id = %s AND id > %s AND tipo IN ('strumento','fase') ORDER BY id DESC LIMIT 1""", (r["agente_id"], r["eid"])).fetchone()
+        t = conn.execute("""SELECT t.titolo, p.nome AS progetto FROM task t LEFT JOIN progetti p ON p.id = t.progetto_id
+                            WHERE t.assegnato_agente_id = %s AND t.stato = 'in_corso' ORDER BY t.aggiornata_il DESC LIMIT 1""", (r["agente_id"],)).fetchone()
+        progetto = t["progetto"] if t and t["progetto"] else None
+        if not progetto:
+            ps = conn.execute("""SELECT p.nome FROM progetti_agenti pa JOIN progetti p ON p.id = pa.progetto_id WHERE pa.agente_id = %s AND NOT p.archiviato LIMIT 2""", (r["agente_id"],)).fetchall()
+            progetto = ps[0]["nome"] if len(ps) == 1 else None
+        al_lavoro.append({"agente_id": r["agente_id"], "nome": r["nome"], "ruolo": r["ruolo"], "livello": r["livello"], "reparto": r["reparto"], "impresa": r["impresa"], "colore": r["colore"],
+                          "progetto": progetto, "compito": t["titolo"] if t else None, "sta_facendo": (passo["dettaglio"] if passo else r["richiesta"]) or "", "richiesta": r["richiesta"] or "",
+                          "da_secondi": int(r["secondi"] or 0)})
+    totale = conn.execute("SELECT count(*) AS n FROM agenti WHERE attivo AND tipo <> 'sistema'").fetchone()["n"]
+    per_impresa, per_reparto = {}, {}
+    for x in al_lavoro:
+        per_impresa[x["impresa"] or "Senza impresa"] = per_impresa.get(x["impresa"] or "Senza impresa", 0) + 1
+        per_reparto[x["reparto"] or "Senza reparto"] = per_reparto.get(x["reparto"] or "Senza reparto", 0) + 1
+    finiti = conn.execute("""SELECT a.nome, f.tipo, f.dettaglio, f.durata_ms, EXTRACT(EPOCH FROM (NOW() - f.creato_il))::int AS secondi
+                             FROM eventi_lavoro f JOIN agenti a ON a.id = f.agente_id WHERE f.tipo IN ('fine','errore') AND f.creato_il > NOW() - INTERVAL '30 minutes'
+                             ORDER BY f.id DESC LIMIT 5""").fetchall()
+    persone = conn.execute("""SELECT u.nome, (array_agg(e.vista ORDER BY e.creato_il DESC))[1] AS vista, max(e.creato_il) AS ultimo
+                              FROM uso_eventi e JOIN utenti u ON u.id = e.utente_id WHERE e.azione = 'vista' AND e.creato_il > NOW() - INTERVAL '5 minutes' GROUP BY u.nome ORDER BY u.nome""").fetchall()
+    return {"al_lavoro": al_lavoro, "n": len(al_lavoro), "agenti_attivi": int(totale), "per_impresa": [{"nome": k, "n": v} for k, v in sorted(per_impresa.items(), key=lambda kv: -kv[1])],
+            "per_reparto": [{"nome": k, "n": v} for k, v in sorted(per_reparto.items(), key=lambda kv: -kv[1])],
+            "conclusi": [{"nome": f["nome"], "esito": "errore" if f["tipo"] == "errore" else "concluso", "durata_s": round(f["durata_ms"] / 1000) if f["durata_ms"] else None, "fa_secondi": int(f["secondi"])} for f in finiti],
+            "persone": [{"nome": p["nome"], "vista": p["vista"]} for p in persone]}
+
+
+@router.get("/plancia/lavoro")
+def plancia_lavoro(_: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return lavoro_adesso(conn)

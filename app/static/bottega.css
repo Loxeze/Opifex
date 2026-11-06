@@ -236,3 +236,23 @@ body.bottega .pallini i{background:#E3DED1}body.bottega .pallini i.on{background
 .bt-fitta .bt-kpis{align-items:start}
 .bt-fitta .bt-kpis>.bt-kpi{min-height:0;align-self:start}
 .bt-fitta .bt-griglia{align-items:start}
+
+/* Al lavoro adesso: chi sta lavorando in questo momento */
+.bt-lavoro{display:flex;flex-direction:column;gap:10px}
+.bt-lavoro-testa{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.bt-lavoro-testa .bt-num{font-size:34px;line-height:1}
+.bt-lavoro-chip{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.bt-lavoro-chip span{font-size:12px;padding:3px 10px;border-radius:999px;background:var(--carta2);color:var(--testo);white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.bt-lavoro-chip i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.bt-lavoro-righe{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:8px}
+.bt-lav{border:1px solid var(--bordo);border-radius:12px;padding:9px 12px;display:flex;flex-direction:column;gap:3px;min-width:0;background:transparent}
+.bt-lav-nome{display:flex;align-items:center;gap:8px;min-width:0}
+.bt-lav-nome b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-lav-nome .bt-sotto{margin-left:auto;white-space:nowrap}
+.bt-pulsa{width:9px;height:9px;border-radius:50%;background:var(--ok,#1F6B52);flex:none;animation:btpulsa 1.6s ease-out infinite}
+@keyframes btpulsa{0%{box-shadow:0 0 0 0 rgba(46,138,111,.55)}100%{box-shadow:0 0 0 9px rgba(46,138,111,0)}}
+@media (prefers-reduced-motion:reduce){.bt-pulsa{animation:none}}
+.bt-lav-dove{display:flex;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--tenue)}
+.bt-lav-dove span{display:inline-flex;align-items:center;gap:5px}
+.bt-lav-dove i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.bt-lav-fa{font-size:13px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}

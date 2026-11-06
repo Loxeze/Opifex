@@ -112,6 +112,33 @@ function vistaOrganigrammaPagina() {
   return [window.name === "opifex-organigramma" ? null : h("div", { class: "bt-testa-pagina" }, h("h2", {}, "Organigramma"), h("button", { class: "s", onclick: () => vai("dashboard") }, "Torna alla plancia")), scena];
 }
 
+
+const fa = (s) => s < 60 ? "da " + s + " s" : s < 3600 ? "da " + Math.floor(s / 60) + " min" : "da " + Math.floor(s / 3600) + " h " + Math.floor(s % 3600 / 60) + " min";
+function riquadroLavoro() {
+  const el = h("article", { class: "bt-card bt-lavoro" }, h("div", { class: "bt-cap" }, "Al lavoro adesso"), h("p", { class: "bt-sotto" }, "Carico…"));
+  const disegna = (d) => {
+    const chip = (arr) => arr.map(x => h("span", {}, x.colore ? h("i", { style: "background:" + x.colore }) : null, x.nome + " · " + x.n));
+    const colImpresa = {}; d.al_lavoro.forEach(a => { if (a.impresa) colImpresa[a.impresa] = a.colore; });
+    const righe = d.al_lavoro.map(a => h("div", { class: "bt-lav", title: a.richiesta },
+      h("div", { class: "bt-lav-nome" }, h("span", { class: "bt-pulsa", "aria-hidden": "true" }), h("b", {}, a.nome), h("span", { class: "bt-sotto" }, fa(a.da_secondi))),
+      h("div", { class: "bt-lav-dove" },
+        a.impresa ? h("span", {}, h("i", { style: "background:" + (a.colore || PB.ottone) }), a.impresa) : null,
+        a.reparto ? h("span", {}, "· " + a.reparto) : null,
+        a.progetto ? h("span", {}, "· progetto " + a.progetto) : null),
+      h("div", { class: "bt-lav-fa" }, a.compito ? h("b", {}, a.compito + " — ") : null, a.sta_facendo || "Sta preparando la risposta")));
+    const quasi = d.conclusi.length ? h("p", { class: "bt-nota" }, "Appena finito: " + d.conclusi.map(c => c.nome + (c.esito === "errore" ? " (con un errore)" : "") + " " + (c.fa_secondi < 60 ? "adesso" : Math.round(c.fa_secondi / 60) + " min fa")).join(" · ")) : null;
+    const pers = d.persone.length ? h("p", { class: "bt-nota" }, "Collegati ora: " + d.persone.map(p => p.nome).join(", ")) : null;
+    riempi(el, [
+      h("div", { class: "bt-lavoro-testa" }, h("div", { class: "bt-cap" }, "Al lavoro adesso"),
+        h("div", { class: "bt-num" }, nIt(d.n)), h("span", { class: "bt-sotto" }, d.n === 1 ? "agente su " + nIt(d.agenti_attivi) : "agenti su " + nIt(d.agenti_attivi)),
+        h("div", { class: "bt-lavoro-chip" }, chip(d.per_impresa.map(x => ({ ...x, colore: colImpresa[x.nome] }))), chip(d.per_reparto))),
+      d.n ? h("div", { class: "bt-lavoro-righe" }, righe) : h("p", { class: "bt-sotto" }, "Nessun agente sta lavorando in questo momento."),
+      quasi, pers]);
+  };
+  const ricarica = async () => { try { disegna(await api("GET", "/gestione/plancia/lavoro")); } catch (e) { riempi(el, [h("div", { class: "bt-cap" }, "Al lavoro adesso"), avviso(e.message, "no")]); } };
+  return { el, ricarica };
+}
+
 function vistaDashboard() {
   const ora = new Date().getHours(), saluto = ora < 6 ? "Buonanotte" : ora < 13 ? "Buongiorno" : ora < 19 ? "Buon pomeriggio" : "Buonasera";
   const titolo = h("h1", { class: "bt-titolo" }, saluto + (stato.nome ? " " + stato.nome.split(" ")[0] : "") + ". ");
@@ -171,6 +198,7 @@ function vistaDashboard() {
         h("span", { class: "punto-col", style: "background:" + (p.colore || PB.ottone) }), h("b", {}, p.nome), h("span", { class: "bt-sotto" }, p.agenti.length + " agenti" + (p.drive_stato !== "ok" ? " · Drive: " + ({ da_sincronizzare: "da creare", errore: "errore" })[p.drive_stato] : "")))) : h("p", { class: "bt-sotto" }, "Nessun progetto."));
     } catch (e) { boxPro.replaceChildren(avviso(e.message, "no")); }
   };
+  const lavoro = riquadroLavoro(); lavoro.ricarica();
   const daFare = pannelloDaFare();
   const garanzie = ((stato.opzioni && stato.opzioni.fornitori) || []).filter(f => !(f.non_conservazione_attiva && f.dpa_firmato));
 
@@ -240,11 +268,11 @@ function vistaDashboard() {
     catch (e) { riempi(riga1, avviso(e.message, "no")); }
   };
   carica(); caricaRichieste(); caricaIniziative(); caricaProgetti();
-  stato.timer2 = setInterval(() => { attesa++; caricaRichieste(); caricaIniziative(); if (attesa % 4 === 0) { caricaProgetti(); daFare.ricarica(); } if (attesa % 20 === 0) carica(); }, 3000);
+  stato.timer2 = setInterval(() => { attesa++; if (attesa % 2 === 0) lavoro.ricarica(); caricaRichieste(); caricaIniziative(); if (attesa % 4 === 0) { caricaProgetti(); daFare.ricarica(); } if (attesa % 20 === 0) carica(); }, 3000);
 
   return h("div", { class: "bt-plancia bt-fitta" },
     h("div", { class: "bt-intesta" }, h("div", {}, h("div", { class: "bt-cap" }, new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })), titolo),
       h("div", { class: "bt-azioni" }, h("button", { class: "s", onclick: apriOrganigramma }, "Organigramma 3D ↗"), bottoneAllinea(), h("button", { class: "s", onclick: () => vai("task") }, "Task"), h("button", { class: "p", onclick: () => vai("riunioni") }, "Avvia una riunione"))),
-    kpi, riga1, riga2,
+    lavoro.el, kpi, riga1, riga2,
     garanzie.length ? h("p", { class: "bt-nota" }, "Dati interni e riservati bloccati verso: " + garanzie.map(f => f.nome).join(", ") + ". ", h("a", { href: "#", onclick: (e) => { e.preventDefault(); vai("impostazioni", "sicurezza"); } }, "Dichiara le garanzie")) : null);
 }
