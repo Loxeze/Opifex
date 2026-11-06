@@ -27,7 +27,7 @@ import (
 var indicePy []byte
 
 const (
-	versione   = 3 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
+	versione   = 4 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
 	urlPredef  = "https://app.opifex.space"
 	porta      = "8765"
 	pyZipURL   = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip"
@@ -264,7 +264,7 @@ func inAscolto() bool {
 func apriFinestra(base string) {
 	u := "http://127.0.0.1:" + porta + "/"
 	if b := browserApp(); b != "" {
-		exec.Command(b, "--app="+u, "--user-data-dir="+filepath.Join(base, "finestra"), "--window-size=1180,860", "--window-position=90,70", "--no-first-run", "--no-default-browser-check").Start()
+		exec.Command(b, "--app="+u, "--user-data-dir="+filepath.Join(base, "finestra"), "--window-size=1360,900", "--window-position=70,50", "--no-first-run", "--no-default-browser-check").Start()
 		return
 	}
 	exec.Command("rundll32", "url.dll,FileProtocolHandler", u).Start()
@@ -282,11 +282,30 @@ func apriPlancia(base, url string) {
 	exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 }
 
+// collegamentoStart crea (una sola volta) «Opifex Archivio» nel menu Start di Windows, cosi' si trova e si apre come un programma qualsiasi.
+// Se qualcosa non va, non succede nulla: il programma parte lo stesso.
+func collegamentoStart() {
+	me, err := os.Executable()
+	if err != nil || os.Getenv("APPDATA") == "" {
+		return
+	}
+	lnk := filepath.Join(os.Getenv("APPDATA"), `Microsoft\Windows\Start Menu\Programs`, "Opifex Archivio.lnk")
+	if _, err := os.Stat(lnk); err == nil {
+		return
+	}
+	q := func(t string) string { return strings.ReplaceAll(t, "'", "''") }
+	cmd := fmt.Sprintf(`$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%s');$s.TargetPath='%s';$s.WorkingDirectory='%s';$s.Description='Opifex - Archivio';$s.Save()`, q(lnk), q(me), q(filepath.Dir(me)))
+	c := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", cmd)
+	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	c.Run()
+}
+
 func main() {
 	base := filepath.Join(os.Getenv("LOCALAPPDATA"), "IndiceArchivio")
 	pyDir := filepath.Join(base, "py")
 	py := filepath.Join(pyDir, "python.exe")
 	os.MkdirAll(base, 0o755)
+	collegamentoStart()
 	if me, err := os.Executable(); err == nil {
 		os.Remove(me + ".vecchio")
 	}
