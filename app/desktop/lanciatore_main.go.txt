@@ -27,7 +27,7 @@ import (
 var indicePy []byte
 
 const (
-	versione   = 6 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
+	versione   = 7 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
 	urlPredef  = "https://app.opifex.space"
 	porta      = "8765"
 	pyZipURL   = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip"
@@ -232,7 +232,8 @@ func aggiornaMe(base, url string, m *manifesto) {
 }
 
 func installaPacchetti(py string, pk []string) error {
-	return esegui(py, append([]string{"-m", "pip", "install", "--no-warn-script-location", "--upgrade"}, pk...)...)
+	// senza --upgrade: installa solo cio' che manca (veloce) e non tocca quello che gia' funziona (per esempio PyTorch con la scheda video)
+	return esegui(py, append([]string{"-m", "pip", "install", "--no-warn-script-location"}, pk...)...)
 }
 
 func browserApp() string {
@@ -327,6 +328,16 @@ func collegamentoStart() {
 	c.Run()
 }
 
+// logga: traccia di cio' che fa il lanciatore (base\lanciatore.log), per capire cosa non va se qualcosa non si aggiorna
+func logga(base, msg string) {
+	f, err := os.OpenFile(filepath.Join(base, "lanciatore.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s v%d %s\n", time.Now().Format("2006-01-02 15:04:05"), versione, msg)
+}
+
 func main() {
 	base := filepath.Join(os.Getenv("LOCALAPPDATA"), "IndiceArchivio")
 	pyDir := filepath.Join(base, "py")
@@ -351,8 +362,27 @@ func main() {
 	}
 
 	m, url := prendiManifesto(base)
-	if m != nil {
+	if m == nil {
+		logga(base, "manifesto NON raggiungibile su "+url)
+	} else {
+		logga(base, "manifesto ok: Opifex "+m.Opifex)
 		aggiornaMe(base, url, m)
+	}
+
+	// il programma dell'indice: quello di Opifex se piu' recente, altrimenti quello gia' presente (o, la prima volta, quello incorporato)
+	script := filepath.Join(base, "indice.py")
+	if _, err := os.Stat(script); err != nil {
+		os.WriteFile(script, indicePy, 0o644)
+	}
+	if m != nil && m.Indice != nil && strings.HasPrefix(m.Indice.URL, "/desktop/") && m.Indice.Sha256 != shaFile(script) {
+		tmp := filepath.Join(base, "indice.nuovo")
+		if scarica(url+m.Indice.URL, tmp, time.Minute) == nil && shaFile(tmp) == m.Indice.Sha256 {
+			os.Rename(tmp, script)
+			logga(base, "programma dell'indice aggiornato")
+		} else {
+			os.Remove(tmp)
+			logga(base, "aggiornamento del programma dell'indice NON riuscito")
+		}
 	}
 
 	if errPronto != nil {
@@ -403,21 +433,8 @@ func main() {
 		}
 	}
 
-	// il programma dell'indice: quello di Opifex se piu' recente, altrimenti quello gia' presente (o, la prima volta, quello incorporato)
-	script := filepath.Join(base, "indice.py")
-	if _, err := os.Stat(script); err != nil {
-		os.WriteFile(script, indicePy, 0o644)
-	}
-	if m != nil && m.Indice != nil && strings.HasPrefix(m.Indice.URL, "/desktop/") && m.Indice.Sha256 != shaFile(script) {
-		tmp := filepath.Join(base, "indice.nuovo")
-		if scarica(url+m.Indice.URL, tmp, time.Minute) == nil && shaFile(tmp) == m.Indice.Sha256 {
-			os.Rename(tmp, script)
-		} else {
-			os.Remove(tmp)
-		}
-	}
-
 	if inAscolto() && revServer() != shaFile(script) {
+		logga(base, "programma di sfondo vecchio: lo riavvio")
 		fermaVecchio(py)
 	}
 	if !inAscolto() {
