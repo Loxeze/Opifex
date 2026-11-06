@@ -27,7 +27,7 @@ import (
 var indicePy []byte
 
 const (
-	versione   = 5 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
+	versione   = 6 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
 	urlPredef  = "https://app.opifex.space"
 	porta      = "8765"
 	pyZipURL   = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip"
@@ -251,6 +251,33 @@ func browserApp() string {
 	return ""
 }
 
+// revServer: l'impronta del programma che sta girando adesso ("" se e' una versione che non la dichiara)
+func revServer() string {
+	c := &http.Client{Timeout: 800 * time.Millisecond}
+	r, err := c.Get("http://127.0.0.1:" + porta + "/api/vivo")
+	if err != nil {
+		return ""
+	}
+	defer r.Body.Close()
+	var v struct {
+		Rev string `json:"rev"`
+	}
+	json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&v)
+	return v.Rev
+}
+
+// fermaVecchio chiude il programma di sfondo rimasto acceso con una versione vecchia (e il suo banco di lavoro): l'indicizzazione riprende da sola
+func fermaVecchio(py string) {
+	q := strings.ReplaceAll(py, "'", "''")
+	cmd := fmt.Sprintf(`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq '%s' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`, q)
+	c := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", cmd)
+	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	c.Run()
+	for i := 0; i < 20 && inAscolto(); i++ {
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
 func inAscolto() bool {
 	c := &http.Client{Timeout: 800 * time.Millisecond}
 	r, err := c.Get("http://127.0.0.1:" + porta + "/api/vivo")
@@ -390,6 +417,9 @@ func main() {
 		}
 	}
 
+	if inAscolto() && revServer() != shaFile(script) {
+		fermaVecchio(py)
+	}
 	if !inAscolto() {
 		args := []string{script, "interfaccia", "--db", filepath.Join(base, "indice.db"), "--non-aprire", "--porta", porta}
 		if !nascosto {

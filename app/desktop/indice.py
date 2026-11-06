@@ -2314,6 +2314,10 @@ setInterval(()=>{if(!$('v-esplora').hidden&&PR.in_corso)caricaFiltri()},60000);
 
 
 OPI = {"url": "", "token": "", "nome": "", "sfida": "", "email": ""}
+try:
+    REV_PROGRAMMA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()   # il lanciatore la confronta con il file aggiornato: se differisce, riavvia il programma
+except OSError:
+    REV_PROGRAMMA = ""
 BATTITO = {"ultimo": 0.0, "chiuso": 0.0}
 
 
@@ -2554,7 +2558,7 @@ def servi(db, porta, ascolta, chiave, finto=False, interfaccia=False, finestra=F
                 return self._r(200, PAGINA, "text/html; charset=utf-8")
             if interfaccia and u.path == "/api/vivo":
                 BATTITO["ultimo"] = time.time()
-                return self._r(200, {"ok": True})
+                return self._r(200, {"ok": True, "rev": REV_PROGRAMMA})
             if interfaccia and u.path.startswith("/api/opifex/"):
                 return self._r(200, opifex_api(db, "GET", u.path, q, {}))
             if not self._ok(q):
