@@ -1463,6 +1463,218 @@ def miniatura(db, fid: int, t=None, w=360):
     return dest.read_bytes() if dest.exists() and dest.stat().st_size > 0 else None
 
 
+# ---------- montaggio: sequenze per Premiere, programmi collegati ----------
+def _fps_di(meta):
+    try:
+        return float(str((meta or {}).get("Fotogrammi al secondo") or "").replace(",", "."))
+    except ValueError:
+        return 0.0
+
+
+def _segmenti_persona(c, fid, pid, durata):
+    """Gli intervalli di un video in cui compare una persona (i fotogrammi analizzati vicini si uniscono in un solo momento)."""
+    pos = sorted({float(r["pos"]) for r in c.execute("SELECT pos FROM volti WHERE file_id=? AND persona_id=?", (fid, pid)) if r["pos"] is not None})
+    if not pos:
+        return []
+    passi = [b - a for a, b in zip(pos, pos[1:]) if b > a]
+    passo = sorted(passi)[len(passi) // 2] if passi else 10.0
+    segs, ini, fin = [], pos[0], pos[0]
+    for p in pos[1:]:
+        if p - fin <= max(passo * 2.5, 6.0):
+            fin = p
+        else:
+            segs.append((ini, fin)); ini = fin = p
+    segs.append((ini, fin))
+    fine_max = durata or (pos[-1] + passo)
+    return [(max(0.0, a - 2.0), min(fine_max, b + max(passo, 4.0))) for a, b in segs]
+
+
+def sequenza_xml(db, sorgente: dict, nome="Montaggio", modo="intero", durata_foto=5.0, ordine="data"):
+    """Crea un progetto di montaggio (Final Cut Pro 7 XML) che Premiere Pro, DaVinci Resolve e Final Cut importano: le clip in fila, con i punti scelti.
+    sorgente: {"raccolta": id} | {"persona": id} | {"ids": [..]}.  modo: «intero» (ogni file per intero), «inquadrature» (ogni taglio di ogni video una clip),
+    «persona» (solo i momenti in cui compare la persona). I file restano dove sono: il progetto li richiama dal loro percorso."""
+    from urllib.parse import quote
+    from xml.sax.saxutils import escape
+    c = apri(db)
+    pid = int(sorgente.get("persona") or 0)
+    if sorgente.get("raccolta"):
+        righe = c.execute(f"SELECT {COLONNE} FROM file JOIN raccolta_file x ON x.file_id=file.id WHERE x.raccolta_id=? AND file.tipo IN ('immagine','video')", (int(sorgente["raccolta"]),)).fetchall()
+    elif pid:
+        righe = c.execute(f"SELECT {COLONNE} FROM file WHERE tipo IN ('immagine','video') AND id IN (SELECT file_id FROM volti WHERE persona_id=?)", (pid,)).fetchall()
+        modo = "persona"
+    else:
+        ids = [int(i) for i in (sorgente.get("ids") or [])][:2000]
+        righe = c.execute(f"SELECT {COLONNE} FROM file WHERE tipo IN ('immagine','video') AND id IN ({','.join('?' * len(ids)) or 'NULL'})", ids).fetchall() if ids else []
+    if not righe:
+        raise ValueError("Non ci sono foto o video da mettere in sequenza")
+    if ordine == "nome":
+        righe = sorted(righe, key=lambda f: f["rel"].lower())
+    else:
+        righe = sorted(righe, key=lambda f: (f["data_ripresa"] or "", f["rel"].lower()))
+    video = [f for f in righe if f["tipo"] == "video"]
+    fr = sorted(_fps_di(json.loads(f["meta"]) if f["meta"] else {}) for f in video)
+    fr = [x for x in fr if x > 1]
+    fps_reale = max(set(fr), key=fr.count) if fr else 25.0
+    ntsc = abs(fps_reale - round(fps_reale)) > 0.01
+    tb = int(round(fps_reale))
+    larg = max([f["larghezza"] or 0 for f in righe] + [0])
+    alt = max([f["altezza"] or 0 for f in righe] + [0])
+    if larg < 3840:   # la consegna e' in 4K: la sequenza parte sempre almeno da li'
+        larg, alt = 3840, 2160
+    real = fps_reale * (1000 / 1001 if ntsc else 1)
+    ritmo = f"<rate><timebase>{tb}</timebase><ntsc>{'TRUE' if ntsc else 'FALSE'}</ntsc></rate>"
+    vid, aud, pos, avvisi, ref = [], [], 0, [], {}
+    durata_foto = max(1.0, min(60.0, float(durata_foto or 5)))
+
+    def clip(f, da, a, k):
+        nonlocal pos
+        p = Path(f["radice"]) / f["rel"]
+        lung = max(1, round((a - da) * real))
+        fin, fout = round(da * real), round(da * real) + lung
+        r = ref.get(f["id"])
+        primo = r is None
+        r = r or f"file-{len(ref) + 1}"
+        ref[f["id"]] = r
+        durf = round((f["durata"] or (a if f["tipo"] == "video" else durata_foto)) * real) if f["tipo"] == "video" else round(3600 * real)
+        url = "file://localhost" + quote("/" + p.as_posix().lstrip("/"), safe="/")
+        w, h = f["larghezza"] or larg, f["altezza"] or alt
+        if w < 3800:
+            avvisi.append(f["rel"].rsplit("/", 1)[-1])
+        sc = ""
+        if w and w != larg:   # adatta alla dimensione della sequenza
+            sc = ("<filter><effect><name>Basic Motion</name><effectid>basic</effectid><effectcategory>motion</effectcategory><effecttype>motion</effecttype><mediatype>video</mediatype>"
+                  f"<parameter><parameterid>scale</parameterid><name>Scale</name><valuemin>0</valuemin><valuemax>1000</valuemax><value>{100.0 * larg / w:.1f}</value></parameter></effect></filter>")
+        nm = escape(p.name)
+        fl = (f'<file id="{r}"><name>{nm}</name><pathurl>{escape(url)}</pathurl>{ritmo}<duration>{durf}</duration><media><video><samplecharacteristics>{ritmo}<width>{w}</width><height>{h}</height></samplecharacteristics></video>'
+              + ("<audio><channelcount>2</channelcount></audio>" if f["tipo"] == "video" else "") + "</media></file>") if primo else f'<file id="{r}"/>'
+        base = f"<name>{nm}</name><enabled>TRUE</enabled><duration>{durf}</duration>{ritmo}<start>{pos}</start><end>{pos + lung}</end><in>{fin}</in><out>{fout}</out>{fl}"
+        vid.append(f'<clipitem id="vclip-{k}">{base}{sc}</clipitem>')
+        if f["tipo"] == "video":
+            aud.append(f'<clipitem id="aclip-{k}"><name>{nm}</name><enabled>TRUE</enabled><duration>{durf}</duration>{ritmo}<start>{pos}</start><end>{pos + lung}</end><in>{fin}</in><out>{fout}</out><file id="{r}"/></clipitem>')
+        pos += lung
+
+    k = 0
+    for f in righe:
+        if f["tipo"] == "immagine":
+            k += 1; clip(f, 0.0, durata_foto, k); continue
+        d = float(f["durata"] or 0)
+        if d <= 0:
+            continue
+        if modo == "persona" and pid:
+            tratti = _segmenti_persona(c, f["id"], pid, d)
+        elif modo == "inquadrature":
+            tratti = [(r["t0"], min(r["t1"], d)) for r in c.execute("SELECT t0, t1 FROM scene WHERE file_id=? ORDER BY t0", (f["id"],)) if r["t1"] - r["t0"] >= 0.5] or [(0.0, d)]
+        else:
+            tratti = [(0.0, d)]
+        for a, b in tratti:
+            k += 1; clip(f, a, b, k)
+    if not vid:
+        raise ValueError("Nessuna clip utilizzabile")
+    nome = re.sub(r"[^\w .\-]", "_", str(nome or "Montaggio")).strip()[:60] or "Montaggio"
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n<xmeml version="4"><sequence id="sequenza-1"><name>' + escape(nome) + f"</name><duration>{pos}</duration>{ritmo}"
+           f"<media><video><format><samplecharacteristics>{ritmo}<width>{larg}</width><height>{alt}</height><anamorphic>FALSE</anamorphic><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></format>"
+           "<track>" + "".join(vid) + "</track></video><audio><track>" + "".join(aud) + "</track></audio></media></sequence></xmeml>")
+    cart = Path(db).resolve().parent / "montaggi"
+    cart.mkdir(exist_ok=True)
+    dest = cart / f"{nome.replace(' ', '_')}.xml"
+    dest.write_text(xml, encoding="utf-8")
+    return {"file": dest.name, "percorso": str(dest), "clip": len(vid), "durata_s": round(pos / real, 1), "sequenza": f"{larg}x{alt} a {round(fps_reale, 3):g} fps",
+            "sotto_4k": sorted(set(avvisi))[:12], "n_sotto_4k": len(set(avvisi))}
+
+
+def montaggi_elenco(db):
+    cart = Path(db).resolve().parent / "montaggi"
+    if not cart.is_dir():
+        return []
+    return [{"file": p.name, "dimensione": p.stat().st_size, "mtime": p.stat().st_mtime} for p in sorted(cart.glob("*.xml"), key=lambda p: -p.stat().st_mtime)[:50]]
+
+
+def montaggio_apri(db, nome: str, mostra=False):
+    p = Path(db).resolve().parent / "montaggi" / Path(str(nome)).name
+    if p.suffix != ".xml" or not p.is_file():
+        raise ValueError("Sequenza non trovata")
+    if sys.platform == "win32":
+        if mostra:
+            subprocess.Popen(["explorer", "/select,", str(p)])
+        else:
+            os.startfile(str(p))   # noqa: S606 - file creato da questo programma nella sua cartella
+    else:
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(p.parent if mostra else p)])
+
+
+# programmi con cui l'archivio lavora: ognuno e' una voce di questo elenco (stato + azioni), cosi' se ne aggiungono altri senza toccare il resto
+BANCO = {"proc": None}
+
+
+def _premiere_trovato():
+    if sys.platform != "win32":
+        return ""
+    import glob
+    c = sorted(glob.glob(os.environ.get("ProgramFiles", r"C:\Program Files") + r"\Adobe\Adobe Premiere Pro*\Adobe Premiere Pro.exe"))
+    return c[-1] if c else ""
+
+
+def banco_stato(db):
+    p = BANCO["proc"]
+    vivo = bool(p and p.poll() is None)
+    return {"attivo": vivo, "voluto": imp_leggi(db, "banco_attivo", "0") == "1", "cartella": imp_leggi(db, "banco_cartella", ""), "ha_chiave": bool(imp_leggi(db, "banco_token", ""))}
+
+
+def banco_avvia(db, token=None, cartella=None, attivo=True):
+    """Il «banco di lavoro»: lascia che gli agenti di Opifex lavorino sui file di questo PC (inventario, fotogrammi, silenzi, ffmpeg, progetti di montaggio)
+    dentro una sola cartella. Si collega solo in uscita; il programma lo scarica da Opifex con la chiave della postazione."""
+    import urllib.request
+    if token is not None and token.strip():
+        imp_scrivi(db, "banco_token", token.strip())
+    if cartella is not None:
+        if cartella and not Path(cartella).is_dir():
+            raise ValueError("La cartella di lavoro non esiste")
+        imp_scrivi(db, "banco_cartella", cartella)
+    p = BANCO["proc"]
+    if p and p.poll() is None:
+        p.terminate()
+        BANCO["proc"] = None
+    imp_scrivi(db, "banco_attivo", "1" if attivo else "0")
+    if not attivo:
+        return banco_stato(db)
+    tok, cart = imp_leggi(db, "banco_token", ""), imp_leggi(db, "banco_cartella", "")
+    url = (OPI["url"] or _config_url(db)).rstrip("/")
+    if not (tok.startswith("bn_") and cart and url.startswith("https://")):
+        raise ValueError("Servono l'indirizzo di Opifex, la chiave della postazione (inizia con bn_, la crei in Opifex: Impostazioni, Banco di lavoro) e la cartella di lavoro")
+    dest = Path(db).resolve().with_name("opifex_banco.py")
+    rq = urllib.request.Request(url + "/banco/programma", headers={"Authorization": "Bearer " + tok, "User-Agent": "Opifex-Archivio"})
+    try:
+        with urllib.request.urlopen(rq, timeout=30) as r:
+            dest.write_bytes(r.read(2_000_000))
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"Non riesco a scaricare il programma da Opifex ({type(e).__name__}): controlla indirizzo e chiave") from e
+    env = dict(os.environ, OPIFEX_URL=url, OPIFEX_TOKEN=tok, OPIFEX_CARTELLA=cart)
+    BANCO["proc"] = subprocess.Popen([sys.executable, str(dest)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                      creationflags=0x08000000 if sys.platform == "win32" else 0)
+    return banco_stato(db)
+
+
+def _config_url(db):
+    try:
+        return json.loads(Path(db).resolve().with_name("config.json").read_text()).get("opifex_url", "")
+    except (OSError, ValueError):
+        return ""
+
+
+def programmi_elenco(db):
+    c = apri(db)
+    prem = _premiere_trovato()
+    b = banco_stato(db)
+    radici = [{"percorso": r["percorso"], "raggiungibile": os.path.exists(r["percorso"]),
+               "file": c.execute("SELECT count(*) n FROM file WHERE radice=?", (r["percorso"],)).fetchone()["n"]} for r in c.execute("SELECT percorso FROM radici ORDER BY percorso")]
+    return [
+        {"id": "premiere", "nome": "Adobe Premiere Pro", "stato": "trovato" if prem else ("non rilevato" if sys.platform == "win32" else "non verificabile qui"),
+         "dettaglio": prem or "Le sequenze create qui si aprono con il programma predefinito per i file .xml (Premiere, se è quello associato) o con File > Importa.", "azioni": []},
+        {"id": "banco", "nome": "Banco di lavoro per gli agenti di Opifex", "stato": "in funzione" if b["attivo"] else "fermo", "dettaglio": b, "azioni": ["avvia", "ferma"]},
+        {"id": "nas", "nome": "Dischi e NAS indicizzati", "stato": f"{sum(1 for r in radici if r['raggiungibile'])} di {len(radici)} raggiungibili", "dettaglio": radici, "azioni": []},
+    ]
+
+
 def apri_file(db, fid: int, mostra=False):
     """Apre il file col programma predefinito del computer, oppure mostra la sua cartella."""
     p = _percorso_di(db, fid)
@@ -1753,7 +1965,7 @@ table.mt{width:100%;border-collapse:collapse;font-size:13.5px}table.mt td{paddin
 </head>
 <body>
 <header class="top"><div class="marchio"><i></i>Opifex · Archivio</div>
-<nav class="sc"><button id="t-esplora" class="on">Esplora</button><button id="t-persone">Persone</button><button id="t-indice">Indicizzazione</button><button id="t-dialogo">Dialogo con Opifex</button></nav>
+<nav class="sc"><button id="t-esplora" class="on">Esplora</button><button id="t-persone">Persone</button><button id="t-montaggio">Montaggio</button><button id="t-indice">Indicizzazione</button><button id="t-dialogo">Dialogo con Opifex</button></nav>
 <div id="stato-alto"></div></header>
 <main>
 <div id="v-esplora">
@@ -1781,6 +1993,16 @@ table.mt{width:100%;border-collapse:collapse;font-size:13.5px}table.mt td{paddin
  <div class="carta"><div class="riga" style="justify-content:space-between"><div><h2>Persone</h2><div class="m">I volti trovati nelle foto e nei video, raggruppati da soli. Dai un nome a una persona una volta sola: da quel momento la cerchi per nome e vedi in quali file e in quale minuto compare. Tutto avviene su questo computer: i volti non escono mai.</div></div>
  <label class="interr m"><input type="checkbox" id="pnasc"> Mostra anche le nascoste</label></div></div>
  <div class="pers-g" id="pg"></div><div class="vuoto" id="pvuoto" hidden>Ancora nessun volto: avvia l'indicizzazione, le analisi delle persone partono da sole.</div>
+</div>
+<div id="v-montaggio" hidden>
+ <div class="carta"><h2>Sequenza per il montaggio</h2><div class="m">Trasforma una selezione dell'archivio in un progetto che Premiere Pro (e DaVinci Resolve) apre con File &gt; Importa: le clip già in fila, con i punti giusti. Nessun file viene copiato o spostato; la sequenza è sempre almeno 4K.</div>
+ <div class="riga" style="margin-top:12px"><select id="m-sorg"><option value="raccolta">Una raccolta</option><option value="persona">Tutti i momenti di una persona</option></select><select id="m-qual" style="min-width:220px"></select>
+ <select id="m-modo"><option value="intero">Ogni file per intero</option><option value="inquadrature">Ogni inquadratura una clip</option></select>
+ <select id="m-ord"><option value="data">In ordine di data</option><option value="nome">In ordine di nome</option></select></div>
+ <div class="riga" style="margin-top:10px"><input id="m-nome" style="flex:1;min-width:220px" placeholder="Nome della sequenza"><label class="m">Foto: <input id="m-foto" type="number" min="1" max="60" value="5" style="width:70px;display:inline-block"> s ciascuna</label><button class="p" id="m-crea">Crea sequenza</button></div>
+ <div id="m-esito" style="margin-top:12px"></div></div>
+ <div class="carta"><h2>Sequenze create</h2><div id="m-elenco" class="m">Nessuna ancora.</div></div>
+ <div class="carta"><h2>Programmi collegati</h2><div class="m">Qui compaiono i programmi con cui l'archivio lavora insieme, ognuno con il suo stato.</div><div id="m-prog" style="margin-top:10px"></div></div>
 </div>
 <div id="v-indice" hidden>
  <div class="carta"><h2>Cartelle</h2><div class="m">Sfoglia il computer: vedi cosa è già nell'indice, cosa è in coda e cosa è ancora fuori. Le cartelle che aggiungi restano ricordate anche dopo aver chiuso l'app.</div>
@@ -1824,9 +2046,9 @@ function tempo(s){if(s==null)return'';if(s<90)return s+' s';if(s<5400)return Mat
 function evid(t){return E(t).replace(/\[([^\]]+)\]/g,'<mark>$1</mark>')}
 let qui='';
 /* ---------- schede ---------- */
-function vai(n){for(const k of['esplora','persone','indice','dialogo']){$('v-'+k).hidden=k!==n;$('t-'+k).className=k===n?'on':''}
- if(n==='indice'){carica(qui);agg()}if(n==='persone')caricaPersone();if(n==='dialogo')opStato();if(n!=='esplora')chiudiDett()}
-['esplora','persone','indice','dialogo'].forEach(k=>$('t-'+k).onclick=()=>vai(k));
+function vai(n){for(const k of['esplora','persone','montaggio','indice','dialogo']){$('v-'+k).hidden=k!==n;$('t-'+k).className=k===n?'on':''}
+ if(n==='indice'){carica(qui);agg()}if(n==='persone')caricaPersone();if(n==='montaggio')caricaMontaggio();if(n==='dialogo')opStato();if(n!=='esplora')chiudiDett()}
+['esplora','persone','montaggio','indice','dialogo'].forEach(k=>$('t-'+k).onclick=()=>vai(k));
 $('sb').onclick=()=>vai('indice');
 /* ---------- cartelle ---------- */
 const ET={indicizzata:['ok','Indicizzata'],indicizzata_vuota:['ok','Nessun file supportato'],in_coda:['cd','In coda'],errori:['er','Con errori'],vuota:['','Vuota'],fuori:['','Non indicizzata'],contiene:['cd','Contiene cartelle indicizzate'],esclusa:['','Esclusa (di sistema)']};
@@ -2018,16 +2240,47 @@ async function apriDett(i,noscroll){S.corr=i;const x=S.ris[i];if(!x)return;$('ve
 async function caricaPersone(){const r=await j('/api/persone?nascoste='+($('pnasc').checked?1:0));const ps=r.persone||[];
  $('pvuoto').hidden=ps.length>0;
  $('pg').innerHTML=ps.map(p=>`<div class="pers" data-id="${p.id}"><img src="/api/volto?id=${p.esempio}&w=240" alt="" data-m="${p.id}" style="cursor:pointer" title="Mostra i file con questa persona"><input data-nome="${p.id}" value="${E(p.nome||'')}" placeholder="Chi è? Scrivi il nome"><div class="m">${p.n_file.toLocaleString('it-IT')} ${p.n_file===1?'file':'file'} · ${p.n_volti.toLocaleString('it-IT')} volti</div>`+
-  `<div class="riga" style="justify-content:center"><button class="p piccolo" data-m="${p.id}">Mostra</button><button class="s piccolo" data-h="${p.id}">${$('pnasc').checked&&p.nascosta?'Ripristina':'Nascondi'}</button></div>`+
+  `<div class="riga" style="justify-content:center"><button class="p piccolo" data-m="${p.id}">Mostra</button><button class="s piccolo" data-seq="${p.id}">Sequenza</button><button class="s piccolo" data-h="${p.id}">${$('pnasc').checked&&p.nascosta?'Ripristina':'Nascondi'}</button></div>`+
   `<select data-u="${p.id}"><option value="">Unisci con un'altra persona…</option>${ps.filter(o=>o.id!==p.id).map(o=>`<option value="${o.id}">${E(o.nome||'Senza nome #'+o.id)} (${o.n_file})</option>`).join('')}</select></div>`).join('');
  const nomeDiP=id=>(ps.find(p=>p.id===id)||{}).nome||'';
  $('pg').querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{const id=Number(b.dataset.m);S.persona=id;S.personaNome=nomeDiP(id);S.simili=0;vai('esplora');cercaOra()});
+ $('pg').querySelectorAll('[data-seq]').forEach(b=>b.onclick=async()=>{$('m-sorg').value='persona';$('m-modo').disabled=true;await riempiQual();$('m-qual').value=b.dataset.seq;vai('montaggio')});
  $('pg').querySelectorAll('[data-nome]').forEach(i=>i.onchange=async()=>{await j('/api/persona',{method:'POST',body:JSON.stringify({id:Number(i.dataset.nome),nome:i.value})})});
  $('pg').querySelectorAll('[data-h]').forEach(b=>b.onclick=async()=>{const id=Number(b.dataset.h),p=ps.find(x=>x.id===id);await j('/api/persona',{method:'POST',body:JSON.stringify({id,nascondi:!(p&&p.nascosta)})});caricaPersone()});
  $('pg').querySelectorAll('[data-u]').forEach(s=>s.onchange=async()=>{if(!s.value)return;const da=Number(s.dataset.u),a=Number(s.value);
   if(!confirm('Sono la stessa persona? I loro volti verranno uniti in un unico gruppo.'))return void(s.value='');
   await j('/api/persona',{method:'POST',body:JSON.stringify({id:da,unisci_in:a})});caricaPersone()})}
 $('pnasc').onchange=caricaPersone;
+
+/* ---------- montaggio ---------- */
+let MP=null;
+async function riempiQual(){const s=$('m-sorg').value;let o='';
+ if(s==='raccolta'){const r=(await j('/api/raccolte')).raccolte||[];o=r.map(x=>`<option value="${x.id}">${E(x.nome)} (${x.n})</option>`).join('')||'<option value="">Nessuna raccolta: creane una dal pannello di un file</option>'}
+ else{const r=(await j('/api/persone')).persone||[];o=r.map(x=>`<option value="${x.id}">${E(x.nome||'Senza nome #'+x.id)} (${x.n_file} file)</option>`).join('')||'<option value="">Nessuna persona trovata</option>'}
+ const v=$('m-qual').value;$('m-qual').innerHTML=o;if(v)$('m-qual').value=v}
+$('m-sorg').onchange=()=>{$('m-modo').disabled=$('m-sorg').value==='persona';riempiQual()};
+async function caricaMontaggio(){await riempiQual();const r=await j('/api/montaggi');MP=r;
+ $('m-elenco').innerHTML=(r.sequenze||[]).length?r.sequenze.map(x=>`<div class="f"><div class="n" style="cursor:default">${E(x.file)}</div><span class="m">${dataIt(x.mtime)} · ${mb(x.dimensione)}</span><button class="p piccolo" data-ap="${E(x.file)}">Apri</button><button class="s piccolo" data-mo="${E(x.file)}">Mostra nella cartella</button></div>`).join(''):'Nessuna ancora.';
+ $('m-elenco').querySelectorAll('[data-ap]').forEach(b=>b.onclick=()=>j('/api/montaggio_apri',{method:'POST',body:JSON.stringify({file:b.dataset.ap})}).then(x=>x.errore&&alert(x.errore)));
+ $('m-elenco').querySelectorAll('[data-mo]').forEach(b=>b.onclick=()=>j('/api/montaggio_apri',{method:'POST',body:JSON.stringify({file:b.dataset.mo,mostra:true})}).then(x=>x.errore&&alert(x.errore)));
+ disegnaProg(r.programmi||[])}
+function disegnaProg(ps){$('m-prog').innerHTML=ps.map(p=>{let det='';
+  if(p.id==='banco'){const b=p.dettaglio||{};det=`<div class="m" style="margin:6px 0">Gli agenti di Opifex possono lavorare sui file di questo PC (inventario, fotogrammi, silenzi, ffmpeg, progetti di montaggio) solo dentro la cartella che scegli. Il programma si collega a Opifex solo in uscita. La chiave si crea in Opifex: Impostazioni › Banco di lavoro.</div>
+   <div class="riga"><input id="b-chiave" style="flex:1;min-width:200px" type="password" placeholder="${b.ha_chiave?'Chiave già salvata (scrivine una nuova per cambiarla)':'Chiave della postazione (bn_…)'}"><input id="b-cart" style="flex:1;min-width:200px" value="${E(b.cartella||'')}" placeholder="Cartella di lavoro, per esempio D:\\Riprese"></div>
+   <div class="riga" style="margin-top:8px"><button class="p piccolo" id="b-av">${b.attivo?'Riavvia':'Avvia'}</button><button class="s piccolo" id="b-fe" ${b.attivo?'':'disabled'}>Ferma</button><span class="m" id="b-msg"></span></div>`}
+  else if(p.id==='nas')det=(p.dettaglio||[]).map(r=>`<div class="f"><div class="n" style="cursor:default">${E(r.percorso)}</div><span class="m">${r.file.toLocaleString('it-IT')} file</span><span class="et ${r.raggiungibile?'ok':'er'}">${r.raggiungibile?'Raggiungibile':'Non raggiungibile ora'}</span></div>`).join('')||'<div class="m">Nessuna cartella indicizzata.</div>';
+  else det=`<div class="m" style="margin-top:4px">${E(typeof p.dettaglio==='string'?p.dettaglio:'')}</div>`;
+  return`<div style="border-top:1px solid var(--bordo);padding:12px 0"><div class="riga" style="justify-content:space-between"><b>${E(p.nome)}</b><span class="et ${/funzione|trovato$|raggiungibil/.test(p.stato)&&!/non/.test(p.stato)?'ok':''}">${E(p.stato)}</span></div>${det}</div>`}).join('');
+ if($('b-av')){const agg2=async a=>{$('b-msg').textContent='…';const r=await j('/api/banco',{method:'POST',body:JSON.stringify({chiave:$('b-chiave').value,cartella:$('b-cart').value.trim(),attivo:a})});$('b-msg').textContent=r.errore||(a?'Avviato.':'Fermato.');if(!r.errore){$('b-chiave').value='';caricaMontaggio()}};
+  $('b-av').onclick=()=>agg2(true);$('b-fe').onclick=()=>agg2(false)}}
+$('m-crea').onclick=async()=>{const s=$('m-sorg').value,q=Number($('m-qual').value||0);if(!q){$('m-esito').innerHTML='<div class="avviso">Scegli prima da dove prendere i file.</div>';return}
+ $('m-esito').textContent='Creo la sequenza…';
+ const r=await j('/api/montaggio',{method:'POST',body:JSON.stringify({sorgente:s==='raccolta'?{raccolta:q}:{persona:q},nome:$('m-nome').value.trim()||((($('m-qual').selectedOptions[0]||{}).text||'').replace(/\s*\(.*$/,'')||'Montaggio'),modo:$('m-modo').value,durata_foto:Number($('m-foto').value||5),ordine:$('m-ord').value})});
+ if(r.errore){$('m-esito').innerHTML='<div class="avviso">'+E(r.errore)+'</div>';return}
+ $('m-esito').innerHTML=`<div class="lav"><div class="tx"><div class="nomefile">${E(r.file)}</div><div class="m">${r.clip} clip · ${dur(r.durata_s)} · sequenza ${E(r.sequenza)}</div>${r.n_sotto_4k?`<div class="m" style="margin-top:4px">${r.n_sotto_4k} file sotto il 4K nativo (${E(r.sotto_4k.slice(0,4).join(', '))}${r.n_sotto_4k>4?'…':''}): in Premiere saranno adattati alla sequenza, ma non diventano 4K veri.</div>`:''}</div><button class="p piccolo" id="m-ap">Apri</button><button class="s piccolo" id="m-mo">Mostra nella cartella</button></div>`;
+ $('m-ap').onclick=()=>j('/api/montaggio_apri',{method:'POST',body:JSON.stringify({file:r.file})}).then(x=>x.errore&&alert(x.errore));
+ $('m-mo').onclick=()=>j('/api/montaggio_apri',{method:'POST',body:JSON.stringify({file:r.file,mostra:true})});
+ caricaMontaggio()};
 /* ---------- dialogo con Opifex ---------- */
 let passo2=false;
 async function opStato(){const r=await j('/api/opifex/stato');$('ou').value=$('ou').value||r.url||'https://app.opifex.space';$('oe').value=$('oe').value||r.email||'';
@@ -2334,6 +2587,8 @@ def servi(db, porta, ascolta, chiave, finto=False, interfaccia=False, finestra=F
                 if interfaccia and u.path == "/api/volto":
                     jpg = volto_miniatura(db, int((q.get("id") or ["0"])[0]), int((q.get("w") or ["160"])[0]))
                     return self._bin(204, b"", "image/jpeg") if jpg is None else self._bin(200, jpg, "image/jpeg", {"Cache-Control": "max-age=86400"})
+                if interfaccia and u.path == "/api/montaggi":
+                    return self._r(200, {"sequenze": montaggi_elenco(db), "programmi": programmi_elenco(db)})
                 if interfaccia and u.path == "/api/etichette":
                     return self._r(200, {"etichette": etichette_elenco(db)})
                 if interfaccia and u.path == "/api/raccolte":
@@ -2426,6 +2681,23 @@ def servi(db, porta, ascolta, chiave, finto=False, interfaccia=False, finestra=F
                     return self._r(200, {"ok": True, "persona_id": volto_sposta(db, int(corpo.get("id") or 0), corpo.get("persona_id"))})
                 except ValueError as e:
                     return self._r(200, {"errore": str(e)})
+            if self.path == "/api/montaggio":
+                try:
+                    return self._r(200, sequenza_xml(db, corpo.get("sorgente") or {}, corpo.get("nome") or "Montaggio", corpo.get("modo") or "intero",
+                                                     corpo.get("durata_foto") or 5, corpo.get("ordine") or "data"))
+                except ValueError as e:
+                    return self._r(200, {"errore": str(e)})
+            if self.path == "/api/montaggio_apri":
+                try:
+                    montaggio_apri(db, corpo.get("file") or "", bool(corpo.get("mostra")))
+                    return self._r(200, {"ok": True})
+                except ValueError as e:
+                    return self._r(200, {"errore": str(e)})
+            if self.path == "/api/banco":
+                try:
+                    return self._r(200, banco_avvia(db, corpo.get("chiave"), corpo.get("cartella"), bool(corpo.get("attivo", True))))
+                except ValueError as e:
+                    return self._r(200, {"errore": str(e)})
             if self.path == "/api/apri":
                 try:
                     apri_file(db, int(corpo.get("id") or 0), bool(corpo.get("mostra")))
@@ -2451,6 +2723,11 @@ def servi(db, porta, ascolta, chiave, finto=False, interfaccia=False, finestra=F
     log.info("Servizio su http://%s:%d", ascolta, porta)
     if interfaccia:
         threading.Thread(target=ponte_ciclo, args=(db,), daemon=True).start()
+        if imp_leggi(db, "banco_attivo", "0") == "1":
+            try:
+                banco_avvia(db)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Banco di lavoro non avviato: %s", e)
     if interfaccia and finestra:
         def riprendi():   # all'apertura riparte da solo dalle cartelle ricordate (si puo' spegnere dalla finestra)
             time.sleep(4)

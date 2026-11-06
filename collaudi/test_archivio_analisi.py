@@ -74,6 +74,39 @@ ix.persone_unisci(db, nuova["id"], pl["id"]); ok("unione di due persone", len(ix
 ix.persona_nascondi(db, mp["id"]); ok("persona nascosta sparisce dall'elenco", len(ix.persone_elenco(db)) == 1 and len(ix.persone_elenco(db, True)) == 1)
 ok("ritaglio del volto (JPEG)", (ix.volto_miniatura(db, pl["esempio"], 120) or b"")[:2] == b"\xff\xd8")
 ix.persona_nascondi(db, mp["id"], False)
+
+# ---- montaggio (2.27) ----
+from xml.etree import ElementTree as ET
+ix.persona_nascondi(db, mp["id"], False)
+r1 = ix.sequenza_xml(db, {"raccolta": rid}, "Selezione podcast", "intero")
+x1 = ET.parse(r1["percorso"]).getroot()
+ok("sequenza da raccolta: 2 clip (foto + video), almeno 4K", r1["clip"] == 2 and x1.find(".//sequence/media/video/format/samplecharacteristics/width").text == "3840" and x1.find(".//sequence/media/video/format/samplecharacteristics/height").text == "2160", str(r1))
+ok("le clip puntano ai file veri", all("file://localhost" in e.text for e in x1.iter("pathurl")) and any(e.text.endswith("intervista.mp4") for e in x1.iter("pathurl")))
+ok("la foto dura 5 secondi (50 fotogrammi a 10 fps)", any(c.find("out").text == "50" for c in x1.iter("clipitem") if c.find("name").text.endswith(".jpg")))
+r2 = ix.sequenza_xml(db, {"raccolta": rid}, "Per inquadrature", "inquadrature")
+ok("per inquadrature il video diventa due clip", r2["clip"] == 3, str(r2))
+r3 = ix.sequenza_xml(db, {"persona": mp["id"]}, "Solo Messi")
+x3 = ET.parse(r3["percorso"]).getroot()
+vclip = [c for c in x3.iter("clipitem") if c.get("id", "").startswith("vclip") and c.find("name").text == "intervista.mp4"]
+ok("persona: nel video solo il tratto in cui compare (parte dopo il taglio)", vclip and int(vclip[0].find("in").text) >= 40, str([(c.find("in").text, c.find("out").text) for c in vclip]))
+ok("elenco sequenze", {"Selezione_podcast.xml", "Solo_Messi.xml"} <= {x["file"] for x in ix.montaggi_elenco(db)})
+try:
+    ix.montaggio_apri(db, "../../etc/passwd"); ok("apri sequenza fuori cartella rifiutato", False)
+except ValueError:
+    ok("apri sequenza fuori cartella rifiutato", True)
+try:
+    ix.sequenza_xml(db, {"raccolta": 99999}); ok("raccolta vuota segnalata", False)
+except ValueError:
+    ok("raccolta vuota segnalata", True)
+ok("programmi collegati: premiere, banco, nas", [p["id"] for p in ix.programmi_elenco(db)] == ["premiere", "banco", "nas"])
+try:
+    ix.banco_avvia(db, "", "", True); ok("banco senza chiave rifiutato", False)
+except ValueError:
+    ok("banco senza chiave rifiutato", True)
+try:
+    ix.banco_avvia(db, "bn_x", "/non/esiste", True); ok("banco: cartella inesistente rifiutata", False)
+except ValueError:
+    ok("banco: cartella inesistente rifiutata", True)
 # archivio indicizzato da una versione precedente: le analisi si recuperano da sole e non duplicano le persone
 c.execute("UPDATE file SET analisi=0"); c.commit()
 ix.scansiona(db, [S], 0, 3, True)
