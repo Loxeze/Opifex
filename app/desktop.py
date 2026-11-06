@@ -12,8 +12,8 @@ router = APIRouter(prefix="/desktop", tags=["desktop"])
 CARTELLA = Path(__file__).resolve().parent / "desktop"
 FINESTRE = Path(__file__).resolve().parent / "finestre.py"   # lo stesso modulo gira sul server e sul computer
 # pacchetti Python dell'app per computer: se cambia questo elenco, aumenta REQUISITI_REV e l'app li reinstalla da sola
-REQUISITI_REV = 2
-REQUISITI = ["numpy", "pillow", "pypdf", "imageio-ffmpeg", "faster-whisper", "open_clip_torch", "playwright"]
+REQUISITI_REV = 3
+REQUISITI = ["numpy", "pillow", "pypdf", "imageio-ffmpeg", "faster-whisper", "open_clip_torch", "playwright", "opencv-python-headless"]
 
 
 def _sha(p: Path) -> str:

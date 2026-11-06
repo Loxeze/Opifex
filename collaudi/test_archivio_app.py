@@ -12,7 +12,7 @@ im.save(S + "/Foto/torre.jpg", exif=ex)
 subprocess.run(["ffmpeg","-v","error","-f","lavfi","-i","testsrc=s=3840x2160:r=25:d=3","-pix_fmt","yuv420p","-c:v","libx264","-preset","ultrafast","-y",S+"/Video/uhd.mp4"])
 subprocess.run(["ffmpeg","-v","error","-f","lavfi","-i","testsrc=s=640x360:r=25:d=3","-pix_fmt","yuv420p","-y",S+"/Video/sd.mp4"])
 db = T + "/i.db"
-r = ix.scansiona(db, [S], 10, True)
+r = ix.scansiona(db, [S], 0, 10, True)
 ok("scansione: 3 file", r["fatti"] == 3, str(r))
 f = {x["nome"]: x for x in ix.sfoglia(db, 20)}
 ok("metadati foto: marca, modello, ISO, diaframma, data di scatto", f["torre.jpg"]["meta"].get("Modello") == "ILCE-7M4" and f["torre.jpg"]["meta"].get("ISO") == "400" and f["torre.jpg"]["meta"].get("Diaframma") == "f/2.8" and f["torre.jpg"]["data"].startswith("2025-06-12"), str(f["torre.jpg"]["meta"]))

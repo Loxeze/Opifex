@@ -63,6 +63,21 @@ CREATE TABLE IF NOT EXISTS radici (percorso TEXT PRIMARY KEY, aggiunta REAL);
 """
 
 
+SCHEMA_ANALISI = """
+CREATE TABLE IF NOT EXISTS persone (id INTEGER PRIMARY KEY, nome TEXT, centro BLOB, n INTEGER DEFAULT 0, nascosta INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS volti (id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL, pos REAL, x REAL, y REAL, w REAL, h REAL, punteggio REAL, emb BLOB, persona_id INTEGER);
+CREATE INDEX IF NOT EXISTS volti_file ON volti(file_id);
+CREATE INDEX IF NOT EXISTS volti_persona ON volti(persona_id);
+CREATE TABLE IF NOT EXISTS etichette (file_id INTEGER NOT NULL, gruppo TEXT, tag TEXT, p REAL);
+CREATE INDEX IF NOT EXISTS etichette_file ON etichette(file_id);
+CREATE INDEX IF NOT EXISTS etichette_tag ON etichette(tag);
+CREATE TABLE IF NOT EXISTS scene (file_id INTEGER NOT NULL, t0 REAL, t1 REAL);
+CREATE INDEX IF NOT EXISTS scene_file ON scene(file_id);
+CREATE TABLE IF NOT EXISTS raccolte (id INTEGER PRIMARY KEY, nome TEXT UNIQUE, creata REAL);
+CREATE TABLE IF NOT EXISTS raccolta_file (raccolta_id INTEGER NOT NULL, file_id INTEGER NOT NULL, aggiunto REAL, PRIMARY KEY (raccolta_id, file_id));
+"""
+
+
 def apri(db: str) -> sqlite3.Connection:
     c = sqlite3.connect(db, check_same_thread=False, timeout=60)
     c.row_factory = sqlite3.Row
@@ -71,6 +86,12 @@ def apri(db: str) -> sqlite3.Connection:
     if "meta" not in {r[1] for r in c.execute("PRAGMA table_info(file)")}:
         c.execute("ALTER TABLE file ADD COLUMN meta TEXT")   # metadati letti dai file (archivi creati con versioni precedenti)
     c.execute("CREATE TABLE IF NOT EXISTS impostazioni (chiave TEXT PRIMARY KEY, valore TEXT)")
+    cols = {r[1] for r in c.execute("PRAGMA table_info(file)")}
+    for nome, tipo in (("analisi", "INTEGER DEFAULT 0"), ("nitidezza", "REAL"), ("esposizione", "TEXT"), ("dhash", "TEXT"), ("colori", "TEXT"), ("stelle", "INTEGER DEFAULT 0"),
+                       ("colore", "TEXT"), ("parole", "TEXT"), ("n_volti", "INTEGER DEFAULT 0"), ("gruppo_dup", "INTEGER"), ("migliore", "INTEGER DEFAULT 1")):
+        if nome not in cols:
+            c.execute(f"ALTER TABLE file ADD COLUMN {nome} {tipo}")
+    c.executescript(SCHEMA_ANALISI)
     return c
 
 
@@ -460,7 +481,7 @@ def fotogrammi(p: Path, passo: int, cartella: Path, durata: float, avanza=None) 
         if durata and t >= durata:
             break
         f = cartella / f"f_{i:05d}.jpg"
-        subprocess.run([ffmpeg(), "-v", "error", "-ss", str(t), "-i", str(p), "-frames:v", "1", "-vf", "scale=336:-2", "-q:v", "4", "-y", str(f)], capture_output=True, timeout=300)
+        subprocess.run([ffmpeg(), "-v", "error", "-ss", str(t), "-i", str(p), "-frames:v", "1", "-vf", "scale=960:-2", "-q:v", "4", "-y", str(f)], capture_output=True, timeout=300)
         if f.exists() and f.stat().st_size > 0:
             out.append((float(t), str(f)))
         if avanza:
@@ -474,16 +495,414 @@ def salva_vettori(c, fid, pos_v):
         c.execute("INSERT INTO vettore (file_id, pos, dim, v) VALUES (?,?,?,?)", (fid, pos, int(a.shape[0]), a.tobytes()))
 
 
-def indicizza_file(c, mod: Modelli, riga, radice: Path, passo: int):
+# ---------- analisi aggiuntive: etichette, volti, qualita', scene ----------
+B_ETICHETTE, B_QUALITA, B_VOLTI, B_SCENE = 1, 2, 4, 8
+SOGLIA_VOLTO = float(os.environ.get("INDICE_SOGLIA_VOLTO", "0.45"))     # somiglianza (coseno) per dire «e' la stessa persona»
+SOGLIA_DUP = int(os.environ.get("INDICE_SOGLIA_DUP", "6"))               # differenza massima (su 64) tra due foto quasi uguali
+SOGLIA_SFOCATA = float(os.environ.get("INDICE_SOGLIA_SFOCATA", "25"))
+SOGLIA_SCENA = os.environ.get("INDICE_SOGLIA_SCENA", "0.30")
+MODELLI_VOLTI = {
+    "yunet.onnx": ("https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+                   "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"),
+    "sface.onnx": ("https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+                   "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79")}
+# Ogni gruppo: (nome mostrato, frase per CLIP). Le frasi sono in inglese: il modello le capisce meglio e cerca comunque anche in italiano.
+VOCABOLARIO = {
+    "scena": [("paesaggio", "a landscape"), ("città", "a city street"), ("architettura", "the exterior of a building"), ("interno", "an indoor interior"),
+              ("natura", "nature, trees and plants"), ("mare", "the sea and the coast"), ("montagna", "mountains"), ("ritratto", "a portrait of a person"),
+              ("folla", "a crowd of people"), ("evento", "a public event"), ("oggetto", "a close-up of an object"), ("veduta aerea", "an aerial view from a drone"),
+              ("opera d'arte", "a painting or a work of art"), ("documento", "a page of text or a document"), ("cibo", "food"), ("schermata", "a computer screenshot")],
+    "inquadratura": [("campo lunghissimo", "an extreme wide shot of a vast scene"), ("campo largo", "a wide shot showing the whole place"),
+                     ("campo medio", "a medium shot"), ("primo piano", "a close-up shot"), ("particolare", "an extreme close-up of a small detail")],
+    "luce": [("alba o tramonto", "golden light of sunrise or sunset"), ("giorno", "a bright sunny day"), ("notte", "a dark night scene"),
+             ("nuvoloso", "an overcast gray day"), ("controluce", "a backlit silhouette")],
+    "soggetto": [("castello", "a castle"), ("torre", "a tower"), ("chiesa", "a church"), ("borgo", "a medieval village"), ("affresco", "a fresco on a wall"),
+                 ("museo", "a museum gallery"), ("persone", "people"), ("bambini", "children"), ("intervista", "a person being interviewed"),
+                 ("palco", "a stage performance"), ("strada", "a street"), ("ponte", "a bridge"), ("giardino", "a garden"), ("fiume", "a river"),
+                 ("bosco", "a forest"), ("animali", "animals"), ("fiori", "flowers"), ("porto", "a harbour with boats"), ("rovine", "ancient ruins"),
+                 ("libro o manoscritto", "a book or a manuscript"), ("statua", "a statue or a monument"), ("mercato", "a market"), ("auto", "a car"),
+                 ("cielo", "the sky and clouds"), ("scultura", "a sculpture"), ("artigianato", "handmade craft work"), ("cucina", "people cooking")]}
+SOGLIE_ETICHETTE = {"scena": (0.30, 1), "inquadratura": (0.35, 1), "luce": (0.40, 1), "soggetto": (0.12, 3)}
+
+
+def _sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def cartella_modelli(db) -> Path:
+    return Path(os.environ.get("INDICE_MODELLI") or (Path(db).resolve().parent / "modelli"))
+
+
+class Volti:
+    """Riconoscimento dei volti in locale (OpenCV: YuNet per trovarli, SFace per distinguerli). I modelli, piccoli, si scaricano una volta sola e se ne controlla l'impronta."""
+
+    def __init__(self, cartella):
+        self.cartella = Path(cartella)
+        self.ok = None
+        self.motivo = ""
+
+    def _modello(self, nome):
+        url, sha = MODELLI_VOLTI[nome]
+        dest = self.cartella / nome
+        if dest.exists() and _sha256(dest) == sha:
+            return dest
+        self.cartella.mkdir(parents=True, exist_ok=True)
+        import urllib.request
+        tmp = dest.with_suffix(".tmp")
+        with urllib.request.urlopen(url, timeout=180) as r, open(tmp, "wb") as f:
+            while True:
+                b = r.read(1 << 20)
+                if not b:
+                    break
+                f.write(b)
+        if _sha256(tmp) != sha:
+            tmp.unlink()
+            raise ValueError("il modello scaricato non ha l'impronta attesa")
+        tmp.replace(dest)
+        return dest
+
+    def pronto(self) -> bool:
+        if self.ok is None:
+            try:
+                import cv2
+                self._cv2 = cv2
+                self._det = cv2.FaceDetectorYN.create(str(self._modello("yunet.onnx")), "", (320, 320), 0.85, 0.3, 5000)
+                self._rec = cv2.FaceRecognizerSF.create(str(self._modello("sface.onnx")), "")
+                self.ok = True
+            except Exception as e:  # noqa: BLE001
+                self.ok = False
+                self.motivo = f"{type(e).__name__}: {e}"[:160]
+                log.warning("Riconoscimento volti non disponibile (%s)", self.motivo)
+        return self.ok
+
+    def rileva(self, percorso):
+        cv2 = self._cv2
+        img = cv2.imdecode(np.fromfile(str(percorso), dtype=np.uint8), cv2.IMREAD_COLOR)   # legge anche percorsi con accenti e applica l'orientamento EXIF
+        if img is None:
+            return []
+        h, w = img.shape[:2]
+        if max(h, w) > 2400:
+            s = 2400 / max(h, w)
+            img = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+            h, w = img.shape[:2]
+        self._det.setInputSize((w, h))
+        _, f = self._det.detect(img)
+        out = []
+        for r in (f if f is not None else []):
+            x, y, fw, fh = (float(v) for v in r[:4])
+            if fw < 36 or fh < 36:
+                continue
+            e = self._rec.feature(self._rec.alignCrop(img, r)).flatten().astype("float32")
+            e /= (np.linalg.norm(e) or 1.0)
+            out.append({"x": max(0.0, x) / w, "y": max(0.0, y) / h, "w": fw / w, "h": fh / h, "punteggio": float(r[14]), "emb": e, "px": min(fw, fh)})
+        return out
+
+
+class Persone:
+    """Raggruppa i volti: ogni nuovo volto va alla persona piu' somigliante, oppure ne nasce una nuova. Il nome lo dai tu, una volta sola."""
+
+    def __init__(self, c):
+        self.c = c
+        self.carica()
+
+    def carica(self):
+        r = self.c.execute("SELECT id, centro, n FROM persone WHERE centro IS NOT NULL").fetchall()
+        self.ids = [x["id"] for x in r]
+        self.ns = [x["n"] for x in r]
+        self.M = np.stack([np.frombuffer(x["centro"], dtype="float32") for x in r]) if r else None
+
+    def assegna(self, emb, buono: bool):
+        if self.M is not None:
+            s = self.M @ emb
+            i = int(np.argmax(s))
+            if s[i] >= SOGLIA_VOLTO:
+                n = self.ns[i]
+                nuovo = (self.M[i] * n + emb) / (n + 1)
+                nuovo /= (np.linalg.norm(nuovo) or 1.0)
+                self.M[i], self.ns[i] = nuovo, n + 1
+                self.c.execute("UPDATE persone SET centro=?, n=? WHERE id=?", (nuovo.astype("float32").tobytes(), n + 1, self.ids[i]))
+                return self.ids[i]
+        if not buono:
+            return None
+        pid = self.c.execute("INSERT INTO persone (centro, n) VALUES (?,1)", (emb.astype("float32").tobytes(),)).lastrowid
+        self.ids.append(pid)
+        self.ns.append(1)
+        self.M = emb[None, :].copy() if self.M is None else np.vstack([self.M, emb[None, :]])
+        return pid
+
+
+def salva_volti(c, fid, immagini, volti: Volti, persone: Persone):
+    """Cerca i volti in foto o fotogrammi e li assegna alle persone. Ritorna quanti ne ha trovati."""
+    c.execute("DELETE FROM volti WHERE file_id=?", (fid,))
+    persone.carica()
+    tot = 0
+    for pos, f in immagini:
+        try:
+            trovati = volti.rileva(f)
+        except Exception as e:  # noqa: BLE001
+            log.debug("volti %s: %s", f, e)
+            continue
+        for v in trovati:
+            pid = persone.assegna(v["emb"], v["punteggio"] >= 0.9 and v["px"] >= 60)
+            c.execute("INSERT INTO volti (file_id, pos, x, y, w, h, punteggio, emb, persona_id) VALUES (?,?,?,?,?,?,?,?,?)",
+                      (fid, pos, v["x"], v["y"], v["w"], v["h"], v["punteggio"], v["emb"].astype("float32").tobytes(), pid))
+            tot += 1
+    c.execute("UPDATE file SET n_volti=? WHERE id=?", (tot, fid))
+    return tot
+
+
+def qualita_immagine(percorso) -> dict:
+    """Nitidezza, esposizione, colori dominanti e impronta visiva (per trovare le foto quasi uguali)."""
+    from PIL import Image, ImageOps
+    with Image.open(percorso) as im:
+        im.draft("RGB", (1024, 1024))
+        im = ImageOps.exif_transpose(im).convert("RGB")
+        im.thumbnail((512, 512))
+        g = np.asarray(im.convert("L"), dtype="float32")
+        lap = 4 * g[1:-1, 1:-1] - g[:-2, 1:-1] - g[2:, 1:-1] - g[1:-1, :-2] - g[1:-1, 2:]
+        media, scuri, chiari = float(g.mean()), float((g < 20).mean()), float((g > 240).mean())
+        esp = "sottoesposta" if media < 45 or scuri > 0.55 else "sovraesposta" if media > 215 or chiari > 0.30 else "ok"
+        q = im.resize((96, 96)).quantize(5)
+        pal = q.getpalette() or []
+        freq = sorted(q.getcolors() or [], reverse=True)
+        colori = ["#%02x%02x%02x" % tuple(pal[i * 3:i * 3 + 3]) for _, i in freq[:5]]
+        px = np.asarray(im.convert("L").resize((9, 8)), dtype="int16")
+        bit = (px[:, 1:] > px[:, :-1]).flatten()
+        dh = f"{int(''.join('1' if b else '0' for b in bit), 2):016x}"
+    return {"nitidezza": float(lap.var()), "esposizione": esp, "colori": colori, "dhash": dh, "luminosita": media}
+
+
+def vocabolario(mod):
+    """Le frasi del vocabolario, convertite una volta in vettori CLIP. None se CLIP non e' disponibile."""
+    if getattr(mod, "_voc", None) is not None:
+        return mod._voc or None
+    voc = {}
+    for g, voci in VOCABOLARIO.items():
+        vs = [mod.testo("a photo of " + en) for _, en in voci]
+        if any(v is None for v in vs):
+            mod._voc = False
+            return None
+        voc[g] = ([n for n, _ in voci], np.stack([np.asarray(v, dtype="float32") for v in vs]))
+    mod._voc = voc
+    return voc
+
+
+def calcola_etichette(c, mod, fid) -> bool:
+    """Etichette dedotte dai vettori gia' calcolati (nessuna rilettura del file): scena, inquadratura, luce, soggetti."""
+    voc = vocabolario(mod)
+    righe = c.execute("SELECT dim, v FROM vettore WHERE file_id=?", (fid,)).fetchall()
+    if not voc or not righe:
+        return False
+    d = next(iter(voc.values()))[1].shape[1]
+    V = [np.frombuffer(r["v"], dtype="float16").astype("float32") for r in righe if r["dim"] == d]
+    if not V:
+        return False
+    V = np.stack(V)
+    c.execute("DELETE FROM etichette WHERE file_id=?", (fid,))
+    tags = []
+    for g, (nomi, T) in voc.items():
+        z = 100.0 * (V @ T.T)
+        z -= z.max(axis=1, keepdims=True)
+        p = np.exp(z)
+        p /= p.sum(axis=1, keepdims=True)
+        p = p.mean(axis=0)
+        soglia, massimo = SOGLIE_ETICHETTE[g]
+        for i in np.argsort(-p)[:massimo]:
+            if p[i] >= soglia:
+                tags.append((g, nomi[int(i)], float(p[i])))
+    f = c.execute("SELECT max(w*h) a, count(*) n FROM volti WHERE file_id=?", (fid,)).fetchone()
+    if f and f["n"]:
+        tags.append(("soggetto", "persone", 1.0))
+        if f["n"] >= 4:
+            tags.append(("soggetto", "gruppo di persone", 1.0))
+        if (f["a"] or 0) >= 0.06 and not any(t[1] == "primo piano" for t in tags):
+            tags.append(("inquadratura", "primo piano", 0.9))
+    for g, t, p in tags:
+        c.execute("INSERT INTO etichette (file_id, gruppo, tag, p) VALUES (?,?,?,?)", (fid, g, t, p))
+    c.execute("DELETE FROM testi WHERE file_id=? AND tipo='etichette'", (fid,))
+    if tags:
+        c.execute("INSERT INTO testi (testo, file_id, tipo, pos) VALUES (?,?,?,?)", (" . ".join(sorted({t for _, t, _ in tags})), fid, "etichette", 0))
+    return True
+
+
+def scene_video(p: Path, durata: float):
+    """Tagli di montaggio del video (cambi di inquadratura) letti da ffmpeg. Ritorna [(inizio, fine)]."""
+    cmd = [ffmpeg(), "-hide_banner", "-nostats", "-i", str(p), "-vf", f"scale=320:-2,select='gt(scene,{SOGLIA_SCENA})',showinfo", "-an", "-f", "null", "-"]
+    r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=6 * 3600)
+    tagli = sorted({float(x) for x in re.findall(r"pts_time:([\d.]+)", r.stderr)})
+    punti = [0.0] + [t for t in tagli if t > 0.5] + ([durata] if durata else [])
+    out = []
+    for a, b in zip(punti, punti[1:]):
+        if b - a >= 0.5:
+            out.append((a, b))
+    return out or ([(0.0, durata)] if durata else [])
+
+
+def analisi_extra(c, mod, ctx, fid, p: Path, tipo, immagini, durata, bits):
+    """Le analisi oltre al testo e ai vettori. `immagini` = [(secondo, file)] di foto o fotogrammi gia' pronti. Segna come fatto cio' che e' riuscito."""
+    fatto = 0
+    if bits & B_QUALITA and immagini:
+        fase("Misuro nitidezza e colori", 90)
+        camp = [immagini[int(i * (len(immagini) - 1) / max(1, min(len(immagini), 12) - 1))] for i in range(min(len(immagini), 12))]
+        rs = []
+        for _, f in camp:
+            try:
+                rs.append(qualita_immagine(f))
+            except Exception:  # noqa: BLE001
+                pass
+        if rs:
+            r0 = rs[len(rs) // 2]
+            nit = float(np.median([r["nitidezza"] for r in rs]))
+            c.execute("UPDATE file SET nitidezza=?, esposizione=?, colori=?, dhash=? WHERE id=?",
+                      (nit, r0["esposizione"], json.dumps(r0["colori"]), r0["dhash"] if tipo == "immagine" else None, fid))
+            fatto |= B_QUALITA
+    if bits & B_VOLTI and immagini and ctx.get("volti") is not None:
+        fase("Cerco i volti", 92)
+        salva_volti(c, fid, immagini, ctx["volti"], ctx["persone"])
+        fatto |= B_VOLTI
+    if bits & B_ETICHETTE:
+        fase("Assegno le etichette", 95)
+        if calcola_etichette(c, mod, fid):
+            fatto |= B_ETICHETTE
+    if bits & B_SCENE and tipo == "video":
+        fase("Cerco i tagli di montaggio", 96)
+        try:
+            sc = scene_video(p, durata)
+            c.execute("DELETE FROM scene WHERE file_id=?", (fid,))
+            c.executemany("INSERT INTO scene (file_id, t0, t1) VALUES (?,?,?)", [(fid, a, b) for a, b in sc])
+            fatto |= B_SCENE
+        except Exception as e:  # noqa: BLE001
+            log.debug("scene %s: %s", p, e)
+    elif bits & B_SCENE:
+        fatto |= B_SCENE
+    c.execute("UPDATE file SET analisi = COALESCE(analisi, 0) | ? WHERE id=?", (fatto, fid))
+
+
+def bits_attesi(db, mod, ctx) -> int:
+    """Quali analisi aggiuntive sono attive e possibili su questo computer."""
+    b = B_QUALITA
+    if imp_leggi(db, "analisi_etichette", "1") == "1" and vocabolario(mod):
+        b |= B_ETICHETTE
+    if imp_leggi(db, "analisi_volti", "1") == "1":
+        v = ctx.get("volti")
+        if v is not None and v.pronto():
+            b |= B_VOLTI
+        elif v is not None:
+            PROG["avvisi"].append("Riconoscimento volti non disponibile su questo computer: " + (v.motivo or "?"))
+    if imp_leggi(db, "analisi_scene", "1") == "1":
+        b |= B_SCENE
+    return b
+
+
+def completa_analisi(c, mod, ctx, bits, passo):
+    """Applica le analisi aggiuntive ai file gia' indicizzati che non le hanno (archivi fatti prima, o funzioni accese dopo)."""
+    righe = c.execute("SELECT * FROM file WHERE stato='ok' AND tipo IN ('immagine','video') AND (COALESCE(analisi,0) & ?) != ? "
+                      "ORDER BY CASE tipo WHEN 'immagine' THEN 0 ELSE 1 END, id", (bits, bits)).fetchall()
+    if not righe:
+        return
+    PROG.update(stadio="Analisi aggiuntive (volti, etichette, qualità, scene)", da_fare=len(righe), fatti=0, prossimi=[], recenti=[])
+    tempi: dict = {}
+    for i, riga in enumerate(righe):
+        if PROG["ferma"]:
+            break
+        p = Path(riga["radice"]) / riga["rel"]
+        PROG["corrente"] = riga["rel"]
+        PROG["file"] = {"rel": riga["rel"], "tipo": riga["tipo"], "dimensione": riga["dimensione"], "fase": "Comincio", "pct": 1}
+        PROG["prossimi"] = [{"rel": r["rel"], "tipo": r["tipo"], "dimensione": r["dimensione"]} for r in righe[i + 1:i + 11]]
+        t0 = time.time()
+        esito = True
+        mancano = bits & ~(riga["analisi"] or 0)
+        try:
+            if not p.exists():
+                esito = False
+            else:
+                with tempfile.TemporaryDirectory() as tmp:
+                    imgs = []
+                    if mancano & (B_QUALITA | B_VOLTI):
+                        if riga["tipo"] == "immagine":
+                            imgs = [(0.0, str(p))]
+                        else:
+                            fase("Estraggo i fotogrammi", 20)
+                            imgs = fotogrammi(p, passo, Path(tmp), riga["durata"] or 0)
+                    analisi_extra(c, mod, ctx, riga["id"], p, riga["tipo"], imgs, riga["durata"] or 0, mancano)
+        except Exception as e:  # noqa: BLE001
+            esito = False
+            log.warning("analisi %s: %s", riga["rel"], e)
+        c.commit()
+        sec = time.time() - t0
+        PROG["fatti"] = i + 1
+        PROG["recenti"] = ([{"rel": riga["rel"], "tipo": riga["tipo"], "sec": round(sec, 1), "ok": esito}] + PROG["recenti"])[:8]
+        t = tempi.setdefault(riga["tipo"], [0, 0.0])
+        t[0] += 1
+        t[1] += sec
+        PROG["eta_s"] = int(sum(x[1] for x in tempi.values()) / max(1, sum(x[0] for x in tempi.values())) * (len(righe) - i - 1))
+    PROG["file"] = {}
+
+
+def raggruppa_duplicati(c):
+    """Foto quasi identiche (raffiche, copie): le mette in gruppo e segna la migliore. Non cancella e non sposta nulla."""
+    c.execute("UPDATE file SET gruppo_dup=NULL, migliore=1 WHERE tipo='immagine'")
+    r = c.execute("SELECT id, radice, rel, dhash, nitidezza, dimensione, larghezza, altezza FROM file WHERE tipo='immagine' AND dhash IS NOT NULL ORDER BY radice, rel").fetchall()
+    padre: dict = {}
+
+    def trova(x):
+        while padre.setdefault(x, x) != x:
+            padre[x] = padre[padre[x]]
+            x = padre[x]
+        return x
+
+    def unisci(a, b):
+        ra, rb = trova(a), trova(b)
+        if ra != rb:
+            padre[rb] = ra
+    ints = [int(x["dhash"], 16) for x in r]
+    uguali: dict = {}
+    for i, x in enumerate(r):
+        uguali.setdefault((ints[i], x["larghezza"], x["altezza"], x["dimensione"]), []).append(x["id"])
+    for ids in uguali.values():
+        for k in ids[1:]:
+            unisci(ids[0], k)
+    cartella = [x["radice"] + "|" + x["rel"].rsplit("/", 1)[0] if "/" in x["rel"] else x["radice"] + "|" for x in r]
+    for i in range(len(r)):
+        for j in range(i + 1, min(i + 31, len(r))):
+            if cartella[i] == cartella[j] and bin(ints[i] ^ ints[j]).count("1") <= SOGLIA_DUP:
+                unisci(r[i]["id"], r[j]["id"])
+    gruppi: dict = {}
+    for x in r:
+        gruppi.setdefault(trova(x["id"]), []).append(x)
+    for membri in gruppi.values():
+        if len(membri) < 2:
+            continue
+        migliore = max(membri, key=lambda m: ((m["nitidezza"] or 0), m["dimensione"] or 0))
+        gid = min(m["id"] for m in membri)
+        for m in membri:
+            c.execute("UPDATE file SET gruppo_dup=?, migliore=? WHERE id=?", (gid, 1 if m["id"] == migliore["id"] else 0, m["id"]))
+    c.commit()
+
+
+def pulisci_analisi(c, fid):
+    for t in ("volti", "etichette", "scene"):
+        c.execute(f"DELETE FROM {t} WHERE file_id = ?", (fid,))  # nosec B608 - nomi fissi
+    c.execute("UPDATE file SET analisi=0, n_volti=0 WHERE id = ?", (fid,))
+
+
+def indicizza_file(c, mod: Modelli, riga, radice: Path, passo: int, ctx=None):
     p = radice / riga["rel"]
     est = p.suffix.lower()
     fid = riga["id"]
     tipo = riga["tipo"]
+    bits = (ctx or {}).get("bits", 0)
     c.execute("DELETE FROM testi WHERE file_id = ?", (fid,))
     c.execute("DELETE FROM vettore WHERE file_id = ?", (fid,))
+    pulisci_analisi(c, fid)
     c.execute("INSERT INTO testi (testo, file_id, tipo, pos) VALUES (?,?,?,?)", (riga["rel"].replace("/", " ").replace("_", " ").replace("-", " "), fid, "nome", 0))
     fase("Leggo i metadati", 3)
     meta, info = leggi_metadati(p, tipo)
+    salva_meta(c, fid, meta, info, tipo)   # i metadati sono subito ricercabili, anche se il resto fallisce
     if est in EST_TESTO or est in (".docx", ".pdf"):
         fase("Leggo il testo", 20)
         for i, b in enumerate(blocchi(testo_di(p, est))):
@@ -492,13 +911,15 @@ def indicizza_file(c, mod: Modelli, riga, radice: Path, passo: int):
         if np is not None:
             fase("Analizzo l'immagine", 40)
             salva_vettori(c, fid, [(0.0, v) for v in mod.immagini([str(p)])])
+        if bits:
+            analisi_extra(c, mod, ctx, fid, p, tipo, [(0.0, str(p))], 0, bits)
     elif est in EST_VID or est in EST_AUD:
         durata = info.get("durata") or 0
         with tempfile.TemporaryDirectory() as tmp:
             fase("Estraggo l'audio", 8)
             wav = os.path.join(tmp, "a.wav")
             r = subprocess.run([ffmpeg(), "-v", "error", "-i", str(p), "-vn", "-ac", "1", "-ar", "16000", wav], capture_output=True, timeout=7200)
-            video = est in EST_VID and np is not None
+            video = est in EST_VID and (np is not None or bool(bits & (B_QUALITA | B_VOLTI)))
             if r.returncode == 0 and os.path.exists(wav):
                 fine_tr = 70 if video else 97
                 fase("Trascrivo il parlato", 10)
@@ -507,16 +928,17 @@ def indicizza_file(c, mod: Modelli, riga, radice: Path, passo: int):
             if video:
                 fase("Estraggo i fotogrammi", 72)
                 fr = fotogrammi(p, passo, Path(tmp), durata, lambda f: fase("Estraggo i fotogrammi", 72 + f * 13))
-                if fr:
+                if fr and np is not None:
                     fase("Analizzo le immagini", 86)
                     salva_vettori(c, fid, list(zip([t for t, _ in fr], mod.immagini([f for _, f in fr]))))
+                if bits:
+                    analisi_extra(c, mod, ctx, fid, p, tipo, fr, durata, bits)
     fase("Salvo", 99)
-    salva_meta(c, fid, meta, info, tipo)
     c.execute("UPDATE file SET stato='ok', errore=NULL, indicizzato=? WHERE id=?", (time.time(), fid))
 
 
 PROG = {"in_corso": False, "fatti": 0, "da_fare": 0, "corrente": "", "ferma": False, "esito": "", "fase_scan": "", "visti": 0,
-        "file": {}, "prossimi": [], "recenti": [], "eta_s": None, "inizio": None, "avvisi": []}
+        "file": {}, "prossimi": [], "recenti": [], "eta_s": None, "inizio": None, "avvisi": [], "stadio": ""}
 
 
 def fase(nome, pct):
@@ -525,7 +947,7 @@ def fase(nome, pct):
     f["fase"], f["pct"] = nome, int(max(0, min(99, pct)))
 
 
-def avvia_scansione(db, cartelle=None, passo=30, finto=False):
+def avvia_scansione(db, cartelle=None, passo=15, finto=False):
     """Fa partire l'indicizzazione di tutte le cartelle ricordate. Restituisce il testo dell'errore, oppure None se e' partita."""
     if PROG["in_corso"]:
         return "Sto gia' indicizzando"
@@ -539,11 +961,22 @@ def avvia_scansione(db, cartelle=None, passo=30, finto=False):
 
     def lavoro():
         try:
+            if sys.platform == "win32":
+                import ctypes
+                ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)   # il PC non va in sospensione finche' lavora
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             r = scansiona(db, cart, 0, passo, finto)
             PROG["esito"] = "Fermato." if PROG["ferma"] else f"Finito: {r['fatti']} file indicizzati."
         except Exception as e:  # noqa: BLE001
             PROG["esito"] = f"Errore: {type(e).__name__}: {e}"[:200]
-        PROG.update(in_corso=False, corrente="", file={}, prossimi=[], fase_scan="")
+        PROG.update(in_corso=False, corrente="", file={}, prossimi=[], fase_scan="", stadio="")
+        try:
+            if sys.platform == "win32":
+                ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+        except Exception:  # noqa: BLE001
+            pass
     threading.Thread(target=lavoro, daemon=True).start()
     return None
 
@@ -585,6 +1018,11 @@ def scansiona(db, cartelle, limite=0, passo=30, finto=False):
     if not PROG["ferma"]:
         riempi_metadati(c)
     PROG["fase_scan"] = ""
+    PROG.update(fase_scan="Preparo i modelli di analisi", stadio="Indicizzo i nuovi file")
+    usa_volti = imp_leggi(db, "analisi_volti", "1") == "1" and (not finto or bool(os.environ.get("INDICE_MODELLI")))
+    ctx = {"volti": Volti(cartella_modelli(db)) if usa_volti else None, "persone": Persone(c)}
+    ctx["bits"] = 0 if PROG["ferma"] else bits_attesi(db, mod, ctx)
+    PROG["fase_scan"] = ""
     coda = [] if PROG["ferma"] else c.execute("SELECT * FROM file WHERE stato IN ('nuovo') ORDER BY CASE tipo WHEN 'testo' THEN 0 WHEN 'immagine' THEN 1 WHEN 'audio' THEN 2 ELSE 3 END, id").fetchall()
     log.info("%d file da indicizzare", len(coda))
     fatti = 0
@@ -602,7 +1040,7 @@ def scansiona(db, cartelle, limite=0, passo=30, finto=False):
         t0 = time.time()
         esito = True
         try:
-            indicizza_file(c, mod, riga, Path(riga["radice"]), passo)
+            indicizza_file(c, mod, riga, Path(riga["radice"]), passo, ctx)
         except Exception as e:  # noqa: BLE001 - un file rotto non ferma l'archivio
             esito = False
             c.execute("UPDATE file SET stato='errore', errore=? WHERE id=?", (f"{type(e).__name__}: {e}"[:300], riga["id"]))
@@ -620,6 +1058,10 @@ def scansiona(db, cartelle, limite=0, passo=30, finto=False):
         PROG["eta_s"] = int(sum(n * ((tempi[k][1] / tempi[k][0]) if k in tempi else media) for k, n in restano.items()))
         log.info("[%d/%d] %s (%.1f s)", fatti, len(coda), riga["rel"], sec)
     PROG["file"] = {}
+    if not PROG["ferma"] and not limite:
+        completa_analisi(c, mod, ctx, ctx["bits"], passo)
+        if not PROG["ferma"]:
+            raggruppa_duplicati(c)
     return {"da_fare": len(coda), "fatti": fatti}
 
 
@@ -630,48 +1072,110 @@ def _fts_query(q: str) -> str:
 
 
 SOGLIA_SIM = float(os.environ.get("INDICE_SOGLIA", "0.20"))   # sotto questa somiglianza CLIP un fotogramma non e' una risposta
-COLONNE = "id, radice, rel, tipo, dimensione, mtime, durata, larghezza, altezza, data_ripresa, meta"
+COLONNE = ("id, radice, rel, tipo, dimensione, mtime, durata, larghezza, altezza, data_ripresa, meta, stelle, colore, parole, n_volti, colori, nitidezza, esposizione, "
+           "gruppo_dup, migliore, (SELECT group_concat(tag, '|') FROM etichette WHERE file_id = file.id) AS tags")
+COLORI_VALIDI = ("rosso", "arancio", "giallo", "verde", "blu", "viola")
 
 
 def _scheda(f, dove=None, pos=None, estratto=None, punteggio=None):
-    """Una riga del catalogo, con tutto quello che serve a mostrarla (percorso, misure, metadati)."""
+    """Una riga del catalogo, con tutto quello che serve a mostrarla (percorso, misure, metadati, etichette)."""
     try:
         meta = json.loads(f["meta"]) if f["meta"] else {}
     except ValueError:
         meta = {}
+    try:
+        colori = json.loads(f["colori"]) if f["colori"] else []
+    except ValueError:
+        colori = []
     rel = f["rel"]
     video_audio = f["tipo"] in ("video", "audio")
     return {"id": f["id"], "file": rel, "nome": rel.rsplit("/", 1)[-1], "cartella": str(Path(f["radice"]) / rel.rsplit("/", 1)[0]) if "/" in rel else f["radice"],
             "radice": f["radice"], "percorso": str(Path(f["radice"]) / rel), "tipo": f["tipo"], "dove": dove,
-            "secondo": round(pos, 1) if dove in ("parlato", "immagine") and video_audio and pos is not None else None,
+            "secondo": round(pos, 1) if dove in ("parlato", "immagine", "persona", "simili") and video_audio and pos is not None else None,
             "estratto": estratto, "data": f["data_ripresa"], "punteggio": punteggio, "dimensione": f["dimensione"], "mtime": f["mtime"],
             "durata": f["durata"], "larghezza": f["larghezza"], "altezza": f["altezza"], "meta": meta,
-            "risoluzione": etichetta_risoluzione(f["larghezza"], f["altezza"]) if f["tipo"] == "video" else ""}
+            "risoluzione": etichetta_risoluzione(f["larghezza"], f["altezza"]) if f["tipo"] == "video" else "",
+            "stelle": f["stelle"] or 0, "colore": f["colore"] or "", "parole": f["parole"] or "", "n_volti": f["n_volti"] or 0,
+            "tags": [t for t in (f["tags"] or "").split("|") if t], "colori": colori, "sfocata": f["tipo"] == "immagine" and f["nitidezza"] is not None and f["nitidezza"] < SOGLIA_SFOCATA,
+            "esposizione": f["esposizione"] or "", "doppioni": bool(f["gruppo_dup"]) and not f["migliore"], "in_gruppo": bool(f["gruppo_dup"])}
 
 
 ORDINI_SQL = {"recenti": "indicizzato DESC", "data": "COALESCE(data_ripresa, datetime(mtime, 'unixepoch')) DESC", "nome": "rel COLLATE NOCASE ASC",
-              "dimensione": "dimensione DESC"}
+              "dimensione": "dimensione DESC", "nitidezza": "nitidezza DESC"}
 
 
-def sfoglia(db, n=30, offset=0, tipo=None, ordine="recenti", min_larghezza=0):
-    """Il catalogo senza una frase di ricerca: i file piu' recenti (o ordinati come si preferisce) con i loro metadati."""
-    c = apri(db)
-    dove, par = ["stato='ok'"], []
+def _clausole(tipo=None, min_larghezza=0, filtri=None):
+    """Condizioni SQL comuni a ricerca e catalogo (tipo, risoluzione, stelle, colore, raccolta, persona, etichetta, solo migliori, sfocate)."""
+    f = filtri or {}
+    dove, par = [], []
     if tipo:
         dove.append("tipo=?"); par.append(tipo)
     if min_larghezza:
         dove.append("larghezza>=?"); par.append(int(min_larghezza))
+    if f.get("stelle"):
+        dove.append("stelle>=?"); par.append(int(f["stelle"]))
+    if f.get("colore") in COLORI_VALIDI:
+        dove.append("colore=?"); par.append(f["colore"])
+    if f.get("raccolta"):
+        dove.append("id IN (SELECT file_id FROM raccolta_file WHERE raccolta_id=?)"); par.append(int(f["raccolta"]))
+    if f.get("persona"):
+        dove.append("id IN (SELECT file_id FROM volti WHERE persona_id=?)"); par.append(int(f["persona"]))
+    if f.get("tag"):
+        dove.append("id IN (SELECT file_id FROM etichette WHERE tag=?)"); par.append(str(f["tag"]))
+    if f.get("migliori"):
+        dove.append("COALESCE(migliore, 1)=1")
+    if f.get("sfocate"):
+        dove.append("tipo='immagine' AND nitidezza IS NOT NULL AND nitidezza < ?"); par.append(SOGLIA_SFOCATA)
+    if f.get("con_volti"):
+        dove.append("n_volti > 0")
+    return dove, par
+
+
+def _dopo_persona(c, schede, filtri):
+    pid = (filtri or {}).get("persona")
+    if pid:
+        for s in schede:
+            r = c.execute("SELECT min(pos) p FROM volti WHERE file_id=? AND persona_id=?", (s["id"], int(pid))).fetchone()
+            if r and r["p"] is not None and s["tipo"] == "video":
+                s["dove"], s["secondo"] = "persona", round(r["p"], 1)
+    return schede
+
+
+def sfoglia(db, n=30, offset=0, tipo=None, ordine="recenti", min_larghezza=0, filtri=None):
+    """Il catalogo senza una frase di ricerca: i file piu' recenti (o ordinati come si preferisce) con i loro metadati."""
+    c = apri(db)
+    dove, par = _clausole(tipo, min_larghezza, filtri)
+    dove.insert(0, "stato='ok'")
     o = ORDINI_SQL.get(ordine, ORDINI_SQL["recenti"])
     righe = c.execute(f"SELECT {COLONNE} FROM file WHERE {' AND '.join(dove)} ORDER BY {o} LIMIT ? OFFSET ?", (*par, n, offset)).fetchall()  # nosec B608 - parti fisse
-    return [_scheda(f) for f in righe]
+    return _dopo_persona(c, [_scheda(f) for f in righe], filtri)
 
 
-def cerca(db, q, n=10, finto=False, tipo=None, ordine="rilevanza", offset=0, min_larghezza=0):
+_VETT = {"k": None, "ids": [], "pos": [], "M": None}
+
+
+def _matrice(c):
+    """Tutti i vettori in memoria, riletti solo quando l'indice cambia: rende rapide ricerca e «trova simili»."""
+    k = tuple(c.execute("SELECT count(*), COALESCE(max(id),0) FROM vettore").fetchone())
+    if _VETT["k"] == k and _VETT["M"] is not None:
+        return _VETT
+    righe = c.execute("SELECT file_id, pos, dim, v FROM vettore").fetchall()
+    if not righe:
+        _VETT.update(k=k, ids=[], pos=[], M=None)
+        return _VETT
+    dim = max({r["dim"] for r in righe}, key=lambda d: sum(1 for r in righe if r["dim"] == d))
+    ok = [r for r in righe if r["dim"] == dim]
+    _VETT.update(k=k, ids=[r["file_id"] for r in ok], pos=[r["pos"] for r in ok],
+                 M=np.stack([np.frombuffer(r["v"], dtype="float16").astype("float32") for r in ok]))
+    return _VETT
+
+
+def cerca(db, q, n=10, finto=False, tipo=None, ordine="rilevanza", offset=0, min_larghezza=0, filtri=None):
     if not (q or "").strip():
-        return sfoglia(db, n, offset, tipo, "recenti" if ordine == "rilevanza" else ordine, min_larghezza)
+        return sfoglia(db, n, offset, tipo, "recenti" if ordine == "rilevanza" else ordine, min_larghezza, filtri)
     c = apri(db)
     punti: dict = {}
-    pool = (n + offset) * (8 if (tipo or min_larghezza) else 4)
+    pool = (n + offset) * (8 if (tipo or min_larghezza or filtri) else 4)
 
     def aggiungi(fid, pos, tipo_, testo, rango, peso):
         k = (fid, tipo_)
@@ -681,43 +1185,243 @@ def cerca(db, q, n=10, finto=False, tipo=None, ordine="rilevanza", offset=0, min
     if fq:
         for i, r in enumerate(c.execute("SELECT file_id, tipo, pos, snippet(testi, 0, '[', ']', ' … ', 18) AS s FROM testi WHERE testi MATCH ? ORDER BY bm25(testi) LIMIT ?", (fq, pool))):
             aggiungi(r["file_id"], r["pos"], r["tipo"], r["s"], i, 1.0)
-    if np is not None and c.execute("SELECT 1 FROM vettore LIMIT 1").fetchone():
+    ql = q.strip().lower()   # il nome di una persona trova tutti i file in cui compare
+    for pr in c.execute("SELECT id, nome FROM persone WHERE nome IS NOT NULL AND lower(nome) LIKE ?", (f"%{ql}%",)).fetchall():
+        for i, r in enumerate(c.execute("SELECT file_id, min(pos) p FROM volti WHERE persona_id=? GROUP BY file_id LIMIT ?", (pr["id"], pool))):
+            aggiungi(r["file_id"], r["p"], "persona", pr["nome"], i, 1.5)
+    V = _matrice(c) if np is not None else {"M": None}
+    if V["M"] is not None:
         v = Modelli(finto).testo(q)
-        if v is not None:
-            righe = c.execute("SELECT file_id, pos, dim, v FROM vettore").fetchall()
-            ok = [r for r in righe if r["dim"] == len(v)]
-            if ok:
-                m = np.stack([np.frombuffer(r["v"], dtype="float16").astype("float32") for r in ok])
-                s = m @ (np.asarray(v, dtype="float32"))
-                soglia = 0.6 if finto else SOGLIA_SIM
-                for rango, i in enumerate([k for k in np.argsort(-s)[:pool] if s[k] >= soglia]):
-                    aggiungi(ok[i]["file_id"], ok[i]["pos"], "immagine", f"somiglianza visiva {float(s[i]):.2f}", rango, 0.8)
+        if v is not None and len(v) == V["M"].shape[1]:
+            s = V["M"] @ np.asarray(v, dtype="float32")
+            soglia = 0.6 if finto else SOGLIA_SIM
+            for rango, i in enumerate([k for k in np.argsort(-s)[:pool] if s[k] >= soglia]):
+                aggiungi(V["ids"][i], V["pos"][i], "immagine", f"somiglianza visiva {float(s[i]):.2f}", rango, 0.8)
     ris = sorted(punti.values(), key=lambda x: -x["score"])
+    dove, par = _clausole(tipo, min_larghezza, filtri)
+    extra = (" AND " + " AND ".join(dove)) if dove else ""
     visti, out = set(), []
     for r in ris:
         if r["file_id"] in visti:
             continue
-        f = c.execute(f"SELECT {COLONNE} FROM file WHERE id=?", (r["file_id"],)).fetchone()
-        if f is None or (tipo and f["tipo"] != tipo) or (min_larghezza and (f["larghezza"] or 0) < int(min_larghezza)):
+        f = c.execute(f"SELECT {COLONNE} FROM file WHERE id=?{extra}", (r["file_id"], *par)).fetchone()  # nosec B608 - parti fisse
+        if f is None:
             continue
         visti.add(r["file_id"])
         out.append(_scheda(f, r["tipo"], r["pos"], r["testo"], round(r["score"] * 100, 2)))
     if ordine in ("data", "nome", "dimensione"):
         out.sort(key=(lambda x: x["data"] or "") if ordine == "data" else (lambda x: x["nome"].lower()) if ordine == "nome" else (lambda x: -(x["dimensione"] or 0)),
                  reverse=(ordine == "data"))
-    return out[offset:offset + n]
+    return _dopo_persona(c, out[offset:offset + n], filtri)
+
+
+def simili(db, fid: int, n=24, offset=0):
+    """Le immagini piu' vicine a una data (anche in altre cartelle e nei fotogrammi dei video), per somiglianza visiva."""
+    c = apri(db)
+    V = _matrice(c)
+    if V["M"] is None:
+        return []
+    sel = [i for i, x in enumerate(V["ids"]) if x == fid]
+    if not sel:
+        return []
+    q = V["M"][sel].mean(axis=0)
+    q /= (np.linalg.norm(q) or 1.0)
+    s = V["M"] @ q
+    out, visti = [], {fid}
+    for i in np.argsort(-s):
+        f_id = V["ids"][int(i)]
+        if f_id in visti:
+            continue
+        visti.add(f_id)
+        f = c.execute(f"SELECT {COLONNE} FROM file WHERE id=?", (f_id,)).fetchone()
+        if f is not None:
+            out.append(_scheda(f, "simili", V["pos"][int(i)], f"somiglianza {float(s[i]):.2f}", round(float(s[i]) * 100, 1)))
+        if len(out) >= n + offset:
+            break
+    return out[offset:]
 
 
 def dettaglio(db, fid: int):
     c = apri(db)
-    f = c.execute(f"SELECT {COLONNE}, stato, errore, indicizzato FROM file WHERE id=?", (fid,)).fetchone()
+    f = c.execute(f"SELECT {COLONNE}, stato, errore, indicizzato, analisi FROM file WHERE id=?", (fid,)).fetchone()
     if f is None:
         raise ValueError("File non trovato nell'indice")
     d = _scheda(f)
     d.update(stato=f["stato"], errore=f["errore"], indicizzato=f["indicizzato"], raggiungibile=os.path.exists(d["percorso"]))
     d["testi"] = [{"pos": r["pos"], "tipo": r["tipo"], "testo": r["testo"]} for r in
                   c.execute("SELECT pos, tipo, testo FROM testi WHERE file_id=? AND tipo IN ('parlato','testo') ORDER BY CAST(pos AS REAL) LIMIT 400", (fid,))]
+    d["volti"] = [{"id": r["id"], "pos": r["pos"], "persona_id": r["persona_id"], "nome": r["nome"], "x": r["x"], "y": r["y"], "w": r["w"], "h": r["h"]} for r in
+                  c.execute("SELECT v.id, v.pos, v.persona_id, p.nome, v.x, v.y, v.w, v.h FROM volti v LEFT JOIN persone p ON p.id=v.persona_id WHERE v.file_id=? ORDER BY v.pos, v.x LIMIT 300", (fid,))]
+    d["scene"] = [{"t0": r["t0"], "t1": r["t1"]} for r in c.execute("SELECT t0, t1 FROM scene WHERE file_id=? ORDER BY t0 LIMIT 2000", (fid,))]
+    d["etichette"] = [{"gruppo": r["gruppo"], "tag": r["tag"]} for r in c.execute("SELECT gruppo, tag FROM etichette WHERE file_id=? ORDER BY gruppo", (fid,))]
+    d["raccolte"] = [r["nome"] for r in c.execute("SELECT r.nome FROM raccolte r JOIN raccolta_file x ON x.raccolta_id=r.id WHERE x.file_id=?", (fid,))]
+    d["gruppo"] = ([{"id": r["id"], "nome": r["rel"].rsplit("/", 1)[-1], "migliore": bool(r["migliore"])} for r in
+                    c.execute("SELECT id, rel, migliore FROM file WHERE gruppo_dup=(SELECT gruppo_dup FROM file WHERE id=?) AND id!=?", (fid, fid))]
+                   if f["gruppo_dup"] else [])
     return d
+
+
+# ---------- valutazioni, raccolte, etichette ----------
+def valuta(db, ids, stelle=None, colore=None, parole=None):
+    c = apri(db)
+    ids = [int(i) for i in ids][:5000]
+    for fid in ids:
+        if stelle is not None:
+            c.execute("UPDATE file SET stelle=? WHERE id=?", (max(0, min(5, int(stelle))), fid))
+        if colore is not None:
+            c.execute("UPDATE file SET colore=? WHERE id=?", (colore if colore in COLORI_VALIDI else None, fid))
+        if parole is not None:
+            testo = ", ".join(p.strip() for p in str(parole).split(",") if p.strip())[:500]
+            c.execute("UPDATE file SET parole=? WHERE id=?", (testo or None, fid))
+            c.execute("DELETE FROM testi WHERE file_id=? AND tipo='parole'", (fid,))
+            if testo:
+                c.execute("INSERT INTO testi (testo, file_id, tipo, pos) VALUES (?,?,?,?)", (testo, fid, "parole", 0))
+    c.commit()
+
+
+def raccolte_elenco(db):
+    return [dict(r) for r in apri(db).execute("SELECT r.id, r.nome, (SELECT count(*) FROM raccolta_file x WHERE x.raccolta_id=r.id) AS n FROM raccolte r ORDER BY r.nome COLLATE NOCASE")]
+
+
+def raccolta_azione(db, corpo: dict):
+    c = apri(db)
+    if corpo.get("crea"):
+        nome = str(corpo["crea"]).strip()[:80]
+        if not nome:
+            raise ValueError("Scrivi un nome per la raccolta")
+        c.execute("INSERT OR IGNORE INTO raccolte (nome, creata) VALUES (?,?)", (nome, time.time()))
+        rid = c.execute("SELECT id FROM raccolte WHERE nome=?", (nome,)).fetchone()["id"]
+    else:
+        rid = int(corpo.get("id") or 0)
+        if not c.execute("SELECT 1 FROM raccolte WHERE id=?", (rid,)).fetchone():
+            raise ValueError("Raccolta non trovata")
+    for fid in corpo.get("aggiungi") or []:
+        c.execute("INSERT OR IGNORE INTO raccolta_file (raccolta_id, file_id, aggiunto) VALUES (?,?,?)", (rid, int(fid), time.time()))
+    for fid in corpo.get("togli") or []:
+        c.execute("DELETE FROM raccolta_file WHERE raccolta_id=? AND file_id=?", (rid, int(fid)))
+    if corpo.get("elimina"):
+        c.execute("DELETE FROM raccolta_file WHERE raccolta_id=?", (rid,))
+        c.execute("DELETE FROM raccolte WHERE id=?", (rid,))
+    c.commit()
+    return rid
+
+
+def etichette_elenco(db, n=80):
+    return [dict(r) for r in apri(db).execute("SELECT tag, gruppo, count(DISTINCT file_id) AS n FROM etichette GROUP BY tag, gruppo ORDER BY n DESC LIMIT ?", (n,))]
+
+
+# ---------- persone ----------
+def persone_elenco(db, nascoste=False):
+    c = apri(db)
+    righe = c.execute("""SELECT p.id, p.nome, p.nascosta,
+        (SELECT count(*) FROM volti v WHERE v.persona_id=p.id) AS n_volti,
+        (SELECT count(DISTINCT file_id) FROM volti v WHERE v.persona_id=p.id) AS n_file,
+        (SELECT id FROM volti v WHERE v.persona_id=p.id ORDER BY v.punteggio * v.w * v.h DESC LIMIT 1) AS esempio
+        FROM persone p WHERE p.nascosta=? ORDER BY n_file DESC, p.id""", (1 if nascoste else 0,)).fetchall()
+    return [dict(r) for r in righe if r["n_volti"] > 0]
+
+
+def persona_rinomina(db, pid, nome):
+    c = apri(db)
+    c.execute("UPDATE persone SET nome=? WHERE id=?", ((nome or "").strip()[:80] or None, int(pid)))
+    c.commit()
+
+
+def persona_nascondi(db, pid, nascondi=True):
+    c = apri(db)
+    c.execute("UPDATE persone SET nascosta=? WHERE id=?", (1 if nascondi else 0, int(pid)))
+    c.commit()
+
+
+def persone_unisci(db, da, a):
+    """Due gruppi che erano la stessa persona: i volti di `da` passano ad `a` (il nome di `a` resta, altrimenti prende quello di `da`)."""
+    da, a = int(da), int(a)
+    if da == a:
+        raise ValueError("Scegli due persone diverse")
+    c = apri(db)
+    pa, pd = (c.execute("SELECT nome, centro, n FROM persone WHERE id=?", (x,)).fetchone() for x in (a, da))
+    if pa is None or pd is None:
+        raise ValueError("Persona non trovata")
+    c.execute("UPDATE volti SET persona_id=? WHERE persona_id=?", (a, da))
+    if pa["centro"] and pd["centro"]:
+        m = (np.frombuffer(pa["centro"], dtype="float32") * pa["n"] + np.frombuffer(pd["centro"], dtype="float32") * pd["n"])
+        m /= (np.linalg.norm(m) or 1.0)
+        c.execute("UPDATE persone SET centro=?, n=? WHERE id=?", (m.astype("float32").tobytes(), pa["n"] + pd["n"], a))
+    if not pa["nome"] and pd["nome"]:
+        c.execute("UPDATE persone SET nome=? WHERE id=?", (pd["nome"], a))
+    c.execute("DELETE FROM persone WHERE id=?", (da,))
+    c.commit()
+
+
+def volto_sposta(db, vid, persona_id=None):
+    """Corregge un errore: questo volto non e' di quella persona. Senza destinazione ne nasce una nuova."""
+    c = apri(db)
+    v = c.execute("SELECT emb FROM volti WHERE id=?", (int(vid),)).fetchone()
+    if v is None:
+        raise ValueError("Volto non trovato")
+    if not persona_id:
+        persona_id = c.execute("INSERT INTO persone (centro, n) VALUES (?,1)", (v["emb"],)).lastrowid
+    c.execute("UPDATE volti SET persona_id=? WHERE id=?", (int(persona_id), int(vid)))
+    c.commit()
+    return persona_id
+
+
+def volto_miniatura(db, vid: int, w=160):
+    """Il ritaglio del volto (con un po' di margine), preso dalla foto o dal fotogramma del video."""
+    c = apri(db)
+    v = c.execute("SELECT v.file_id, v.pos, v.x, v.y, v.w, v.h, f.radice, f.rel, f.tipo FROM volti v JOIN file f ON f.id=v.file_id WHERE v.id=?", (int(vid),)).fetchone()
+    if v is None:
+        return None
+    w = max(48, min(int(w), 600))
+    cache = Path(db).resolve().parent / "miniature"
+    cache.mkdir(exist_ok=True)
+    dest = cache / f"volto_{int(vid)}_{w}.jpg"
+    if dest.exists() and dest.stat().st_size > 0:
+        return dest.read_bytes()
+    p = Path(v["radice"]) / v["rel"]
+    if not p.exists():
+        return None
+    from PIL import Image, ImageOps
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = str(p)
+            if v["tipo"] == "video":
+                src = os.path.join(tmp, "f.jpg")
+                subprocess.run([ffmpeg(), "-v", "error", "-ss", str(v["pos"] or 0), "-i", str(p), "-frames:v", "1", "-vf", "scale=960:-2", "-q:v", "3", "-y", src], capture_output=True, timeout=120)
+            with Image.open(src) as im:
+                im = ImageOps.exif_transpose(im).convert("RGB")
+                W, H = im.size
+                mx, my = v["w"] * 0.35, v["h"] * 0.35
+                box = (max(0, int((v["x"] - mx) * W)), max(0, int((v["y"] - my) * H)), min(W, int((v["x"] + v["w"] + mx) * W)), min(H, int((v["y"] + v["h"] + my) * H)))
+                im = im.crop(box)
+                im.thumbnail((w, w))
+                im.save(dest, "JPEG", quality=85)
+    except Exception:  # noqa: BLE001
+        return None
+    return dest.read_bytes() if dest.exists() else None
+
+
+# ---------- avvio con Windows ----------
+def _collegamento_avvio() -> Path:
+    return Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "Opifex Archivio.lnk"
+
+
+def avvio_windows(attivo=None):
+    """Fa partire l'archivio da solo all'accensione del computer (senza aprire finestre): serve a un PC dedicato che lavora da solo."""
+    exe = os.environ.get("OPIFEX_EXE", "")
+    if sys.platform != "win32" or not exe:
+        return {"disponibile": False, "attivo": False}
+    lnk = _collegamento_avvio()
+    if attivo is None:
+        return {"disponibile": True, "attivo": lnk.exists()}
+    if attivo:
+        q = lambda t: str(t).replace("'", "''")  # noqa: E731
+        cmd = (f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{q(lnk)}');$s.TargetPath='{q(exe)}';$s.Arguments='--nascosto';"
+               f"$s.WorkingDirectory='{q(Path(exe).parent)}';$s.Description='Opifex - Archivio (avvio automatico)';$s.Save()")
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd], capture_output=True, timeout=60, creationflags=0x08000000)
+    elif lnk.exists():
+        lnk.unlink()
+    return {"disponibile": True, "attivo": lnk.exists()}
 
 
 def _percorso_di(db, fid: int) -> Path:
@@ -779,6 +1483,9 @@ def stato(db):
             "per_tipo": {r["tipo"]: r["n"] for r in c.execute("SELECT tipo, count(*) n FROM file GROUP BY tipo")},
             "dimensione": c.execute("SELECT COALESCE(sum(dimensione),0) n FROM file").fetchone()["n"],
             "vettori": c.execute("SELECT count(*) n FROM vettore").fetchone()["n"],
+            "volti": c.execute("SELECT count(*) n FROM volti").fetchone()["n"],
+            "persone": c.execute("SELECT count(*) n FROM persone WHERE nascosta=0 AND id IN (SELECT persona_id FROM volti)").fetchone()["n"],
+            "etichettati": c.execute("SELECT count(DISTINCT file_id) n FROM etichette").fetchone()["n"],
             "blocchi_di_testo": c.execute("SELECT count(*) n FROM testi").fetchone()["n"],
             "errori": [dict(r) for r in c.execute("SELECT rel, errore FROM file WHERE stato='errore' LIMIT 20")]}
 
@@ -859,6 +1566,8 @@ def radice_togli(db, p: str):
         q = ",".join("?" * len(blocco))
         c.execute(f"DELETE FROM testi WHERE file_id IN ({q})", blocco)
         c.execute(f"DELETE FROM vettore WHERE file_id IN ({q})", blocco)
+        for t in ("volti", "etichette", "scene", "raccolta_file"):
+            c.execute(f"DELETE FROM {t} WHERE file_id IN ({q})", blocco)  # nosec B608 - nomi fissi
     c.execute("DELETE FROM file WHERE radice=?", (p,))
     c.execute("DELETE FROM radici WHERE percorso=?", (p,))
     c.commit()
@@ -1018,11 +1727,33 @@ table.mt{width:100%;border-collapse:collapse;font-size:13.5px}table.mt td{paddin
 .cz{max-height:46vh;overflow:auto;margin:12px 0;display:flex;flex-direction:column;gap:8px}.mb{padding:9px 12px;border-radius:14px;max-width:88%;white-space:pre-wrap;word-break:break-word}.mb.u{align-self:flex-end;background:var(--pri);color:var(--pri-t)}.mb.a{align-self:flex-start;background:rgba(255,255,255,.08);border:1px solid var(--bordo)}
 .avviso{background:rgba(243,196,106,.14);color:var(--avv);border-radius:12px;padding:8px 12px;margin:8px 0;font-size:13px}
 .interr{display:flex;align-items:center;gap:8px;cursor:pointer}.interr input{width:auto;accent-color:var(--pri)}
+
+/* 2.26: valutazioni, persone, filtri, scene */
+.filtri2{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:-6px 0 16px}
+.filtri2 select{padding:5px 10px;border-radius:999px;font-size:13px;font-weight:600;background:rgba(255,255,255,.10);border:1px solid transparent;color:#D9CFC4}
+.filtri2 select.on{background:rgba(232,146,74,.22);border-color:var(--pri);color:#F7B97A}
+.pal{display:inline-flex;gap:5px;align-items:center}.pal button{width:20px;height:20px;border-radius:50%;border:2px solid transparent;padding:0}.pal button.on{border-color:#fff}
+.stelle{display:inline-flex;gap:2px}.stelle button{background:transparent;border:0;color:rgba(255,255,255,.28);font-size:22px;line-height:1;padding:0 2px}.stelle button.on{color:#F2A862}.stelle button:hover{color:#F7B97A}
+.badge.st{right:8px;top:8px;color:#F2A862;letter-spacing:1px}.badge.av{left:8px;top:32px;background:rgba(243,196,106,.9);color:#1A110A}
+.badge.pt{width:12px;height:12px;border-radius:50%;padding:0;right:8px;top:30px}
+.tagrow{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.tagrow .et{font-size:11px;padding:1px 8px}
+.mese{grid-column:1/-1;margin:14px 0 2px;font-family:var(--serif);font-size:19px;text-transform:capitalize;letter-spacing:0;color:var(--testo);font-weight:500}
+.avviso.az{display:flex;align-items:center;gap:10px;justify-content:space-between;background:rgba(232,146,74,.16);color:#F7B97A}
+.pers-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+.pers{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:22px;padding:14px;display:flex;flex-direction:column;gap:8px;align-items:center;text-align:center}
+.pers img,.vis-v img{width:112px;height:112px;border-radius:50%;object-fit:cover;background:rgba(0,0,0,.3);border:2px solid rgba(232,146,74,.5)}
+.pers input{text-align:center;font-family:var(--serif);font-size:17px}
+.pers select{width:100%;font-size:13px}
+.volti-r{display:flex;gap:12px;flex-wrap:wrap}.vis-v{width:104px;display:flex;flex-direction:column;gap:5px;align-items:center;text-align:center}.vis-v img{width:72px;height:72px;cursor:pointer}.vis-v input{padding:4px 6px;font-size:12px;text-align:center;border-radius:8px}
+.scene{display:grid;grid-template-columns:repeat(auto-fill,minmax(116px,1fr));gap:8px}
+.scene div{cursor:pointer;font-size:12px;color:var(--tenue)}.scene img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:10px;display:block;background:rgba(0,0,0,.3)}.scene div:hover img{outline:2px solid var(--pri)}
+.sw{display:inline-block;width:26px;height:26px;border-radius:8px;border:1px solid rgba(255,255,255,.25)}
+.sel-r{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sel-r select,.sel-r input{width:auto;flex:1;min-width:140px}
 </style>
 </head>
 <body>
 <header class="top"><div class="marchio"><i></i>Opifex · Archivio</div>
-<nav class="sc"><button id="t-esplora" class="on">Esplora</button><button id="t-indice">Indicizzazione</button><button id="t-dialogo">Dialogo con Opifex</button></nav>
+<nav class="sc"><button id="t-esplora" class="on">Esplora</button><button id="t-persone">Persone</button><button id="t-indice">Indicizzazione</button><button id="t-dialogo">Dialogo con Opifex</button></nav>
 <div id="stato-alto"></div></header>
 <main>
 <div id="v-esplora">
@@ -1033,13 +1764,31 @@ table.mt{width:100%;border-collapse:collapse;font-size:13.5px}table.mt td{paddin
   <button class="chip" id="f4k">Solo 4K o più</button><span class="sp"></span>
   <select id="ord"><option value="rilevanza">Più pertinenti</option><option value="data">Più recenti (data di ripresa)</option><option value="nome">Nome</option><option value="dimensione">Più grandi</option></select>
   <button class="chip on" id="vg" title="Griglia">Griglia</button><button class="chip" id="ve" title="Elenco">Elenco</button></div>
+ <div class="filtri2" id="filtri2">
+  <select id="ftag" title="Che cosa si vede"><option value="">Qualsiasi soggetto</option></select>
+  <select id="fst" title="Valutazione"><option value="0">Qualsiasi valutazione</option><option value="1">★ o più</option><option value="2">★★ o più</option><option value="3">★★★ o più</option><option value="4">★★★★ o più</option><option value="5">★★★★★</option></select>
+  <span class="pal" id="fcol" title="Etichetta colore"></span>
+  <select id="frac" title="Raccolta"><option value="0">Tutte le raccolte</option></select>
+  <button class="chip" id="fmig" title="Nasconde i doppioni e le foto quasi uguali, tenendo la migliore">Solo i migliori</button>
+  <button class="chip" id="fsf" title="Foto fuori fuoco o mosse">Sfocate</button>
+  <button class="chip" id="fvo">Con volti</button>
+  <button class="chip on" id="fpe" hidden></button></div>
+ <div class="avviso az" id="fsim" hidden><span id="fsim-t"></span><button class="s piccolo" id="fsim-x">Esci dai simili ✕</button></div>
  <div class="m" id="intest" style="margin-bottom:10px"></div>
  <div class="griglia" id="gr"></div><div style="text-align:center;margin-top:18px"><button class="s" id="altri" hidden>Mostra altri</button></div>
+</div>
+<div id="v-persone" hidden>
+ <div class="carta"><div class="riga" style="justify-content:space-between"><div><h2>Persone</h2><div class="m">I volti trovati nelle foto e nei video, raggruppati da soli. Dai un nome a una persona una volta sola: da quel momento la cerchi per nome e vedi in quali file e in quale minuto compare. Tutto avviene su questo computer: i volti non escono mai.</div></div>
+ <label class="interr m"><input type="checkbox" id="pnasc"> Mostra anche le nascoste</label></div></div>
+ <div class="pers-g" id="pg"></div><div class="vuoto" id="pvuoto" hidden>Ancora nessun volto: avvia l'indicizzazione, le analisi delle persone partono da sole.</div>
 </div>
 <div id="v-indice" hidden>
  <div class="carta"><h2>Cartelle</h2><div class="m">Sfoglia il computer: vedi cosa è già nell'indice, cosa è in coda e cosa è ancora fuori. Le cartelle che aggiungi restano ricordate anche dopo aver chiuso l'app.</div>
  <div id="cr" class="m" style="margin:12px 0 4px"></div><div id="cl"></div>
  <div class="riga" style="margin-top:12px"><input id="np" style="flex:1;min-width:220px" placeholder="Oppure scrivi un percorso, per esempio D:\Montarrenti o Z:\Archivio\Video"><button id="na" class="s">Aggiungi</button></div></div>
+ <div class="carta"><h2>Analisi automatiche</h2><div class="m">Dopo l'indicizzazione il programma guarda ogni foto e ogni video: che cosa si vede, quanto è nitida, quali volti ci sono, dove cambia l'inquadratura. Può lavorare da solo, di notte, su un PC dedicato.</div>
+ <div class="riga" style="margin-top:12px;gap:18px"><label class="interr"><input type="checkbox" id="an-v"> Riconosci i volti</label><label class="interr"><input type="checkbox" id="an-e"> Descrivi ciò che si vede</label><label class="interr"><input type="checkbox" id="an-s"> Trova i tagli di montaggio nei video</label></div>
+ <div class="riga" style="margin-top:10px"><label class="interr"><input type="checkbox" id="av-w"> Avvia da solo quando accendo il computer (senza aprire finestre)</label></div><div class="m" id="av-w-m" style="margin-top:4px"></div></div>
  <div class="carta"><div class="riga" style="justify-content:space-between"><h2 style="margin:0">Indicizzazione</h2>
  <div class="riga"><label class="interr m"><input type="checkbox" id="auto"> Riprendi da solo quando apro l'app</label><button id="av" class="p">Indicizza tutto</button><button id="fe" class="s">Ferma</button></div></div>
  <div id="avvisi"></div>
@@ -1075,9 +1824,9 @@ function tempo(s){if(s==null)return'';if(s<90)return s+' s';if(s<5400)return Mat
 function evid(t){return E(t).replace(/\[([^\]]+)\]/g,'<mark>$1</mark>')}
 let qui='';
 /* ---------- schede ---------- */
-function vai(n){for(const k of['esplora','indice','dialogo']){$('v-'+k).hidden=k!==n;$('t-'+k).className=k===n?'on':''}
- if(n==='indice'){carica(qui);agg()}if(n==='dialogo')opStato();if(n!=='esplora')chiudiDett()}
-['esplora','indice','dialogo'].forEach(k=>$('t-'+k).onclick=()=>vai(k));
+function vai(n){for(const k of['esplora','persone','indice','dialogo']){$('v-'+k).hidden=k!==n;$('t-'+k).className=k===n?'on':''}
+ if(n==='indice'){carica(qui);agg()}if(n==='persone')caricaPersone();if(n==='dialogo')opStato();if(n!=='esplora')chiudiDett()}
+['esplora','persone','indice','dialogo'].forEach(k=>$('t-'+k).onclick=()=>vai(k));
 $('sb').onclick=()=>vai('indice');
 /* ---------- cartelle ---------- */
 const ET={indicizzata:['ok','Indicizzata'],indicizzata_vuota:['ok','Nessun file supportato'],in_coda:['cd','In coda'],errori:['er','Con errori'],vuota:['','Vuota'],fuori:['','Non indicizzata'],contiene:['cd','Contiene cartelle indicizzate'],esclusa:['','Esclusa (di sistema)']};
@@ -1101,7 +1850,11 @@ setInterval(()=>{if(!qui&&!$('v-indice').hidden)carica('')},15000);
 $('av').onclick=async()=>{const r=await j('/api/avvia',{method:'POST',body:JSON.stringify({})});if(r.errore)alert(r.errore);else{carica(qui);agg()}};
 $('fe').onclick=()=>j('/api/ferma',{method:'POST'});
 $('auto').onchange=()=>j('/api/impostazioni',{method:'POST',body:JSON.stringify({riprendi_da_solo:$('auto').checked})});
-j('/api/impostazioni').then(r=>{$('auto').checked=!!r.riprendi_da_solo}).catch(()=>{});
+const imp=(k,v)=>j('/api/impostazioni',{method:'POST',body:JSON.stringify({[k]:v})});
+[['an-v','analisi_volti'],['an-e','analisi_etichette'],['an-s','analisi_scene']].forEach(([i,k])=>{$(i).onchange=()=>imp(k,$(i).checked)});
+j('/api/impostazioni').then(r=>{$('auto').checked=!!r.riprendi_da_solo;$('an-v').checked=!!r.analisi_volti;$('an-e').checked=!!r.analisi_etichette;$('an-s').checked=!!r.analisi_scene;
+ const a=r.avvio_windows||{};$('av-w').checked=!!a.attivo;$('av-w').disabled=!a.disponibile;$('av-w-m').textContent=a.disponibile?'':'Disponibile solo con il programma installato su Windows (IndiceArchivio.exe).'}).catch(()=>{});
+$('av-w').onchange=async()=>{const r=await j('/api/avvio_windows',{method:'POST',body:JSON.stringify({attivo:$('av-w').checked})});$('av-w').checked=!!r.attivo;$('av-w-m').textContent=r.attivo?'Fatto: all\'accesso a Windows l\'archivio parte nascosto e riprende il lavoro.':''};
 const nomeDi=r=>r.split('/').pop(),cartDi=r=>r.includes('/')?r.slice(0,r.lastIndexOf('/')):'';
 function voceCoda(x,stato){const pc=stato==='fatto'?100:0;
  return `<div class="coda"><div class="ic">${icona(x.tipo,18)}</div><div class="tx"><div class="nomefile" title="${E(x.rel)}">${E(nomeDi(x.rel))}</div><div class="m" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${E(cartDi(x.rel))}</div><div class="barra sottile"><i style="width:${pc}%;${x.ok===false?'background:var(--no)':''}"></i></div></div>`+
@@ -1115,11 +1868,12 @@ async function agg(){let r;try{r=await j('/api/progresso')}catch(e){return}PR=r;
   else if(r.da_fare){pc=100*((r.fatti||0)+(f.pct||0)/100)/r.da_fare;testo=`Indicizzo ${r.fatti} di ${r.da_fare} file (${Math.floor(pc)}%)`+(r.eta_s!=null?` · mancano circa ${tempo(r.eta_s)}`:'')}
   else testo='Preparo la coda…'}
  else testo=(r.esito||'Pronto.')+(r.totale?` Nell'indice: ${r.totale.toLocaleString('it-IT')} file.`:'');
+ if(r.in_corso&&r.stadio)testo=r.stadio+' · '+testo;
  $('b').style.width=Math.min(100,pc)+'%';$('bt').classList.toggle('indef',ind);$('p').textContent=testo;
  $('av').disabled=!!r.in_corso;$('fe').disabled=!r.in_corso;
  $('avvisi').innerHTML=(r.avvisi||[]).map(a=>`<div class="avviso">${E(a)}</div>`).join('');
  const pt=r.per_tipo||{};
- $('numeri').innerHTML=[['Nell\'indice',(r.totale||0).toLocaleString('it-IT')],['Foto',(pt.immagine||0).toLocaleString('it-IT')],['Video',(pt.video||0).toLocaleString('it-IT')],['Audio',(pt.audio||0).toLocaleString('it-IT')],['Documenti',(pt.testo||0).toLocaleString('it-IT')],['Dimensione',mb(r.dimensione)||'0 B']].map(a=>`<div class="num"><b>${a[1]}</b><span class="m">${a[0]}</span></div>`).join('');
+ $('numeri').innerHTML=[['Nell\'indice',(r.totale||0).toLocaleString('it-IT')],['Foto',(pt.immagine||0).toLocaleString('it-IT')],['Video',(pt.video||0).toLocaleString('it-IT')],['Audio',(pt.audio||0).toLocaleString('it-IT')],['Documenti',(pt.testo||0).toLocaleString('it-IT')],['Persone',(r.persone||0).toLocaleString('it-IT')],['Volti trovati',(r.volti||0).toLocaleString('it-IT')],['Descritti',(r.etichettati||0).toLocaleString('it-IT')],['Dimensione',mb(r.dimensione)||'0 B']].map(a=>`<div class="num"><b>${a[1]}</b><span class="m">${a[0]}</span></div>`).join('');
  $('lavoro').innerHTML=r.in_corso&&f.rel?`<h3 style="margin-top:6px">In lavorazione ora</h3><div class="lav"><div class="ic">${icona(f.tipo,22)}</div><div class="tx"><div class="nomefile" title="${E(f.rel)}">${E(nomeDi(f.rel))}</div><div class="m">${E(f.fase||'')} · ${f.pct||0}%${f.dimensione?' · '+mb(f.dimensione):''}</div><div class="barra sottile" style="margin-top:6px"><i style="width:${f.pct||0}%"></i></div></div></div>`:'';
  $('prossimi').innerHTML=(r.prossimi||[]).length?'<h3 style="margin-top:16px">Prossimi in coda</h3>'+r.prossimi.map(x=>voceCoda(x,'attesa')).join(''):'';
  $('recenti').innerHTML=(r.recenti||[]).length?'<h3 style="margin-top:16px">Completati di recente</h3>'+r.recenti.map(x=>voceCoda(x,'fatto')).join(''):'';
@@ -1128,13 +1882,32 @@ async function agg(){let r;try{r=await j('/api/progresso')}catch(e){return}PR=r;
  if(mostra){$('sb-t').textContent=f.rel?`${nomeDi(f.rel)} · ${f.fase||''}`:testo;$('sb-p').textContent=r.da_fare?`${r.fatti}/${r.da_fare}`:'';$('sb-b').style.width=Math.min(100,pc)+'%'}}
 setInterval(agg,1500);
 /* ---------- esplora ---------- */
-const S={tipo:'',k4:false,vista:'g',da:0,n:24,ris:[],q:'',corr:-1};
+const COL={rosso:'#E5604D',arancio:'#E8924A',giallo:'#E8CB4A',verde:'#5FBF7F',blu:'#5B9BE0',viola:'#A57BD6'};
+const S={tipo:'',k4:false,vista:'g',da:0,n:24,ris:[],q:'',corr:-1,stelle:0,colore:'',raccolta:0,persona:0,personaNome:'',tag:'',migliori:false,sfocate:false,volti:false,simili:0,similiNome:''};
+let RACC=[];
+const star=n=>'★'.repeat(n);
 document.querySelectorAll('#filtri [data-tipo]').forEach(b=>b.onclick=()=>{S.tipo=b.dataset.tipo;document.querySelectorAll('#filtri [data-tipo]').forEach(x=>x.classList.toggle('on',x===b));cercaOra()});
 $('f4k').onclick=()=>{S.k4=!S.k4;$('f4k').classList.toggle('on',S.k4);cercaOra()};
 $('ord').onchange=()=>cercaOra();
 $('vg').onclick=()=>{S.vista='g';$('vg').classList.add('on');$('ve').classList.remove('on');$('gr').classList.remove('elenco')};
 $('ve').onclick=()=>{S.vista='e';$('ve').classList.add('on');$('vg').classList.remove('on');$('gr').classList.add('elenco')};
-$('ce').onclick=()=>cercaOra();$('q').onkeydown=e=>{if(e.key==='Enter')cercaOra()};
+$('ce').onclick=()=>{S.simili=0;cercaOra()};$('q').onkeydown=e=>{if(e.key==='Enter'){S.simili=0;cercaOra()}};
+$('fcol').innerHTML=Object.keys(COL).map(k=>`<button data-c="${k}" title="${k}" style="background:${COL[k]}"></button>`).join('');
+$('fcol').querySelectorAll('button').forEach(b=>b.onclick=()=>{S.colore=S.colore===b.dataset.c?'':b.dataset.c;aggFiltri();cercaOra()});
+$('ftag').onchange=()=>{S.tag=$('ftag').value;aggFiltri();cercaOra()};
+$('fst').onchange=()=>{S.stelle=Number($('fst').value);aggFiltri();cercaOra()};
+$('frac').onchange=()=>{S.raccolta=Number($('frac').value);aggFiltri();cercaOra()};
+[['fmig','migliori'],['fsf','sfocate'],['fvo','volti']].forEach(([i,k])=>$(i).onclick=()=>{S[k]=!S[k];aggFiltri();cercaOra()});
+$('fpe').onclick=()=>{S.persona=0;aggFiltri();cercaOra()};
+$('fsim-x').onclick=()=>{S.simili=0;cercaOra()};
+function aggFiltri(){$('fcol').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.c===S.colore));
+ $('ftag').classList.toggle('on',!!S.tag);$('fst').classList.toggle('on',S.stelle>0);$('frac').classList.toggle('on',S.raccolta>0);
+ $('fmig').classList.toggle('on',S.migliori);$('fsf').classList.toggle('on',S.sfocate);$('fvo').classList.toggle('on',S.volti);
+ $('fpe').hidden=!S.persona||!!S.simili;$('fpe').textContent='Persona: '+(S.personaNome||'senza nome')+' ✕'}
+async function caricaFiltri(){
+ try{const t=(await j('/api/etichette')).etichette||[];const v=$('ftag').value;
+  $('ftag').innerHTML='<option value="">Qualsiasi soggetto</option>'+t.map(x=>`<option value="${E(x.tag)}">${E(x.tag)} (${x.n})</option>`).join('');$('ftag').value=v||S.tag||''}catch(e){}
+ try{RACC=(await j('/api/raccolte')).raccolte||[];$('frac').innerHTML='<option value="0">Tutte le raccolte</option>'+RACC.map(x=>`<option value="${x.id}">${E(x.nome)} (${x.n})</option>`).join('');$('frac').value=String(S.raccolta||0)}catch(e){}}
 function datiRiga(x){const m=x.meta||{},o=[];
  if(x.larghezza&&x.tipo!=='audio')o.push(x.larghezza+'×'+x.altezza+(m.Megapixel?' ('+m.Megapixel+' MP)':''));
  if(x.tipo==='video'&&m['Fotogrammi al secondo'])o.push(m['Fotogrammi al secondo']+' fps');
@@ -1144,6 +1917,8 @@ function datiRiga(x){const m=x.meta||{},o=[];
  const d=dataIt(x.data||x.mtime);if(d)o.push(d);return o.join(' · ')}
 function etichettaTrovato(x){
  if(x.dove==='parlato')return`<b style="color:var(--pri)">${dur(x.secondo)}</b> ${evid(x.estratto||'')}`;
+ if(x.dove==='persona')return x.secondo!=null?`La persona compare dal minuto <b style="color:var(--pri)">${dur(x.secondo)}</b>`:'Compare in questo file';
+ if(x.dove==='simili')return x.secondo!=null?`Simile, al minuto <b style="color:var(--pri)">${dur(x.secondo)}</b>`:'';
  if(x.dove==='immagine')return x.secondo!=null?`Immagine simile al minuto <b style="color:var(--pri)">${dur(x.secondo)}</b>`:'Immagine simile alla tua descrizione';
  if(x.dove==='meta')return'Trovato nei metadati: '+evid(x.estratto||'');
  if(x.dove==='nome')return'';
@@ -1151,28 +1926,40 @@ function etichettaTrovato(x){
 function scheda(x,i){
  const t=x.secondo!=null?x.secondo:'';const vis=x.tipo==='immagine'||x.tipo==='video';
  const th=vis?`<img loading="lazy" alt="" src="/api/miniatura?id=${x.id}${t!==''?'&t='+t:''}&w=420" onerror="this.remove()">`:'';
- const tr=etichettaTrovato(x);
+ const tr=etichettaTrovato(x);const tg=(x.tags||[]).slice(0,4);
  return`<div class="sch" data-i="${i}"><div class="anteprima"><span class="grande">${icona(x.tipo,46)}</span>${th}<span class="badge sx">${NT[x.tipo]||x.tipo}</span>`+
+ (x.stelle?`<span class="badge st">${star(x.stelle)}</span>`:'')+(x.colore&&COL[x.colore]?`<span class="badge pt" style="background:${COL[x.colore]}" title="${x.colore}"></span>`:'')+
+ (x.sfocata?'<span class="badge av">Sfocata</span>':x.doppioni?'<span class="badge av">Doppione</span>':'')+
  (x.risoluzione?`<span class="badge ris">${x.risoluzione}</span>`:'')+((x.tipo==='video'||x.tipo==='audio')&&x.durata?`<span class="badge dx">${dur(x.durata)}</span>`:'')+
- `</div><div class="corpo"><div class="nomefile" title="${E(x.percorso)}">${E(x.nome)}</div><div class="dove" title="${E(x.cartella)}"><bdi>${E(x.cartella)}</bdi></div><div class="dati">${E(datiRiga(x))}</div>${tr?`<div class="estratto">${tr}</div>`:''}</div></div>`}
+ `</div><div class="corpo"><div class="nomefile" title="${E(x.percorso)}">${E(x.nome)}</div><div class="dove" title="${E(x.cartella)}"><bdi>${E(x.cartella)}</bdi></div><div class="dati">${E(datiRiga(x))}${x.n_volti?' · '+x.n_volti+(x.n_volti===1?' volto':' volti'):''}</div>${tr?`<div class="estratto">${tr}</div>`:''}`+
+ (tg.length?`<div class="tagrow">${tg.map(g=>`<span class="et">${E(g)}</span>`).join('')}</div>`:'')+`</div></div>`}
+const meseDi=x=>{const d=x.data?new Date(String(x.data).replace(' ','T')):new Date((x.mtime||0)*1000);return isNaN(d)?'Senza data':d.toLocaleDateString('it-IT',{month:'long',year:'numeric'})};
+function disegna(){let h='',ult='';const per=$('ord').value==='data'&&!S.simili;
+ S.ris.forEach((x,i)=>{if(per){const m=meseDi(x);if(m!==ult){h+=`<h3 class="mese">${E(m)}</h3>`;ult=m}}h+=scheda(x,i)});
+ $('gr').innerHTML=h||`<div class="vuoto" style="grid-column:1/-1">${S.q||S.persona||S.tag||S.stelle||S.colore||S.raccolta||S.sfocate||S.volti?'Nessun risultato. Prova con altre parole, o togli qualche filtro.':'L\'indice è vuoto: vai su «Indicizzazione», aggiungi una cartella e avvia.'}</div>`;
+ $('gr').querySelectorAll('.sch').forEach(el=>el.onclick=()=>apriDett(Number(el.dataset.i)))}
 async function cercaOra(altri){
  if(!altri){S.da=0;S.ris=[]}
- const q=$('q').value.trim();S.q=q;$('intest').textContent='Cerco…';
- let r;try{r=await j('/api/cerca?q='+encodeURIComponent(q)+'&tipo='+S.tipo+'&ordine='+$('ord').value+'&da='+S.da+'&n='+S.n+'&larghezza_min='+(S.k4?3800:0))}catch(e){$('intest').textContent='Non riesco a leggere l\'indice.';return}
- const nuovi=r.risultati||[];S.ris=S.ris.concat(nuovi);
- $('gr').innerHTML=S.ris.map(scheda).join('')||`<div class="vuoto" style="grid-column:1/-1">${q?'Nessun risultato. Prova con altre parole, o con una descrizione di ciò che si vede.':'L\'indice è vuoto: vai su «Indicizzazione», aggiungi una cartella e avvia.'}</div>`;
- $('gr').querySelectorAll('.sch').forEach(el=>el.onclick=()=>apriDett(Number(el.dataset.i)));
+ const q=$('q').value.trim();S.q=q;$('intest').textContent='Cerco…';aggFiltri();$('fsim').hidden=!S.simili;
+ let r,u;
+ if(S.simili){u='/api/simili?id='+S.simili+'&da='+S.da+'&n='+S.n;$('fsim-t').textContent='Foto e video che somigliano a «'+S.similiNome+'»'}
+ else u='/api/cerca?q='+encodeURIComponent(q)+'&tipo='+S.tipo+'&ordine='+$('ord').value+'&da='+S.da+'&n='+S.n+'&larghezza_min='+(S.k4?3800:0)+'&stelle='+S.stelle+'&colore='+S.colore+'&raccolta='+S.raccolta+'&persona='+S.persona+'&tag='+encodeURIComponent(S.tag)+'&migliori='+(S.migliori?1:0)+'&sfocate='+(S.sfocate?1:0)+'&con_volti='+(S.volti?1:0);
+ try{r=await j(u)}catch(e){$('intest').textContent='Non riesco a leggere l\'indice.';return}
+ const nuovi=r.risultati||[];S.ris=S.ris.concat(nuovi);disegna();
  $('altri').hidden=nuovi.length<S.n;
- $('intest').textContent=S.ris.length?(q?`${S.ris.length}${nuovi.length===S.n?'+':''} risultati per «${q}»`:'File indicizzati di recente (cerca per vedere i risultati più pertinenti)'):''}
+ const filt=S.persona||S.tag||S.stelle||S.colore||S.raccolta||S.sfocate||S.volti||S.migliori;
+ $('intest').textContent=S.ris.length?(S.simili?`${S.ris.length}${nuovi.length===S.n?'+':''} file simili`:q||filt?`${S.ris.length}${nuovi.length===S.n?'+':''} risultati${q?` per «${q}»`:''}`:'File indicizzati di recente (cerca per vedere i risultati più pertinenti)'):''}
 $('altri').onclick=()=>{S.da+=S.n;cercaOra(true)};
 /* ---------- dettaglio ---------- */
 function chiudiDett(){$('dr').classList.remove('on');$('vela').classList.remove('on');$('dr').innerHTML=''}
 $('vela').onclick=chiudiDett;
 document.addEventListener('keydown',e=>{if(!$('dr').classList.contains('on')||/INPUT|TEXTAREA|SELECT/.test((e.target||{}).tagName))return;
- if(e.key==='Escape')chiudiDett();else if(e.key==='ArrowRight'&&S.corr<S.ris.length-1)apriDett(S.corr+1);else if(e.key==='ArrowLeft'&&S.corr>0)apriDett(S.corr-1)});
-async function apriDett(i){S.corr=i;const x=S.ris[i];if(!x)return;$('vela').classList.add('on');$('dr').classList.add('on');$('dr').innerHTML='<div class="m">Carico…</div>';
+ if(e.key==='Escape')chiudiDett();else if(e.key==='ArrowRight'&&S.corr<S.ris.length-1)apriDett(S.corr+1);else if(e.key==='ArrowLeft'&&S.corr>0)apriDett(S.corr-1);
+ else if(/^[0-5]$/.test(e.key)&&S.ris[S.corr]){valutaRapida(S.ris[S.corr].id,Number(e.key))}});
+async function valutaRapida(id,n){await j('/api/valuta',{method:'POST',body:JSON.stringify({ids:[id],stelle:n})});const x=S.ris.find(y=>y.id===id);if(x)x.stelle=n;disegna();if($('dr').classList.contains('on'))apriDett(S.corr,true)}
+async function apriDett(i,noscroll){S.corr=i;const x=S.ris[i];if(!x)return;$('vela').classList.add('on');$('dr').classList.add('on');if(!noscroll)$('dr').innerHTML='<div class="m">Carico…</div>';
  const d=await j('/api/dettaglio?id='+x.id);if(d.errore){$('dr').innerHTML='<div class="avviso">'+E(d.errore)+'</div>';return}
- const sec=x.secondo!=null?x.secondo:0,id=d.id;let pv='';
+ const sec=x.secondo!=null?x.secondo:0,id=d.id;let pv='';const keep=noscroll?$('dr').scrollTop:0;
  if(d.tipo==='immagine')pv=`<img src="/api/media?id=${id}" alt="" onerror="this.onerror=function(){this.replaceWith(document.createTextNode('Anteprima non disponibile per questo formato: usa Apri.'))};this.src='/api/miniatura?id=${id}&w=1200'">`;
  else if(d.tipo==='video')pv=`<video id="pv" controls preload="metadata" poster="/api/miniatura?id=${id}&w=900${sec?'&t='+sec:''}" src="/api/media?id=${id}"></video>`;
  else if(d.tipo==='audio')pv=`<audio id="pv" controls preload="metadata" src="/api/media?id=${id}"></audio>`;
@@ -1181,23 +1968,66 @@ async function apriDett(i){S.corr=i;const x=S.ris[i];if(!x)return;$('vela').clas
  if(d.durata)righe.push(['Durata',dur(d.durata)]);
  if(d.larghezza&&d.tipo!=='audio'&&!(d.meta||{}).Risoluzione)righe.push(['Dimensioni',d.larghezza+'×'+d.altezza+(d.risoluzione?' ('+d.risoluzione+')':'')]);
  if(d.data)righe.push(['Data di ripresa',dataIt(d.data)+' '+String(d.data).slice(11,16)]);
+ if(d.tipo==='immagine'){righe.push(['Nitidezza',d.sfocata?'Sfocata o mossa':'Buona']);if(d.esposizione)righe.push(['Esposizione',d.esposizione==='ok'?'Corretta':d.esposizione]);}
  for(const[k,v]of Object.entries(d.meta||{}))righe.push([k,v]);
  const av=d.tipo==='video'||d.tipo==='audio';
  const testi=(d.testi||[]).map(t=>av&&t.tipo==='parlato'?`<div class="tr clic" data-s="${t.pos}"><b>${dur(t.pos)}</b><span>${E(t.testo)}</span></div>`:`<div class="tr"><span>${E(t.testo)}</span></div>`).join('');
+ const stl=[1,2,3,4,5].map(n=>`<button data-st="${n}" class="${d.stelle>=n?'on':''}" title="${n} stelle (tasto ${n})">★</button>`).join('');
+ const col=Object.keys(COL).map(k=>`<button data-c="${k}" title="${k}" class="${d.colore===k?'on':''}" style="background:${COL[k]}"></button>`).join('');
+ const vol=(d.volti||[]).slice(0,24).map(v=>`<div class="vis-v"><img src="/api/volto?id=${v.id}&w=120" alt="" data-p="${v.persona_id||''}" data-n="${E(v.nome||'')}" title="${v.persona_id?'Mostra tutti i file con questa persona':'Volto troppo piccolo per essere raggruppato'}">`+
+   (d.tipo==='video'&&v.pos!=null?`<span class="m">${dur(Number(v.pos))}</span>`:'')+(v.persona_id?`<input data-vp="${v.persona_id}" value="${E(v.nome||'')}" placeholder="Chi è?"><button class="s piccolo" data-sp="${v.id}" title="Il programma ha sbagliato: questa non è la stessa persona">Non è lei/lui</button>`:'')+`</div>`).join('');
+ const sc=(d.scene||[]).length>1?(d.scene||[]).slice(0,80).map((s,k)=>`<div data-s="${s.t0}"><img loading="lazy" src="/api/miniatura?id=${id}&t=${s.t0}&w=240" alt="">${k+1} · ${dur(s.t0)}</div>`).join(''):'';
+ const gr=(d.gruppo||[]).length?`<div class="m" style="margin-top:8px">${d.doppioni?'Questo è un doppione: ':'Ha dei doppioni o foto quasi uguali: '}${(d.gruppo||[]).map(g=>E(g.nome)+(g.migliore?' (la migliore)':'')).join(', ')}.</div>`:'';
  $('dr').innerHTML=`<div class="riga" style="justify-content:space-between"><div class="riga"><button class="s piccolo" id="dp" ${i<1?'disabled':''}>&larr;</button><button class="s piccolo" id="ds" ${i>=S.ris.length-1?'disabled':''}>&rarr;</button></div><button class="s piccolo" id="dx">Chiudi ✕</button></div>`+
  `<h2 style="margin-top:14px;word-break:break-word">${E(d.nome)}</h2><div class="m" style="word-break:break-all">${E(d.cartella)}</div><div class="prev">${pv}</div>`+
  (d.raggiungibile?'':'<div class="avviso">Il file non è raggiungibile ora: disco o NAS scollegato. Restano i dati dell\'indice.</div>')+(d.errore?`<div class="avviso">Errore in indicizzazione: ${E(d.errore)}</div>`:'')+
- `<div class="riga" style="margin:6px 0 14px"><button class="p piccolo" id="da">Apri col programma predefinito</button><button class="s piccolo" id="dm">Mostra nella cartella</button><button class="s piccolo" id="dc">Copia percorso</button></div><div class="m" id="dmsg"></div>`+
- `<h3>Informazioni</h3><table class="mt">${righe.map(r=>`<tr><td>${E(r[0])}</td><td>${E(r[1])}</td></tr>`).join('')}</table>`+
+ `<div class="riga" style="margin:6px 0 10px"><button class="p piccolo" id="da">Apri col programma predefinito</button><button class="s piccolo" id="dm">Mostra nella cartella</button><button class="s piccolo" id="dc">Copia percorso</button>${d.tipo==='immagine'||d.tipo==='video'?'<button class="s piccolo" id="dsim">Trova simili</button>':''}</div><div class="m" id="dmsg"></div>`+
+ `<div class="riga" style="margin:10px 0"><span class="stelle" id="dst">${stl}</span><span class="pal" id="dcol">${col}</span></div>`+
+ `<div class="sel-r"><input id="dpar" value="${E(d.parole||'')}" placeholder="Parole chiave, separate da virgola"><button class="s piccolo" id="dpars">Salva</button></div>`+
+ `<div class="sel-r" style="margin-top:8px"><select id="drac"><option value="">Aggiungi a una raccolta…</option>${RACC.map(r=>`<option value="${r.id}">${E(r.nome)}</option>`).join('')}<option value="nuova">+ Nuova raccolta…</option></select></div>`+
+ ((d.raccolte||[]).length?`<div class="tagrow" style="margin-top:6px">${d.raccolte.map(r=>`<span class="et ok">${E(r)}</span>`).join('')}</div>`:'')+gr+
+ ((d.etichette||[]).length?`<h3 style="margin-top:18px">Che cosa si vede</h3><div class="tagrow">${d.etichette.map(g=>`<button class="chip" data-tag="${E(g.tag)}">${E(g.tag)}</button>`).join('')}</div>`:'')+
+ ((d.colori||[]).length?`<h3 style="margin-top:18px">Colori dominanti</h3><div class="riga" style="gap:6px">${d.colori.map(c=>`<span class="sw" style="background:${E(c)}" title="${E(c)}"></span>`).join('')}</div>`:'')+
+ (vol?`<h3 style="margin-top:18px">Persone ${d.tipo==='video'?'(e dove compaiono)':''}</h3><div class="volti-r">${vol}</div>`:'')+
+ (sc?`<h3 style="margin-top:18px">Inquadrature (${d.scene.length}) · tocca per andarci</h3><div class="scene">${sc}</div>`:'')+
+ `<h3 style="margin-top:18px">Informazioni</h3><table class="mt">${righe.map(r=>`<tr><td>${E(r[0])}</td><td>${E(r[1])}</td></tr>`).join('')}</table>`+
  (testi?`<h3 style="margin-top:18px">${av?'Trascrizione (tocca un passaggio per andarci)':'Testo'}</h3>${testi}`:'');
+ $('dr').scrollTop=keep;
  $('dx').onclick=chiudiDett;$('dp').onclick=()=>apriDett(i-1);$('ds').onclick=()=>apriDett(i+1);
  const msg=t=>{$('dmsg').textContent=t};
  $('da').onclick=async()=>{const r=await j('/api/apri',{method:'POST',body:JSON.stringify({id})});msg(r.errore||'Aperto.')};
  $('dm').onclick=async()=>{const r=await j('/api/apri',{method:'POST',body:JSON.stringify({id,mostra:true})});msg(r.errore||'Cartella aperta.')};
  $('dc').onclick=()=>{const t=d.percorso;const fb=()=>{const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{document.execCommand('copy')}catch(e){}a.remove();msg('Percorso copiato.')};
   (navigator.clipboard?navigator.clipboard.writeText(t).then(()=>msg('Percorso copiato.')).catch(fb):Promise.resolve(fb()))};
+ if($('dsim'))$('dsim').onclick=()=>{S.simili=id;S.similiNome=d.nome;chiudiDett();cercaOra()};
+ $('dst').querySelectorAll('button').forEach(b=>b.onclick=()=>valutaRapida(id,d.stelle===Number(b.dataset.st)?0:Number(b.dataset.st)));
+ $('dcol').querySelectorAll('button').forEach(b=>b.onclick=async()=>{const nuovo=d.colore===b.dataset.c?'':b.dataset.c;await j('/api/valuta',{method:'POST',body:JSON.stringify({ids:[id],colore:nuovo})});const y=S.ris.find(z=>z.id===id);if(y)y.colore=nuovo;disegna();apriDett(S.corr,true)});
+ $('dpars').onclick=async()=>{await j('/api/valuta',{method:'POST',body:JSON.stringify({ids:[id],parole:$('dpar').value})});const y=S.ris.find(z=>z.id===id);if(y)y.parole=$('dpar').value;msg('Parole chiave salvate.')};
+ $('dpar').onkeydown=e=>{if(e.key==='Enter')$('dpars').click()};
+ $('drac').onchange=async()=>{let rid=$('drac').value;if(!rid)return;
+  if(rid==='nuova'){const nome=prompt('Nome della nuova raccolta (per esempio «Selezione podcast»)');if(!nome){$('drac').value='';return}const r=await j('/api/raccolta',{method:'POST',body:JSON.stringify({crea:nome,aggiungi:[id]})});if(r.errore)return msg(r.errore)}
+  else{const r=await j('/api/raccolta',{method:'POST',body:JSON.stringify({id:Number(rid),aggiungi:[id]})});if(r.errore)return msg(r.errore)}
+  await caricaFiltri();apriDett(S.corr,true)};
+ $('dr').querySelectorAll('[data-tag]').forEach(b=>b.onclick=()=>{S.tag=b.dataset.tag;S.simili=0;$('ftag').value=S.tag;chiudiDett();cercaOra()});
+ $('dr').querySelectorAll('.vis-v img').forEach(im=>im.onclick=()=>{if(!im.dataset.p)return;S.persona=Number(im.dataset.p);S.personaNome=im.dataset.n;S.simili=0;chiudiDett();cercaOra()});
+ $('dr').querySelectorAll('[data-vp]').forEach(inp=>inp.onchange=async()=>{await j('/api/persona',{method:'POST',body:JSON.stringify({id:Number(inp.dataset.vp),nome:inp.value})});msg('Nome salvato: da ora la persona si cerca per nome.');if(S.persona===Number(inp.dataset.vp))S.personaNome=inp.value});
+ $('dr').querySelectorAll('[data-sp]').forEach(b=>b.onclick=async()=>{await j('/api/volto_sposta',{method:'POST',body:JSON.stringify({id:Number(b.dataset.sp)})});apriDett(S.corr,true)});
  const el=$('pv');if(el){el.onerror=()=>{msg('Il lettore non riesce a riprodurre questo formato: usa «Apri col programma predefinito».')};if(sec)el.addEventListener('loadedmetadata',()=>{el.currentTime=sec},{once:true})}
  $('dr').querySelectorAll('[data-s]').forEach(t=>t.onclick=()=>{if(el){el.currentTime=Number(t.dataset.s);el.play().catch(()=>{})}})}
+/* ---------- persone ---------- */
+async function caricaPersone(){const r=await j('/api/persone?nascoste='+($('pnasc').checked?1:0));const ps=r.persone||[];
+ $('pvuoto').hidden=ps.length>0;
+ $('pg').innerHTML=ps.map(p=>`<div class="pers" data-id="${p.id}"><img src="/api/volto?id=${p.esempio}&w=240" alt="" data-m="${p.id}" style="cursor:pointer" title="Mostra i file con questa persona"><input data-nome="${p.id}" value="${E(p.nome||'')}" placeholder="Chi è? Scrivi il nome"><div class="m">${p.n_file.toLocaleString('it-IT')} ${p.n_file===1?'file':'file'} · ${p.n_volti.toLocaleString('it-IT')} volti</div>`+
+  `<div class="riga" style="justify-content:center"><button class="p piccolo" data-m="${p.id}">Mostra</button><button class="s piccolo" data-h="${p.id}">${$('pnasc').checked&&p.nascosta?'Ripristina':'Nascondi'}</button></div>`+
+  `<select data-u="${p.id}"><option value="">Unisci con un'altra persona…</option>${ps.filter(o=>o.id!==p.id).map(o=>`<option value="${o.id}">${E(o.nome||'Senza nome #'+o.id)} (${o.n_file})</option>`).join('')}</select></div>`).join('');
+ const nomeDiP=id=>(ps.find(p=>p.id===id)||{}).nome||'';
+ $('pg').querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{const id=Number(b.dataset.m);S.persona=id;S.personaNome=nomeDiP(id);S.simili=0;vai('esplora');cercaOra()});
+ $('pg').querySelectorAll('[data-nome]').forEach(i=>i.onchange=async()=>{await j('/api/persona',{method:'POST',body:JSON.stringify({id:Number(i.dataset.nome),nome:i.value})})});
+ $('pg').querySelectorAll('[data-h]').forEach(b=>b.onclick=async()=>{const id=Number(b.dataset.h),p=ps.find(x=>x.id===id);await j('/api/persona',{method:'POST',body:JSON.stringify({id,nascondi:!(p&&p.nascosta)})});caricaPersone()});
+ $('pg').querySelectorAll('[data-u]').forEach(s=>s.onchange=async()=>{if(!s.value)return;const da=Number(s.dataset.u),a=Number(s.value);
+  if(!confirm('Sono la stessa persona? I loro volti verranno uniti in un unico gruppo.'))return void(s.value='');
+  await j('/api/persona',{method:'POST',body:JSON.stringify({id:da,unisci_in:a})});caricaPersone()})}
+$('pnasc').onchange=caricaPersone;
 /* ---------- dialogo con Opifex ---------- */
 let passo2=false;
 async function opStato(){const r=await j('/api/opifex/stato');$('ou').value=$('ou').value||r.url||'https://app.opifex.space';$('oe').value=$('oe').value||r.email||'';
@@ -1224,7 +2054,8 @@ async function invia(){const m=$('ot').value.trim();if(!m||!$('oa').value)return
 $('oi').onclick=invia;$('ot').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();invia()}};
 const batti=()=>fetch('/api/vivo').catch(()=>{});batti();setInterval(batti,5000);addEventListener('pagehide',()=>{try{navigator.sendBeacon('/api/chiudi')}catch(e){}});
 /* ---------- avvio: se l'indice è vuoto si parte dalle cartelle, altrimenti dall'archivio ---------- */
-(async()=>{await agg();if(!PR.totale&&!PR.in_corso)vai('indice');else cercaOra()})();
+(async()=>{await agg();caricaFiltri();if(!PR.totale&&!PR.in_corso)vai('indice');else cercaOra()})();
+setInterval(()=>{if(!$('v-esplora').hidden&&PR.in_corso)caricaFiltri()},60000);
 </script></body></html>
 """
 
@@ -1487,12 +2318,26 @@ def servi(db, porta, ascolta, chiave, finto=False, interfaccia=False, finestra=F
                         return self._r(200, {"errore": str(e)})
                 if u.path == "/api/progresso":
                     st = stato(db)
-                    return self._r(200, {**PROG, "totale": sum(st["file"].values()), "per_tipo": st["per_tipo"], "dimensione": st["dimensione"]})
+                    return self._r(200, {**PROG, "totale": sum(st["file"].values()), "per_tipo": st["per_tipo"], "dimensione": st["dimensione"],
+                                         "volti": st["volti"], "persone": st["persone"], "etichettati": st["etichettati"]})
                 if interfaccia and u.path == "/api/cerca":
                     g = lambda k, d="": (q.get(k) or [d])[0]  # noqa: E731
                     tipo = g("tipo") if g("tipo") in ("immagine", "video", "audio", "testo") else None
+                    filtri = {"stelle": int(g("stelle", "0") or 0), "colore": g("colore"), "raccolta": int(g("raccolta", "0") or 0), "persona": int(g("persona", "0") or 0),
+                              "tag": g("tag"), "migliori": g("migliori") == "1", "sfocate": g("sfocate") == "1", "con_volti": g("con_volti") == "1"}
                     return self._r(200, {"risultati": cerca(db, g("q"), min(int(g("n", "24")), 100), finto, tipo, g("ordine", "rilevanza"),
-                                                            int(g("da", "0")), int(g("larghezza_min", "0")))})
+                                                            int(g("da", "0")), int(g("larghezza_min", "0")), filtri)})
+                if interfaccia and u.path == "/api/simili":
+                    return self._r(200, {"risultati": simili(db, int((q.get("id") or ["0"])[0]), min(int((q.get("n") or ["24"])[0]), 100), int((q.get("da") or ["0"])[0]))})
+                if interfaccia and u.path == "/api/persone":
+                    return self._r(200, {"persone": persone_elenco(db, (q.get("nascoste") or ["0"])[0] == "1")})
+                if interfaccia and u.path == "/api/volto":
+                    jpg = volto_miniatura(db, int((q.get("id") or ["0"])[0]), int((q.get("w") or ["160"])[0]))
+                    return self._bin(204, b"", "image/jpeg") if jpg is None else self._bin(200, jpg, "image/jpeg", {"Cache-Control": "max-age=86400"})
+                if interfaccia and u.path == "/api/etichette":
+                    return self._r(200, {"etichette": etichette_elenco(db)})
+                if interfaccia and u.path == "/api/raccolte":
+                    return self._r(200, {"raccolte": raccolte_elenco(db)})
                 if interfaccia and u.path == "/api/dettaglio":
                     try:
                         return self._r(200, dettaglio(db, int((q.get("id") or ["0"])[0])))
@@ -1514,7 +2359,9 @@ def servi(db, porta, ascolta, chiave, finto=False, interfaccia=False, finestra=F
                     import mimetypes
                     return self._file(p, mimetypes.guess_type(p.name)[0] or "application/octet-stream")
                 if interfaccia and u.path == "/api/impostazioni":
-                    return self._r(200, {"riprendi_da_solo": imp_leggi(db, "riprendi_da_solo", "1") == "1"})
+                    return self._r(200, {"riprendi_da_solo": imp_leggi(db, "riprendi_da_solo", "1") == "1", "analisi_volti": imp_leggi(db, "analisi_volti", "1") == "1",
+                                         "analisi_etichette": imp_leggi(db, "analisi_etichette", "1") == "1", "analisi_scene": imp_leggi(db, "analisi_scene", "1") == "1",
+                                         "avvio_windows": avvio_windows()})
                 self._r(404, {"errore": "usa /cerca?q=... oppure /stato"})
             except Exception as e:  # noqa: BLE001
                 self._r(500, {"errore": f"{type(e).__name__}: {e}"[:200]})
@@ -1545,12 +2392,40 @@ def servi(db, porta, ascolta, chiave, finto=False, interfaccia=False, finestra=F
                 except ValueError as e:
                     return self._r(200, {"errore": str(e)})
             if self.path == "/api/avvia":
-                err = avvia_scansione(db, [str(x) for x in (corpo.get("cartelle") or [])], int(corpo.get("passo") or 30), finto)
+                err = avvia_scansione(db, [str(x) for x in (corpo.get("cartelle") or [])], int(corpo.get("passo") or 15), finto)
                 return self._r(200, {"errore": err} if err else {"ok": True})
             if self.path == "/api/impostazioni":
-                if "riprendi_da_solo" in corpo:
-                    imp_scrivi(db, "riprendi_da_solo", "1" if corpo["riprendi_da_solo"] else "0")
+                for k in ("riprendi_da_solo", "analisi_volti", "analisi_etichette", "analisi_scene"):
+                    if k in corpo:
+                        imp_scrivi(db, k, "1" if corpo[k] else "0")
                 return self._r(200, {"ok": True})
+            if self.path == "/api/avvio_windows":
+                return self._r(200, avvio_windows(bool(corpo.get("attivo"))))
+            if self.path == "/api/valuta":
+                valuta(db, corpo.get("ids") or [], corpo.get("stelle"), corpo.get("colore"), corpo.get("parole"))
+                return self._r(200, {"ok": True})
+            if self.path == "/api/raccolta":
+                try:
+                    return self._r(200, {"ok": True, "id": raccolta_azione(db, corpo)})
+                except ValueError as e:
+                    return self._r(200, {"errore": str(e)})
+            if self.path == "/api/persona":
+                try:
+                    pid = int(corpo.get("id") or 0)
+                    if "nome" in corpo:
+                        persona_rinomina(db, pid, corpo["nome"])
+                    if corpo.get("unisci_in"):
+                        persone_unisci(db, pid, int(corpo["unisci_in"]))
+                    if "nascondi" in corpo:
+                        persona_nascondi(db, pid, bool(corpo["nascondi"]))
+                    return self._r(200, {"ok": True})
+                except ValueError as e:
+                    return self._r(200, {"errore": str(e)})
+            if self.path == "/api/volto_sposta":
+                try:
+                    return self._r(200, {"ok": True, "persona_id": volto_sposta(db, int(corpo.get("id") or 0), corpo.get("persona_id"))})
+                except ValueError as e:
+                    return self._r(200, {"errore": str(e)})
             if self.path == "/api/apri":
                 try:
                     apri_file(db, int(corpo.get("id") or 0), bool(corpo.get("mostra")))
@@ -1579,8 +2454,10 @@ def servi(db, porta, ascolta, chiave, finto=False, interfaccia=False, finestra=F
     if interfaccia and finestra:
         def riprendi():   # all'apertura riparte da solo dalle cartelle ricordate (si puo' spegnere dalla finestra)
             time.sleep(4)
-            if imp_leggi(db, "riprendi_da_solo", "1") == "1":
-                avvia_scansione(db, None, 30, finto)
+            while True:   # all'apertura e poi ogni 6 ore: cerca i file nuovi e porta avanti le analisi
+                if imp_leggi(db, "riprendi_da_solo", "1") == "1" and not PROG["in_corso"]:
+                    avvia_scansione(db, None, 15, finto)
+                time.sleep(6 * 3600)
         threading.Thread(target=riprendi, daemon=True).start()
     ThreadingHTTPServer((ascolta, porta), H).serve_forever()
 

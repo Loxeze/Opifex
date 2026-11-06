@@ -27,7 +27,7 @@ import (
 var indicePy []byte
 
 const (
-	versione   = 4 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
+	versione   = 5 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
 	urlPredef  = "https://app.opifex.space"
 	porta      = "8765"
 	pyZipURL   = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip"
@@ -35,7 +35,7 @@ const (
 	revIniziale = 1
 )
 
-var pacchettiIniziali = []string{"numpy", "pillow", "pypdf", "imageio-ffmpeg", "faster-whisper", "open_clip_torch"}
+var pacchettiIniziali = []string{"numpy", "pillow", "pypdf", "imageio-ffmpeg", "faster-whisper", "open_clip_torch", "opencv-python-headless"}
 
 type manifesto struct {
 	Opifex    string `json:"opifex"`
@@ -305,6 +305,12 @@ func main() {
 	pyDir := filepath.Join(base, "py")
 	py := filepath.Join(pyDir, "python.exe")
 	os.MkdirAll(base, 0o755)
+	nascosto := false // avvio automatico all'accensione del PC: lavora da solo, senza aprire finestre
+	for _, a := range os.Args[1:] {
+		if a == "--nascosto" {
+			nascosto = true
+		}
+	}
 	collegamentoStart()
 	if me, err := os.Executable(); err == nil {
 		os.Remove(me + ".vecchio")
@@ -385,7 +391,14 @@ func main() {
 	}
 
 	if !inAscolto() {
-		c := exec.Command(py, script, "interfaccia", "--db", filepath.Join(base, "indice.db"), "--non-aprire", "--finestra", "--porta", porta)
+		args := []string{script, "interfaccia", "--db", filepath.Join(base, "indice.db"), "--non-aprire", "--porta", porta}
+		if !nascosto {
+			args = append(args, "--finestra") // con la finestra aperta si ferma da solo quando la chiudi; nascosto resta in funzione
+		}
+		c := exec.Command(py, args...)
+		if me, err := os.Executable(); err == nil {
+			c.Env = append(os.Environ(), "OPIFEX_EXE="+me)
+		}
 		c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 		if lg, err := os.Create(filepath.Join(base, "ultimo-avvio.log")); err == nil {
 			c.Stdout, c.Stderr = lg, lg
@@ -404,11 +417,16 @@ func main() {
 		if !pronto {
 			muori("il programma non e' partito (dettagli in "+filepath.Join(base, "ultimo-avvio.log")+")", nil)
 		}
-		apriPlancia(base, url)
-		time.Sleep(700 * time.Millisecond)
-		apriFinestra(base)
+		if !nascosto {
+			apriPlancia(base, url)
+			time.Sleep(700 * time.Millisecond)
+			apriFinestra(base)
+		}
 		c.Wait() // si ferma da solo quando la finestra viene chiusa
 		return
+	}
+	if nascosto {
+		return // gia' in funzione
 	}
 	apriPlancia(base, url) // gia' avviato: riapro le due finestre
 	time.Sleep(700 * time.Millisecond)
