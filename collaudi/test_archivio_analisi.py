@@ -58,6 +58,13 @@ ok("etichette assegnate ai file con vettori", ix.stato(db)["etichettati"] >= 5, 
 tg = ix.dettaglio(db, d["lena_a.jpg"]["id"])["etichette"]
 ok("il volto grande aggiunge «persone» e «primo piano»", {"persone", "primo piano"} <= {t["tag"] for t in tg}, str(tg))
 ok("filtro per etichetta", "lena_a.jpg" in [x["nome"] for x in ix.sfoglia(db, 20, filtri={"tag": "persone"})])
+ok("etichette di colore: tramonto = caldi + dominante arancio", {"colori caldi", "dominante arancio"} <= set(ix.etichette_colore(["#e8741c", "#c2410c", "#f59e0b", "#7c2d12", "#fbbf24"])), str(ix.etichette_colore(["#e8741c", "#c2410c", "#f59e0b", "#7c2d12", "#fbbf24"])))
+ok("etichette di colore: mare = freddi + dominante blu", {"colori freddi", "dominante blu"} <= set(ix.etichette_colore(["#1e4fa0", "#2563eb", "#0ea5e9", "#1e3a8a", "#93c5fd"])))
+ok("etichette di colore: grigi = bianco e nero", "bianco e nero" in ix.etichette_colore(["#808080", "#202020", "#f0f0f0", "#a0a0a0", "#303030"]))
+ok("etichette di colore: notte = scura", "scura" in ix.etichette_colore(["#050510", "#0a0a1a", "#101020", "#000000", "#08081a"], "sottoesposta"))
+ok("ogni foto ha le etichette di colore", any(t["gruppo"] == "colore" for t in tg), str(tg))
+ok("vocabolario: opere, meteo, stagione e atmosfera sono previsti", all(g in ix.VOCABOLARIO for g in ("opera", "meteo", "stagione", "atmosfera")) and len(ix.VOCABOLARIO["soggetto"]) >= 60)
+ok("revisione etichette registrata", ix.imp_leggi(db, "rev_etichette") == str(ix.REV_ETICHETTE), ix.imp_leggi(db, "rev_etichette"))
 s = ix.simili(db, d["lena_a.jpg"]["id"], 5)
 ok("trova simili: lena_b e lena_blur (stesso soggetto) prima del paesaggio", s and {s[0]["nome"], s[1]["nome"]} == {"lena_b.jpg", "lena_blur.jpg"}, str([x["nome"] for x in s]))
 # valutazioni e raccolte

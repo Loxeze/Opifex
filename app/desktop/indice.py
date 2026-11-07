@@ -507,22 +507,111 @@ MODELLI_VOLTI = {
     "sface.onnx": ("https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
                    "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79")}
 # Ogni gruppo: (nome mostrato, frase per CLIP). Le frasi sono in inglese: il modello le capisce meglio e cerca comunque anche in italiano.
+REV_ETICHETTE = 2   # sale quando cambia il vocabolario: le etichette vengono ricalcolate (dai vettori gia' salvati, senza rileggere i file)
 VOCABOLARIO = {
     "scena": [("paesaggio", "a landscape"), ("città", "a city street"), ("architettura", "the exterior of a building"), ("interno", "an indoor interior"),
               ("natura", "nature, trees and plants"), ("mare", "the sea and the coast"), ("montagna", "mountains"), ("ritratto", "a portrait of a person"),
               ("folla", "a crowd of people"), ("evento", "a public event"), ("oggetto", "a close-up of an object"), ("veduta aerea", "an aerial view from a drone"),
-              ("opera d'arte", "a painting or a work of art"), ("documento", "a page of text or a document"), ("cibo", "food"), ("schermata", "a computer screenshot")],
+              ("opera d'arte", "a painting or a work of art"), ("documento", "a page of text or a document"), ("cibo", "food"), ("schermata", "a computer screenshot"),
+              ("panorama", "a wide scenic panorama"), ("paesaggio rurale", "countryside with fields and hills"), ("lago", "a lake"), ("campagna", "rural farmland"),
+              ("centro storico", "the old town of a historic city"), ("cantiere", "a construction site"), ("laboratorio", "a workshop or a laboratory"),
+              ("scrittura", "handwriting or an old inscription"), ("mappa", "a map"), ("riunione", "a meeting of people around a table"), ("sport", "a sports activity")],
     "inquadratura": [("campo lunghissimo", "an extreme wide shot of a vast scene"), ("campo largo", "a wide shot showing the whole place"),
-                     ("campo medio", "a medium shot"), ("primo piano", "a close-up shot"), ("particolare", "an extreme close-up of a small detail")],
+                     ("campo medio", "a medium shot"), ("primo piano", "a close-up shot"), ("particolare", "an extreme close-up of a small detail"),
+                     ("dall'alto", "a shot taken from above, looking down"), ("dal basso", "a low angle shot looking up"), ("simmetrica", "a perfectly symmetrical composition")],
     "luce": [("alba o tramonto", "golden light of sunrise or sunset"), ("giorno", "a bright sunny day"), ("notte", "a dark night scene"),
-             ("nuvoloso", "an overcast gray day"), ("controluce", "a backlit silhouette")],
+             ("nuvoloso", "an overcast gray day"), ("controluce", "a backlit silhouette"), ("ora blu", "the blue hour after sunset"),
+             ("luce artificiale", "a scene lit by artificial lamps"), ("luce soffusa", "soft diffused light"), ("illuminazione scenica", "dramatic stage lighting")],
+    "meteo": [("sereno", "a clear blue sky"), ("nuvole", "a sky full of clouds"), ("nebbia", "fog or mist"), ("pioggia", "rain"), ("neve", "snow"),
+              ("temporale", "a stormy dark sky"), ("arcobaleno", "a rainbow")],
+    "stagione": [("autunno", "autumn with orange and yellow leaves"), ("inverno", "winter landscape"), ("primavera", "spring with blossoms and green meadows"),
+                 ("estate", "a summer scene with strong sunlight")],
+    "atmosfera": [("calda", "a warm cozy atmosphere"), ("fredda", "a cold bluish atmosphere"), ("drammatica", "a dramatic moody scene"), ("serena", "a calm peaceful scene"),
+                  ("romantica", "a romantic scene"), ("misteriosa", "a mysterious scene"), ("festosa", "a festive joyful scene"), ("solenne", "a solemn ceremony"),
+                  ("storica", "an old vintage historical photograph")],
+    "opera": [("dipinto", "an oil painting on canvas"), ("affresco", "a fresco on a wall"), ("statua", "a marble statue"), ("scultura", "a sculpture"),
+              ("mosaico", "a mosaic"), ("stemma", "a coat of arms"), ("iscrizione", "a stone inscription"), ("manoscritto", "an illuminated manuscript"),
+              ("stampa antica", "an old engraving or print"), ("ceramica", "pottery or ceramics"), ("gioiello", "a piece of jewelry"), ("tessuto", "a woven textile or tapestry"),
+              ("mobile antico", "antique furniture"), ("vetrata", "a stained glass window"), ("fontana", "a fountain"), ("monumento", "a monument"),
+              ("pala d'altare", "an altarpiece"), ("busto", "a bust sculpture"), ("fotografia d'epoca", "an old black and white photograph")],
     "soggetto": [("castello", "a castle"), ("torre", "a tower"), ("chiesa", "a church"), ("borgo", "a medieval village"), ("affresco", "a fresco on a wall"),
                  ("museo", "a museum gallery"), ("persone", "people"), ("bambini", "children"), ("intervista", "a person being interviewed"),
                  ("palco", "a stage performance"), ("strada", "a street"), ("ponte", "a bridge"), ("giardino", "a garden"), ("fiume", "a river"),
                  ("bosco", "a forest"), ("animali", "animals"), ("fiori", "flowers"), ("porto", "a harbour with boats"), ("rovine", "ancient ruins"),
                  ("libro o manoscritto", "a book or a manuscript"), ("statua", "a statue or a monument"), ("mercato", "a market"), ("auto", "a car"),
-                 ("cielo", "the sky and clouds"), ("scultura", "a sculpture"), ("artigianato", "handmade craft work"), ("cucina", "people cooking")]}
-SOGLIE_ETICHETTE = {"scena": (0.30, 1), "inquadratura": (0.35, 1), "luce": (0.40, 1), "soggetto": (0.12, 3)}
+                 ("cielo", "the sky and clouds"), ("scultura", "a sculpture"), ("artigianato", "handmade craft work"), ("cucina", "people cooking"),
+                 ("palazzo", "a historic palace"), ("cattedrale", "a cathedral"), ("chiostro", "a cloister"), ("scalinata", "a staircase"), ("porta", "an old door or gate"),
+                 ("mura", "city walls and fortifications"), ("piazza", "a town square"), ("vicolo", "a narrow alley"), ("tetti", "rooftops of a town"),
+                 ("campanile", "a bell tower"), ("cupola", "a dome"), ("colonnato", "a colonnade or arches"), ("cortile", "a courtyard"), ("biblioteca", "a library with books"),
+                 ("archivio", "an archive with documents"), ("fabbrica", "a factory or industrial building"), ("treno", "a train"), ("barca", "a boat"), ("aereo", "an airplane"),
+                 ("cane", "a dog"), ("gatto", "a cat"), ("cavallo", "a horse"), ("uccelli", "birds"), ("albero", "a single tree"), ("vigneto", "a vineyard"),
+                 ("spiaggia", "a beach"), ("scogliera", "cliffs by the sea"), ("cascata", "a waterfall"), ("sentiero", "a hiking trail"), ("rocce", "rocks and stones"),
+                 ("tavola", "a laid dinner table"), ("musicisti", "musicians playing instruments"), ("danza", "dancers"), ("proiezione", "a video projection on a building"),
+                 ("fuochi", "fireworks"), ("telecamera", "a video camera or film crew"), ("computer", "a person working at a computer"), ("telefono", "a smartphone")]}
+SOGLIE_ETICHETTE = {"scena": (0.30, 1), "inquadratura": (0.35, 1), "luce": (0.40, 1), "meteo": (0.40, 1), "stagione": (0.55, 1),
+                    "atmosfera": (0.35, 1), "opera": (0.30, 2), "soggetto": (0.08, 4)}
+
+
+def etichette_colore(colori, esposizione=None) -> list:
+    """Etichette di colore dai 5 colori dominanti gia' misurati: caldi/freddi, tinta principale, vivace/spento, bianco e nero, chiaro/scuro."""
+    import colorsys
+    cs = []
+    for i, h in enumerate(colori or []):
+        try:
+            r, g, b = (int(h[k:k + 2], 16) / 255 for k in (1, 3, 5))
+        except Exception:  # noqa: BLE001
+            continue
+        cs.append((colorsys.rgb_to_hsv(r, g, b), 1.0 / (1 + i * 0.6)))
+    if not cs:
+        return []
+    tot = sum(w for _, w in cs)
+    sat = sum(c[1] * w for c, w in cs) / tot
+    val = sum(c[2] * w for c, w in cs) / tot
+    out = []
+    if sat < 0.10:
+        out.append("bianco e nero")
+    else:
+        caldo = sum(w for (h, s, v), w in cs if s >= 0.15 and (h < 0.17 or h > 0.92))
+        freddo = sum(w for (h, s, v), w in cs if s >= 0.15 and 0.45 <= h <= 0.75)
+        if caldo > freddo and caldo / tot >= 0.35:
+            out.append("colori caldi")
+        elif freddo > caldo and freddo / tot >= 0.35:
+            out.append("colori freddi")
+        if sat > 0.55:
+            out.append("colori vivaci")
+        elif sat < 0.22:
+            out.append("toni spenti")
+    nomi = {}
+    for (h, s, v), w in cs:
+        if v < 0.18:
+            n = "nero"
+        elif s < 0.12:
+            n = "bianco" if v > 0.85 else "grigio"
+        elif h < 0.03 or h >= 0.95:
+            n = "rosso"
+        elif h < 0.09:
+            n = "marrone" if v < 0.55 else "arancio"
+        elif h < 0.18:
+            n = "giallo" if v >= 0.55 else "marrone"
+        elif h < 0.44:
+            n = "verde"
+        elif h < 0.52:
+            n = "azzurro" if v > 0.6 else "verde"
+        elif h < 0.72:
+            n = "azzurro" if (v > 0.8 and s < 0.5) else "blu"
+        elif h < 0.85:
+            n = "viola"
+        else:
+            n = "rosa" if v > 0.7 else "viola"
+        nomi[n] = nomi.get(n, 0) + w
+    for n, w in sorted(nomi.items(), key=lambda x: -x[1])[:2]:
+        if w / tot >= 0.25 and n not in ("bianco e nero",):
+            out.append("dominante " + n)
+    if esposizione == "sottoesposta" or val < 0.25:
+        out.append("scura")
+    elif esposizione == "sovraesposta" or val > 0.8:
+        out.append("luminosa")
+    return out
 
 
 def _sha256(p: Path) -> str:
@@ -709,11 +798,18 @@ def calcola_etichette(c, mod, fid) -> bool:
         z -= z.max(axis=1, keepdims=True)
         p = np.exp(z)
         p /= p.sum(axis=1, keepdims=True)
-        p = p.mean(axis=0)
+        p = p.mean(axis=0) if g not in ("soggetto", "opera") else 0.5 * p.mean(axis=0) + 0.5 * p.max(axis=0)   # una statua in un solo fotogramma conta
         soglia, massimo = SOGLIE_ETICHETTE[g]
         for i in np.argsort(-p)[:massimo]:
             if p[i] >= soglia:
                 tags.append((g, nomi[int(i)], float(p[i])))
+    rf = c.execute("SELECT colori, esposizione FROM file WHERE id=?", (fid,)).fetchone()
+    if rf and rf["colori"]:
+        try:
+            for t in etichette_colore(json.loads(rf["colori"]), rf["esposizione"]):
+                tags.append(("colore", t, 1.0))
+        except Exception:  # noqa: BLE001
+            pass
     f = c.execute("SELECT max(w*h) a, count(*) n FROM volti WHERE file_id=?", (fid,)).fetchone()
     if f and f["n"]:
         tags.append(("soggetto", "persone", 1.0))
@@ -721,6 +817,12 @@ def calcola_etichette(c, mod, fid) -> bool:
             tags.append(("soggetto", "gruppo di persone", 1.0))
         if (f["a"] or 0) >= 0.06 and not any(t[1] == "primo piano" for t in tags):
             tags.append(("inquadratura", "primo piano", 0.9))
+    visti, unici = set(), []
+    for g, t, p in tags:
+        if t not in visti:
+            visti.add(t)
+            unici.append((g, t, p))
+    tags = unici
     for g, t, p in tags:
         c.execute("INSERT INTO etichette (file_id, gruppo, tag, p) VALUES (?,?,?,?)", (fid, g, t, p))
     c.execute("DELETE FROM testi WHERE file_id=? AND tipo='etichette'", (fid,))
@@ -787,6 +889,11 @@ def bits_attesi(db, mod, ctx) -> int:
     b = B_QUALITA
     if imp_leggi(db, "analisi_etichette", "1") == "1" and vocabolario(mod):
         b |= B_ETICHETTE
+        if imp_leggi(db, "rev_etichette", "") != str(REV_ETICHETTE):      # vocabolario nuovo: rifai le etichette di tutti (dai vettori, e' veloce)
+            cn = apri(db)
+            cn.execute("UPDATE file SET analisi = COALESCE(analisi,0) & ~?", (B_ETICHETTE,))
+            cn.commit()
+            imp_scrivi(db, "rev_etichette", REV_ETICHETTE)
     if imp_leggi(db, "analisi_volti", "1") == "1":
         v = ctx.get("volti")
         if v is not None and v.pronto():
@@ -1306,7 +1413,7 @@ def raccolta_azione(db, corpo: dict):
     return rid
 
 
-def etichette_elenco(db, n=80):
+def etichette_elenco(db, n=400):
     return [dict(r) for r in apri(db).execute("SELECT tag, gruppo, count(DISTINCT file_id) AS n FROM etichette GROUP BY tag, gruppo ORDER BY n DESC LIMIT ?", (n,))]
 
 
@@ -2128,7 +2235,8 @@ function aggFiltri(){$('fcol').querySelectorAll('button').forEach(b=>b.classList
  $('fpe').hidden=!S.persona||!!S.simili;$('fpe').textContent='Persona: '+(S.personaNome||'senza nome')+' ✕'}
 async function caricaFiltri(){
  try{const t=(await j('/api/etichette')).etichette||[];const v=$('ftag').value;
-  $('ftag').innerHTML='<option value="">Qualsiasi soggetto</option>'+t.map(x=>`<option value="${E(x.tag)}">${E(x.tag)} (${x.n})</option>`).join('');$('ftag').value=v||S.tag||''}catch(e){}
+  const GN={soggetto:'Soggetti',scena:'Scena',opera:'Opere e oggetti',luce:'Luce',meteo:'Meteo',stagione:'Stagione',atmosfera:'Atmosfera',colore:'Colori',inquadratura:'Inquadratura'};const gr={};t.forEach(x=>{(gr[x.gruppo]=gr[x.gruppo]||[]).push(x)});
+  $('ftag').innerHTML='<option value="">Qualsiasi etichetta</option>'+Object.keys(GN).filter(k=>gr[k]).map(k=>`<optgroup label="${GN[k]}">${gr[k].sort((a,b)=>a.tag.localeCompare(b.tag,'it')).map(x=>`<option value="${E(x.tag)}">${E(x.tag)} (${x.n})</option>`).join('')}</optgroup>`).join('');$('ftag').value=v||S.tag||''}catch(e){}
  try{RACC=(await j('/api/raccolte')).raccolte||[];$('frac').innerHTML='<option value="0">Tutte le raccolte</option>'+RACC.map(x=>`<option value="${x.id}">${E(x.nome)} (${x.n})</option>`).join('');$('frac').value=String(S.raccolta||0)}catch(e){}}
 function datiRiga(x){const m=x.meta||{},o=[];
  if(x.larghezza&&x.tipo!=='audio')o.push(x.larghezza+'×'+x.altezza+(m.Megapixel?' ('+m.Megapixel+' MP)':''));
