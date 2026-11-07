@@ -135,7 +135,7 @@ function riquadroLavoro() {
       d.n ? h("div", { class: "bt-lavoro-righe" }, righe) : h("p", { class: "bt-sotto" }, "Nessun agente sta lavorando in questo momento."),
       quasi, pers]);
   };
-  const ricarica = async () => { try { disegna(await api("GET", "/gestione/plancia/lavoro")); } catch (e) { riempi(el, [h("div", { class: "bt-cap" }, "Al lavoro adesso"), avviso(e.message, "no")]); } };
+  const ricarica = async () => { if (inPausa(el)) return; try { disegna(await api("GET", "/gestione/plancia/lavoro")); } catch (e) { mostraErrore(el, e, ricarica, true); } };
   return { el, ricarica };
 }
 
@@ -155,6 +155,7 @@ function vistaDashboard() {
     sottotitolo.textContent = n ? (n === 1 ? "Una cosa aspetta te." : n === 2 ? "Due cose aspettano te." : n + " cose aspettano te.") : "Niente aspetta te, gli agenti vanno avanti da soli.";
   };
   const caricaRichieste = async () => {
+    if (inPausa(boxRic)) return;
     try {
       const el = await api("GET", "/gestione/richieste?stato=aperta");
       stato.richieste = el.length; aggiornaTitolo();
@@ -173,9 +174,10 @@ function vistaDashboard() {
           h("div", { class: "bt-invia" }, ris, h("button", { class: "p", onclick: (e) => invia(e.currentTarget) }, "Invia")));
       }), el.length > 3 ? h("button", { class: "s", onclick: () => vai("richieste") }, "Vedi tutte (" + el.length + ")") : null]
         : h("p", { class: "bt-sotto" }, "Nessuna domanda aperta. Gli agenti hanno tutto ciò che serve."));
-    } catch (e) { boxRic.replaceChildren(avviso(e.message, "no")); }
+    } catch (e) { mostraErrore(boxRic, e, caricaRichieste, true); }
   };
   const caricaIniziative = async () => {
+    if (inPausa(boxIni)) return;
     try {
       const d = await api("GET", "/gestione/iniziative");
       const aperte = d.iniziative.filter(i => i.stato === "da_approvare" || i.stato === "in_corso");
@@ -188,15 +190,16 @@ function vistaDashboard() {
           h("p", { class: "bt-domanda" }, i.titolo),
           i.stato === "da_approvare" ? h("div", { class: "bt-invia" }, h("button", { class: "p", onclick: (e) => decidi("approva", e.currentTarget) }, "Approva"), h("button", { class: "s", onclick: (e) => decidi("rifiuta", e.currentTarget) }, "Rifiuta")) : null);
       }));
-    } catch (e) { boxIni.replaceChildren(avviso(e.message, "no")); }
+    } catch (e) { mostraErrore(boxIni, e, caricaIniziative, true); }
   };
   const caricaProgetti = async () => {
+    if (inPausa(boxPro)) return;
     try {
       const d = await api("GET", "/gestione/progetti");
       const att = d.progetti.filter(p => !p.archiviato && !p.eliminato_il);
       riempi(boxPro, att.length ? att.slice(0, 5).map(p => h("button", { class: "bt-riga-prog", onclick: () => vai("progetti") },
         h("span", { class: "punto-col", style: "background:" + (p.colore || PB.ottone) }), h("b", {}, p.nome), h("span", { class: "bt-sotto" }, p.agenti.length + " agenti" + (p.drive_stato !== "ok" ? " · Drive: " + ({ da_sincronizzare: "da creare", errore: "errore" })[p.drive_stato] : "")))) : h("p", { class: "bt-sotto" }, "Nessun progetto."));
-    } catch (e) { boxPro.replaceChildren(avviso(e.message, "no")); }
+    } catch (e) { mostraErrore(boxPro, e, caricaProgetti, true); }
   };
   const lavoro = riquadroLavoro(); lavoro.ricarica();
   const daFare = pannelloDaFare();
@@ -265,10 +268,11 @@ function vistaDashboard() {
 
   const carica = async () => {
     try { disegnaDati(await api("GET", "/gestione/plancia")); }
-    catch (e) { riempi(riga1, avviso(e.message, "no")); }
+    catch (e) { mostraErrore(riga1, e, carica, true); }
   };
   carica(); caricaRichieste(); caricaIniziative(); caricaProgetti();
-  stato.timer2 = setInterval(() => { attesa++; if (attesa % 2 === 0) lavoro.ricarica(); caricaRichieste(); caricaIniziative(); if (attesa % 4 === 0) { caricaProgetti(); daFare.ricarica(); } if (attesa % 20 === 0) carica(); }, 3000);
+  const inVolo = {}, giro = (k, f) => { if (inVolo[k]) return; inVolo[k] = true; Promise.resolve(f()).finally(() => { inVolo[k] = false; }); };   // una richiesta alla volta per riquadro
+  stato.timer2 = setInterval(() => { if (document.hidden) return; attesa++; if (attesa % 2 === 0) giro('l', lavoro.ricarica); giro('r', caricaRichieste); giro('i', caricaIniziative); if (attesa % 4 === 0) { giro('p', caricaProgetti); giro('d', daFare.ricarica); } if (attesa % 20 === 0) giro('c', carica); }, 3000);
 
   return h("div", { class: "bt-plancia bt-fitta" },
     h("div", { class: "bt-intesta" }, h("div", {}, h("div", { class: "bt-cap" }, new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })), titolo),

@@ -209,6 +209,7 @@ function vistaCollegamenti() {
   const corpo = h("div");
   const msg = h("div");
   const mostra = (t, tipo) => msg.replaceChildren(avviso(t, tipo));
+  corpo.append(h("p", { class: "sotto" }, "Carico i collegamenti…"));
   const carica = async () => {
     try {
       const s = await api("GET", "/gestione/google");
@@ -229,7 +230,7 @@ function vistaCollegamenti() {
         s.account.length ? s.account.map(a => h("div", { class: "carta", style: "margin-bottom:12px" },
           h("div", { class: "nome" }, a.etichetta + " — " + a.email),
           h("div", { class: "sotto" }, "Servizi: " + a.servizi.map(x => s.servizi[x] || x).join(", ")),
-          a.ultimo_errore ? avviso(a.ultimo_errore, "no") : null,
+          a.ultimo_errore ? h("div", { class: "messaggio avv", role: "note" }, "Ultimo problema registrato: " + a.ultimo_errore + " Premi «Prova» per verificare se ora funziona.") : null,
           h("div", { class: "azioni" },
             h("button", { class: "s", onclick: async () => { msg.replaceChildren(); try { mostra((await api("POST", "/gestione/google/account/" + a.id + "/prova")).esito, "ok"); } catch (x) { mostra(x.message, "no"); } } }, "Prova"),
             h("button", { class: "s", onclick: async () => { if (!confirm("Scollegare " + a.email + "?")) return; try { await api("DELETE", "/gestione/google/account/" + a.id); carica(); } catch (x) { mostra(x.message, "no"); } } }, "Scollega"))))
@@ -264,7 +265,7 @@ function vistaCollegamenti() {
         h("h3", {}, "Canva"),
         bloccoCanva(),
       ]);
-    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+    } catch (e) { mostraErrore(corpo, e, carica, false); }
   };
   carica();
   return [h("h2", {}, "Collegamenti"), corpo];

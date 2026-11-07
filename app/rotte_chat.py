@@ -114,9 +114,15 @@ def salva_bozza(agente_id: int, d: Bozza, utente: dict = Depends(utente_corrente
 _NOME_VISTA = re.compile(r"^[a-z0-9_:\-]{1,60}$")
 
 
+CATEGORIE_ERRORE = {"rete", "timeout", "server", "validazione", "interfaccia"}
+
+
 class Evento(BaseModel):
     vista: str
     azione: str
+    categoria: str | None = None
+    durata_s: int | None = None
+    durata_ms: int | None = None
 
 
 class Eventi(BaseModel):
@@ -125,9 +131,12 @@ class Eventi(BaseModel):
 
 @router.post("/uso")
 def registra_uso(d: Eventi, utente: dict = Depends(utente_corrente)):
-    valide = [(e.vista, e.azione) for e in d.eventi if e.azione in ("vista", "errore") and _NOME_VISTA.match(e.vista)]
+    valide = [e for e in d.eventi if e.azione in ("vista", "errore", "uscita") and _NOME_VISTA.match(e.vista)]
     if valide:
         with connessione() as conn:
-            for v, az in valide:
-                conn.execute("INSERT INTO uso_eventi (utente_id, vista, azione) VALUES (%s, %s, %s)", (utente["id"], v, az))
+            for e in valide:
+                cat = e.categoria if e.azione == "errore" and e.categoria in CATEGORIE_ERRORE else None
+                ds = max(0, min(e.durata_s, 7200)) if e.azione == "uscita" and e.durata_s is not None else None
+                dm = max(0, min(e.durata_ms, 600000)) if e.azione == "errore" and e.durata_ms is not None else None
+                conn.execute("INSERT INTO uso_eventi (utente_id, vista, azione, categoria, durata_s, durata_ms) VALUES (%s, %s, %s, %s, %s, %s)", (utente["id"], e.vista, e.azione, cat, ds, dm))
     return {"registrati": len(valide)}

@@ -8,8 +8,9 @@ function vistaRiunioni() {
     try {
       const [cfg, dati] = await Promise.all([api("GET", "/gestione/riunioni/config"), api("GET", "/gestione/riunioni")]);
       riempi(corpo, [formVerbale(dati, carica), h("h3", {}, "Riunioni"), listaRiunioni(dati, carica), h("h3", {}, "Collegamento con la posta"), schedaRiunioni(cfg, carica)]);
-    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+    } catch (e) { mostraErrore(corpo, e, carica, false); }
   };
+  corpo.append(h("p", { class: "sotto" }, "Carico le riunioni…"));
   carica();
   return [h("h2", {}, "Riunioni"), corpo];
 }
@@ -38,7 +39,7 @@ function schedaRiunioni(cfg, ricarica) {
     h("div", { class: "interruttore" }, attivo, h("span", {}, "Importazione attiva (controllo ogni 10 minuti)")),
     h("label", {}, "Casella di posta", casella), h("label", {}, "Il mittente contiene", mitt), h("label", {}, "Agente che elabora i verbali", agente),
     cfg.ultimo_controllo ? h("div", { class: "sotto" }, "Ultimo controllo: " + new Date(cfg.ultimo_controllo).toLocaleString("it-IT")) : null,
-    cfg.ultimo_errore ? avviso(cfg.ultimo_errore, "no") : null, msg,
+    cfg.ultimo_errore ? h("div", { class: "messaggio avv", role: "note" }, "L'ultimo controllo della posta non è riuscito: " + cfg.ultimo_errore + " Il prossimo tentativo è automatico; puoi anche premere «Controlla ora».") : null, msg,
     h("div", { class: "azioni" },
       h("button", { class: "p", onclick: async () => {
         msg.replaceChildren();
@@ -53,7 +54,7 @@ function schedaRiunioni(cfg, ricarica) {
 function listaRiunioni(dati, ricarica) {
   const lista = dati.riunioni;
   if (!lista.length) return h("p", { class: "sotto" }, "Nessuna riunione importata.");
-  return lista.map(r => {
+  const carte = lista.map(r => {
     const msg = h("div");
     const pr = h("select", {}, [h("option", { value: "" }, "— nessun progetto —")].concat(dati.progetti.map(p => h("option", { value: p.id }, p.nome)))); pr.value = r.progetto_id || "";
     const proposte = (r.proposte || []).map(p => {
@@ -72,11 +73,16 @@ function listaRiunioni(dati, ricarica) {
     return h("div", { class: "carta" }, h("div", { class: "nome" }, r.titolo),
       h("div", { class: "sotto" }, ((r.data_riunione || r.data_email) ? new Date(r.data_riunione || r.data_email).toLocaleDateString("it-IT") + " · " : "") + r.stato + (r.mittente ? " · " + r.mittente : "")),
       r.partecipanti && r.partecipanti.length ? h("div", { class: "sotto" }, "Presenti: " + r.partecipanti.map(x => x.nome + (x.contatto_id ? " (CRM)" : x.utente_id ? " (team)" : "")).join(", ")) : null,
-      r.riassunto ? h("p", {}, r.riassunto) : null, r.errore ? avviso(r.errore, "no") : null,
+      r.riassunto ? h("p", {}, r.riassunto) : null, r.errore ? h("div", { class: "messaggio avv", role: "note" }, "Elaborazione non riuscita: " + r.errore + " Usa «Rielabora» per riprovare.") : null,
       h("div", { class: "riga" }, h("label", {}, "Progetto", pr), h("button", { class: "s", style: "align-self:flex-end", onclick: async () => { try { await api("PUT", "/gestione/riunioni/" + r.id + "/progetto", { progetto_id: pr.value ? Number(pr.value) : null }); ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Collega")),
       proposte, msg,
       r.stato === "errore" || r.stato === "elaborata" ? h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => {
         msg.replaceChildren(avviso("Elaborazione…", "avv"));
         try { await api("POST", "/gestione/riunioni/" + r.id + "/rielabora"); ricarica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Rielabora")) : null);
   });
+  // i verbali non elaborati, se sono tanti, stanno in un solo gruppo con il contatore invece di riempire la pagina di avvisi
+  const guasti = lista.filter(r => r.errore).length;
+  if (guasti <= 3) return carte;
+  const ok = carte.filter((_, i) => !lista[i].errore), ko = carte.filter((_, i) => lista[i].errore);
+  return [ok, h("details", { class: "carta" }, h("summary", {}, guasti + " verbali con elaborazione non riuscita (apri per rielaborarli)"), ko)];
 }

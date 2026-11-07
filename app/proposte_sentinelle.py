@@ -88,11 +88,9 @@ def usabilita(conn) -> int:
                                  WHERE p2 = vista AND p1 <> vista AND creato_il - t2 < INTERVAL '3 minutes' GROUP BY 1, 2 HAVING count(*) >= 8 ORDER BY n DESC LIMIT 3""").fetchall():
             n += _nuova(conn, "usabilita", f"avanti_indietro:{r['a']}|{r['b']}", None, f"Tenere vicine «{_nome_vista(r['a'])}» e «{_nome_vista(r['b'])}»",
                         f"In 14 giorni sei passato {r['n']} volte da «{_nome_vista(r['a'])}» a «{_nome_vista(r['b'])}» e ritorno nel giro di pochi minuti. Idea: mostrarle affiancate o con un collegamento diretto dall'una all'altra.")
-        for r in conn.execute("""WITH e AS (SELECT vista, LEAD(creato_il) OVER (PARTITION BY utente_id ORDER BY creato_il) - creato_il AS d FROM uso_eventi
-                                            WHERE azione = 'vista' AND creato_il > NOW() - INTERVAL '14 days')
-                                 SELECT vista, count(*) AS n, percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM d)) AS med FROM e
-                                 WHERE d IS NOT NULL AND d < INTERVAL '30 minutes' GROUP BY vista
-                                 HAVING count(*) >= 10 AND percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM d)) < 6 ORDER BY n DESC LIMIT 3""").fetchall():
+        for r in conn.execute("""SELECT vista, count(*) AS n, percentile_cont(0.5) WITHIN GROUP (ORDER BY durata_s) AS med FROM uso_eventi
+                                 WHERE azione = 'uscita' AND durata_s IS NOT NULL AND creato_il > NOW() - INTERVAL '14 days' GROUP BY vista
+                                 HAVING count(*) >= 10 AND percentile_cont(0.5) WITHIN GROUP (ORDER BY durata_s) < 6 ORDER BY n DESC LIMIT 3""").fetchall():
             n += _nuova(conn, "usabilita", f"lasciata_subito:{r['vista']}", None, f"«{_nome_vista(r['vista'])}» viene aperta e lasciata subito",
                         f"Negli ultimi 14 giorni l'hai aperta {r['n']} volte restandoci in mediana {round(float(r['med']))} secondi: forse non trovi subito quello che cerchi o ci passi solo per arrivare altrove. Idea: portare l'informazione che ti serve in evidenza o raggiungerla in un passaggio in meno.")
         for r in conn.execute("""SELECT vista, count(*) AS n FROM uso_eventi WHERE azione = 'errore' AND creato_il > NOW() - INTERVAL '7 days' GROUP BY vista HAVING count(*) >= 5 ORDER BY n DESC LIMIT 3""").fetchall():

@@ -443,10 +443,23 @@ def _importa(iid: int, origine: str, conv: list[dict], per_tutti: bool, utente_i
 
 
 # ---------- rotte ----------
+_CACHE_VISTA = {"t": 0.0, "v": None}
+DURATA_CACHE_S = 12     # la pagina si aggiorna da sola: i conteggi su tutti i brani si ricalcolano al massimo una volta ogni 12 secondi, non a ogni richiesta
+
+
+def _azzera_cache():
+    _CACHE_VISTA["v"] = None
+
+
 @router.get("")
 def vista(_: dict = Depends(solo_titolare)):
+    import time
+    if _CACHE_VISTA["v"] is not None and time.monotonic() - _CACHE_VISTA["t"] < DURATA_CACHE_S:
+        return _CACHE_VISTA["v"]
     with connessione() as conn:
-        return {**stato(conn), "temi": temi(conn), "relazioni": conn.execute("SELECT count(*) AS n FROM documenti_relazioni").fetchone()["n"], "importazioni": conn.execute("SELECT id, origine, nome_file, stato, conversazioni, importate, saltate, errore, creato_il FROM importazioni_chat ORDER BY id DESC LIMIT 10").fetchall()}
+        v = {**stato(conn), "temi": temi(conn), "relazioni": conn.execute("SELECT count(*) AS n FROM documenti_relazioni").fetchone()["n"], "importazioni": conn.execute("SELECT id, origine, nome_file, stato, conversazioni, importate, saltate, errore, creato_il FROM importazioni_chat ORDER BY id DESC LIMIT 10").fetchall()}
+    _CACHE_VISTA["v"], _CACHE_VISTA["t"] = v, time.monotonic()
+    return v
 
 
 @router.post("/indicizza")
@@ -456,6 +469,7 @@ def ora(_: dict = Depends(solo_titolare)):
             n = indicizza(conn)
         except ErroreMemoria as e:
             raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None
+        _azzera_cache()
         return {"fatti": n, **stato(conn)}
 
 
@@ -475,4 +489,5 @@ async def carica(file: UploadFile = File(...), per_tutti: bool = Form(True), u: 
         iid = await run_in_threadpool(lavoro)
     except ErroreMemoria as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
+    _azzera_cache()
     return {"id": iid}

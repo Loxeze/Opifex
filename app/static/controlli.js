@@ -107,7 +107,7 @@ function vistaMemoriaVett() {
       caricaBlocco();
       riempi(elenco, d.importazioni.length ? d.importazioni.map(i => h("div", { class: "carta", style: "margin-bottom:6px" },
         h("b", {}, i.origine + " — " + i.nome_file), h("div", { class: "sotto" }, ({ in_corso: "In corso…", conclusa: "Conclusa", errore: "Errore: " + (i.errore || "") })[i.stato] + " · " + i.importate + " importate, " + i.saltate + " saltate (brevi o già presenti) su " + i.conversazioni))) : h("p", { class: "sotto" }, "Nessuna importazione ancora."));
-    } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+    } catch (e) { mostraErrore(stato, e, carica, true); }
   };
   const temiBox = h("div"), bloccoMsg = h("div");
   const files = h("input", { type: "file", multiple: true, accept: ".zip,.pdf,.docx,.txt,.md,.csv,.xlsx,.pptx,.html,.json,.rtf,.odt,.png,.jpg,.jpeg" });
@@ -146,8 +146,9 @@ function vistaMemoriaVett() {
     } catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
     importa.disabled = false;
   });
+  stato.append(h("p", { class: "sotto" }, "Carico lo stato della memoria…"));
   carica();
-  const t = setInterval(() => { if (!document.body.contains(stato)) clearInterval(t); else carica(); }, 10000);
+  ticker(stato, carica, 15000);
   return h("div", {}, h("h2", {}, "Memoria condivisa (per significato)"),
     h("p", { class: "aiuto" }, "Tutti i documenti caricati sono ricercabili anche per significato, non solo per parole: un agente che lavora a un progetto trova i brani pertinenti anche se usano termini diversi. Ognuno vede solo i documenti che già poteva vedere. Qui puoi anche importare le tue conversazioni di ChatGPT (Impostazioni → Controlli dati → Esporta) e di Claude (Impostazioni → Privacy → Esporta dati): carica lo zip o il file conversations.json."),
     stato, h("div", { class: "azioni" }, indicizza), temiBox, h("h3", {}, "Carica documenti in blocco"), bloccoForm, h("h3", {}, "Importa conversazioni"), h("label", {}, "File di esportazione (.zip o .json)", file),

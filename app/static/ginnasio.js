@@ -47,7 +47,8 @@ function bannerCasati() {
   const carica = async () => {
     if (!document.body.contains(box)) { clearInterval(timer); return; }
     try {
-      const d = await api("GET", "/gestione/ginnasio/adesso");
+      const d = await api("GET", "/gestione/ginnasio/adesso", undefined, { scadenzaMs: 15000 });
+      if (box._falliti) { box.querySelector(":scope > .banner-errore")?.remove(); box._falliti = 0; box._pausaFino = 0; }
       const f = JSON.stringify(d); if (f === firma) return; firma = f;
       const c = d.in_corso;
       const coda = d.in_coda.length ? h("div", { class: "sotto", style: "margin-top:6px" }, "Poi: " + d.in_coda.map(x => x.competenza + " (liv. " + x.livello + ")").join(" · ") + (d.in_coda_totale > d.in_coda.length ? " · altre " + (d.in_coda_totale - d.in_coda.length) : "")) : null;
@@ -65,9 +66,9 @@ function bannerCasati() {
         h("div", { style: "margin-top:6px" }, h("b", {}, "Ora: "), c.azione + (c.ultima_azione_il ? " (" + quando(c.ultima_azione_il) + ")" : "")),
         h("div", { class: "sotto" }, c.pdf + " documenti scaricati · " + c.video + " video lezioni (trascrizioni) · " + c.passi + " passaggi · " + c.token.toLocaleString("it-IT") + " token · in corso da " + (c.minuti < 1 ? "meno di un minuto" : c.minuti + " min")),
         attesa, coda]);
-    } catch (e) { box.replaceChildren(h("div", { class: "sotto" }, e.message)); }
+    } catch (e) { mostraErrore(box, e, carica, true); }
   };
-  carica(); timer = setInterval(carica, 4000);
+  carica(); timer = ticker(box, carica, 5000);
   return box;
 }
 
@@ -80,10 +81,11 @@ function vistaGinnasio() {
   const ORIGINI = { manuale: "tu", manager: "un manager", pm: "un project manager", lacuna: "lacuna rilevata", cerimoniere: "Cerimoniere" };
   const errore = (e) => msg.replaceChildren(avviso(e.message, "no"));
   const livelloOpz = () => [1, 2, 3, 4, 5].map(n => h("option", { value: n }, n + " — " + NOMI[n]));
-  let timer = null, versoLivello = -1;  // -1: dal più formato al meno formato
+  let timer = null, versoLivello = -1, inCorsoGin = false;  // -1: dal più formato al meno formato
   const carica = async () => {
     try {
       const d = await api("GET", "/gestione/ginnasio"), im = d.impostazioni;
+      destra.querySelector(":scope > .banner-errore")?.remove(); destra._falliti = 0; destra._pausaFino = 0;
       const firma = JSON.stringify(d);
       if (firma === ultimaFirma && destra.firstChild) return;    // nulla di nuovo: non si ridisegna, cosi' non si perde il punto di lettura
       ultimaFirma = firma;
@@ -149,9 +151,9 @@ function vistaGinnasio() {
           : h("th", {}, t)))),
           h("tbody", {}, d.agenti.slice().sort((a, b) => versoLivello * (a.livello_formazione - b.livello_formazione) || a.nome.localeCompare(b.nome, "it")).map(a => h("tr", {},
             h("td", {}, a.nome), h("td", {}, a.tipo === "pm" ? "Project manager" : a.tipo === "manager" ? "Manager" : a.ruolo || "—"), h("td", {}, String(a.livello_formazione))))))]);
-      if ((im.in_corso || d.recenti.some(x => x.stato === "in_corso")) && !timer) timer = setInterval(() => { if (!document.body.contains(destra)) { clearInterval(timer); return; } carica(); }, 8000);
+      if ((im.in_corso || d.recenti.some(x => x.stato === "in_corso")) && !timer) timer = setInterval(() => { if (!document.body.contains(destra)) { clearInterval(timer); return; } if (document.hidden || inPausa(destra) || inCorsoGin) return; inCorsoGin = true; carica().finally(() => { inCorsoGin = false; }); }, 8000);
       if (!im.in_corso && timer) { clearInterval(timer); timer = null; }
-    } catch (e) { destra.replaceChildren(avviso(e.message, "no")); }
+    } catch (e) { mostraErrore(destra, e, carica, true); }
   };
   carica();
   return [h("h2", {}, "Ginnasio"),
@@ -207,6 +209,7 @@ function avanzamento(x, carica, errore, cache) {
   const carica_ = async () => {
     try {
       const a = await api("GET", "/gestione/ginnasio/richieste/" + x.id + "/avanzamento");
+      corpo.querySelector(":scope > .banner-errore")?.remove(); corpo._falliti = 0; corpo._pausaFino = 0;
       const firma = JSON.stringify(a) + x.stato;
       if (firma === firmaAv) return;                // nessuna novita': il testo che stai leggendo non si muove
       firmaAv = firma;
@@ -222,11 +225,11 @@ function avanzamento(x, carica, errore, cache) {
         a.appunti ? h("details", { open: x.stato === "appunti_pronti" }, h("summary", { class: "nome", style: "cursor:pointer" }, "Appunti di studio"), h("div", { class: "sotto", style: "white-space:pre-wrap;max-height:320px;overflow:auto" }, a.appunti)) : null,
         x.stato === "appunti_pronti" ? h("div", { class: "azioni" }, h("button", { class: "p", onclick: async () => { try { await api("POST", "/gestione/ginnasio/richieste/" + x.id + "/stesura"); await carica(); } catch (e) { errore(e); } } }, "Procedi alla stesura")) : null,
         a.passaggi.length ? h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer" }, "Passaggi di Padre Casati (" + a.passaggi.length + ")"), a.passaggi.map(p => h("div", { class: "sotto" }, new Date(p.creato_il).toLocaleTimeString("it-IT") + " · " + p.dettaglio))) : null]);
-    } catch (e) { corpo.replaceChildren(h("div", { class: "sotto" }, e.message)); }
+    } catch (e) { mostraErrore(corpo, e, carica_, true); }
   };
   const det = h("details", { open: x.stato === "in_corso" || x.stato === "appunti_pronti", ontoggle: () => { if (det.open && !caricato) { caricato = true; carica_(); } } },
     h("summary", { style: "cursor:pointer;padding:4px 0" }, h("b", {}, x.competenza_nome + " · liv. " + x.livello), (x.agente ? " · " + x.agente : "") + " · " + STATO_FORMAZIONE[x.stato] + (x.token_usati ? " · " + x.token_usati.toLocaleString("it-IT") + " token" : "")), corpo);
-  const avviaTimer = () => { if (!timer && x.stato === "in_corso") timer = setInterval(() => { if (!document.body.contains(det)) return; carica_(); }, 6000); };
+  const avviaTimer = () => { if (!timer && x.stato === "in_corso") timer = ticker(det, carica_, 6000); };
   const riepilogo = det.querySelector("summary");
   det.aggiorna = (nuovo) => {
     const prima = x.stato;

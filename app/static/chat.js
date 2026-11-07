@@ -321,7 +321,12 @@ function ripristinaVista() {
 
 // ---------- come si usa la piattaforma: solo nomi delle pagine ed errori mostrati, mai i contenuti ----------
 const codaUso = [];
-function registraUso(vista, azione) { if (token && codaUso.length < 60) codaUso.push({ vista: String(vista).toLowerCase().replace(/[^a-z0-9_:\-]/g, "").slice(0, 60) || "x", azione }); }
+function registraUso(vista, azione, extra) { if (token && codaUso.length < 60) codaUso.push({ vista: String(vista).toLowerCase().replace(/[^a-z0-9_:\-]/g, "").slice(0, 60) || "x", azione, ...(extra || {}) }); }
+// Quanto resta aperta una pagina: si misura sul browser (solo il tempo con la scheda visibile) e si invia all'uscita, perche' il server non conosce l'orario dei singoli eventi.
+const tempoVista = { inizio: Date.now(), acc: 0 };
+function secondiVista() { if (tempoVista.inizio) { tempoVista.acc += Date.now() - tempoVista.inizio; tempoVista.inizio = document.hidden ? null : Date.now(); } const s = Math.round(tempoVista.acc / 1000); tempoVista.acc = 0; return Math.min(s, 7200); }
+function chiudiVistaUso(vista) { if (vista) registraUso(vista, "uscita", { durata_s: secondiVista() }); }
+document.addEventListener("visibilitychange", () => { if (document.hidden) { if (tempoVista.inizio) { tempoVista.acc += Date.now() - tempoVista.inizio; tempoVista.inizio = null; } inviaUso(true); } else tempoVista.inizio = Date.now(); });
 async function inviaUso(finePagina) {
   if (!token || !codaUso.length) return;
   const eventi = codaUso.splice(0, 30);
@@ -333,5 +338,5 @@ async function inviaUso(finePagina) {
 function avviaUso() {
   if (stato.timerUso) return;
   stato.timerUso = setInterval(() => inviaUso(false), 20000);
-  window.addEventListener("pagehide", () => inviaUso(true));
+  window.addEventListener("pagehide", () => { chiudiVistaUso(stato.ultimaEtichetta); inviaUso(true); });
 }

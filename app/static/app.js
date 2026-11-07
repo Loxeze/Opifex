@@ -20,6 +20,7 @@ function h(tag, attrs, ...figli) {
 
 // Sostituisce il contenuto di un elemento accettando anche liste annidate di nodi
 function riempi(el, contenuto) {
+  el._falliti = 0; el._pausaFino = 0;
   el.replaceChildren(...[contenuto].flat(Infinity).filter(n => n !== null && n !== undefined && n !== false));
 }
 
@@ -30,11 +31,16 @@ function messaggioErrore(d) {
   return "Errore sconosciuto";
 }
 
-async function api(metodo, percorso, corpo) {
+const SCADENZA_LETTURA_MS = 30000;   // una lettura che non risponde entro 30 secondi si interrompe e lo si dice (scritture e caricamenti di file non hanno limite: possono durare)
+function erroreApi(messaggio, categoria, percorso, codice) { const e = new Error(messaggio); e.categoria = categoria; e.percorso = percorso; e.codice = codice || 0; return e; }
+async function api(metodo, percorso, corpo, opzioni) {
   const modulo = corpo instanceof FormData;
-  // le richieste di lettura e l'accesso non restano mai appese in silenzio: dopo 45 secondi si dice che il server non risponde
   const ctl = new AbortController();
-  const scadenza = (metodo === "GET" || percorso.startsWith("/login")) ? setTimeout(() => ctl.abort(), 45000) : null;
+  const limite = (opzioni && opzioni.scadenzaMs) || ((metodo === "GET" || percorso.startsWith("/login")) ? SCADENZA_LETTURA_MS : 0);
+  const scadenza = limite ? setTimeout(() => ctl.abort(), limite) : null;
+  const vistaAllora = typeof etichettaVista === "function" ? etichettaVista() : "";   // l'errore va alla pagina che ha chiesto, non a quella aperta dopo
+  const base = percorso.split("?")[0];
+  const t0 = Date.now();
   let r;
   try {
     r = await fetch(percorso, {
@@ -44,14 +50,57 @@ async function api(metodo, percorso, corpo) {
       signal: ctl.signal,
     });
   } catch (e) {
-    if (e && e.name === "AbortError") throw new Error("Il server non risponde (" + percorso.split("?")[0] + "). Riprova tra un minuto; se continua, avvisa chi gestisce il server.");
-    throw new Error("Connessione al server non riuscita. Controlla la rete e riprova.");
+    if (e && e.name === "AbortError") { segnalaErrore(vistaAllora, "timeout", base, Date.now() - t0); throw erroreApi("Il server non ha risposto in tempo (" + base + "). Riprova tra qualche secondo.", "timeout", base); }
+    segnalaErrore(vistaAllora, "rete", base, Date.now() - t0);
+    throw erroreApi("Connessione al server non riuscita. Controlla la rete e riprova.", "rete", base);
   } finally { if (scadenza) clearTimeout(scadenza); }
   let dati = null;
   try { dati = await r.json(); } catch (e) { /* risposta vuota */ }
-  if (r.status === 401 && percorso !== "/login" && percorso !== "/v1/accesso") { esci(); throw new Error("Sessione scaduta: rientra"); }
-  if (!r.ok) throw new Error(messaggioErrore(dati));
+  if (r.status === 401 && percorso !== "/login" && percorso !== "/v1/accesso") { esci(); throw erroreApi("Sessione scaduta: rientra", "sessione", base, 401); }
+  if (!r.ok) {
+    const cat = r.status >= 500 ? "server" : "validazione";
+    segnalaErrore(vistaAllora, cat, base, Date.now() - t0);
+    const testo = (dati && (typeof dati.detail === "string" || Array.isArray(dati.detail))) ? messaggioErrore(dati) : (r.status >= 500 ? "Il server ha avuto un problema (codice " + r.status + ")." : "Richiesta non accettata (codice " + r.status + ").");
+    throw erroreApi(testo, cat, base, r.status);
+  }
   return dati;
+}
+
+// Un errore di caricamento conta una volta sola per episodio (stessa pagina, stesso tipo, stesso indirizzo entro un minuto): i ricaricamenti automatici non lo moltiplicano.
+const ultimiErrori = new Map();
+function segnalaErrore(vista, categoria, percorso, durataMs) {
+  if (typeof registraUso !== "function") return;
+  const chiave = vista + "|" + categoria + "|" + percorso, ora = Date.now();
+  if (ultimiErrori.get(chiave) && ora - ultimiErrori.get(chiave) < 60000) return;
+  ultimiErrori.set(chiave, ora);
+  registraUso(vista, "errore", { categoria, durata_ms: Math.min(Math.round(durataMs || 0), 600000) });
+}
+
+// Banner unico per un riquadro che non si carica: cosa e' successo, cosa fare, Riprova, contatore dei tentativi. Con tieni=true i dati gia' mostrati restano sotto il banner.
+function mostraErrore(host, e, riprova, tieni) {
+  host._falliti = (host._falliti || 0) + 1;
+  host._pausaFino = Date.now() + Math.min(60000, 5000 * Math.pow(2, host._falliti - 1));   // gli aggiornamenti automatici rallentano: 5 s, 10 s, 20 s... fino a 1 minuto
+  const cat = e && e.categoria;
+  const cosa = cat === "timeout" || cat === "rete" ? "" : cat === "server" ? "Riprova; se succede ancora, segnalalo a chi gestisce il server." : cat === "sessione" ? "Rientra con la tua password." : "Controlla i dati e riprova.";
+  const bottone = riprova ? h("button", { class: "s", type: "button", onclick: (ev) => { ev.currentTarget.disabled = true; host._pausaFino = 0; riprova(); } }, "Riprova") : null;
+  const banner = h("div", { class: "messaggio no banner-errore", role: "alert" },
+    h("div", {}, (e && e.message) || "Errore"), h("div", { class: "sotto" }, [cosa, host._falliti > 1 ? host._falliti + " tentativi non riusciti" : ""].filter(Boolean).join(" · ")), bottone);
+  const vecchio = host.querySelector(":scope > .banner-errore");
+  if (tieni && host.children.length && !(host.children.length === 1 && vecchio)) { if (vecchio) vecchio.replaceWith(banner); else host.prepend(banner); }
+  else host.replaceChildren(banner);
+}
+const inPausa = (host) => !!(host && host._pausaFino && host._pausaFino > Date.now());
+
+// Aggiornamento automatico sicuro: si ferma quando il riquadro sparisce o la scheda e' nascosta, non si sovrappone, e dopo un errore aspetta di piu'.
+function ticker(host, fn, ms) {
+  let occupato = false;
+  const t = setInterval(async () => {
+    if (!document.body.contains(host)) { clearInterval(t); return; }
+    if (document.hidden || occupato || inPausa(host)) return;
+    occupato = true;
+    try { await fn(); } finally { occupato = false; }
+  }, ms);
+  return t;
 }
 
 function esci() {
@@ -60,7 +109,7 @@ function esci() {
   mostraAccesso();
 }
 
-function avviso(testo, tipo) { if (tipo === "no" && typeof registraUso === "function") registraUso(etichettaVista(), "errore"); return h("div", { class: "messaggio " + (tipo || "avv"), role: "status" }, testo); }
+function avviso(testo, tipo) { return h("div", { class: "messaggio " + (tipo || "avv"), role: "status" }, testo); }
 
 // ---------- Accesso ----------
 function mostraAccesso(errore) {
@@ -164,12 +213,12 @@ function disegna() {
   if (stato.timer) { clearInterval(stato.timer); stato.timer = null; }
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
-  if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
+  if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { chiudiVistaUso(stato.ultimaEtichetta); stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
   const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
   let contenuto;
   try { contenuto = vista(); }
   catch (e) {   // una schermata che si rompe non deve bloccare il menu: si mostra l'errore e si puo' andare altrove
-    if (typeof registraUso === "function") registraUso(etichettaVista(), "errore");
+    if (typeof registraUso === "function") registraUso(etichettaVista(), "errore", { categoria: "interfaccia" });
     if (stato.vista === "impostazioni") stato.sezione = "profilo";
     contenuto = h("div", { class: "carta" }, avviso("Questa schermata non si è aperta (" + (e && e.message ? e.message : "errore") + "). Scegli un'altra voce dal menu: il resto funziona.", "no"),
       h("button", { class: "s", type: "button", onclick: () => vai("dashboard") }, "Torna alla plancia"));

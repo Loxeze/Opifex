@@ -129,6 +129,7 @@ with TestClient(app) as c:
     for k in range(12):
         sql(f"INSERT INTO uso_eventi (utente_id, vista, azione, creato_il) VALUES (%s,'ginnasio','vista', {base} + make_interval(hours => {k * 6 + 100}))", (uid,))
         sql(f"INSERT INTO uso_eventi (utente_id, vista, azione, creato_il) VALUES (%s,'crm','vista', {base} + make_interval(hours => {k * 6 + 100}, secs => 3))", (uid,))
+        sql("INSERT INTO uso_eventi (utente_id, vista, azione, durata_s) VALUES (%s,'ginnasio','uscita',3)", (uid,))   # la permanenza ora si misura sul browser
     for k in range(6):
         sql("INSERT INTO uso_eventi (utente_id, vista, azione) VALUES (%s,'impostazioni:siti','errore')", (uid,))
     with connessione() as cn:
