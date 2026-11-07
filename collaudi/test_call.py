@@ -86,13 +86,13 @@ with TestClient(app) as c:
     ok("in riunione i manager usano il modello scelto per le riunioni, non quello dell'agente", modelli_visti and set(modelli_visti) == {"claude-sonnet-5-5"}, str(set(modelli_visti)))
     ok("il prompt vieta le conferme tipo «ho preso nota»", "VIETATO dire o far capire di aver registrato" in ultimi_msg[1] and "COME RISPONDI" in ultimi_msg[1] and "UNA domanda giusta" in ultimi_msg[1] and "Il ragionamento lo fai dentro di te" in ultimi_msg[1])
     q = c.get("/gestione/riunioni-call/qualita", headers=H).json()
-    ok("qualita' riunioni: di default il modello migliore col ragionamento medio", q["modello"] == "claude-sonnet-5-5" and q["sforzo"] == "medium" and "claude-opus-5-5" in q["modelli"], str(q))
+    ok("qualita' riunioni: di default Sonnet col ragionamento minimo (veloce)", q["modello"] == "claude-sonnet-5-5" and q["sforzo"] == "low" and "claude-opus-5-5" in q["modelli"], str(q))
     ok("qualita' riunioni: modifica e controlli", c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-sonnet-5-5", "sforzo": "medium"}).status_code == 200
        and c.get("/gestione/riunioni-call/qualita", headers=H).json()["modello"] == "claude-sonnet-5-5"
        and c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "inventato"}).status_code == 422
        and c.put("/gestione/riunioni-call/qualita", headers=H, json={"sforzo": "enorme"}).status_code == 422
        and c.get("/gestione/riunioni-call/qualita", headers=HC).status_code == 403)
-    c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-sonnet-5-5", "sforzo": "medium"})
+    c.put("/gestione/riunioni-call/qualita", headers=H, json={"modello": "claude-sonnet-5-5", "sforzo": "low"})
     sql("UPDATE agenti SET modello_riunione='claude-haiku-5-5' WHERE id=%s", (dario,))
     copione[:] = [fine("Uno."), fine("Due.")]; modelli_visti.clear()
     c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Che programma facciamo per l'estate?"})
@@ -113,7 +113,7 @@ with TestClient(app) as c:
     ok("polling incrementale", c.get(f"/gestione/riunioni-call/{tid}?dopo={ult}", headers=H).json()["interventi"] == [])
 
     copione[:] = [fine("Dario: certo, ti rispondo io.\nCODA: Mi servirebbe una decisione sul budget.")]
-    ultimi_msg.clear()
+    ultimi_msg.clear(); strumenti_visti.clear()
     c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Dario, quanto costerebbe il sito?"})
     d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
     nuovi = [i for i in d["interventi"] if i["id"] > ult]
@@ -151,10 +151,13 @@ with TestClient(app) as c:
     sql("UPDATE tavoli SET occupato=FALSE WHERE id=%s", (tid,))
     copione[:] = [fine("Ecco il documento completo sull'estate.\nPAROLE: Ho scritto il piano estate, lo trovi nella task."), fine("Documento sul budget pronto.\nPAROLE: Ho finito il budget.")]
     ultimi_msg.clear()
+    ok("risposta a voce veloce: niente colleghi ne' web tra gli strumenti, e dice di assegnare i lavori lunghi", strumenti_visti and all("chiedi_a_agente" not in t and "web_search" not in t for t in strumenti_visti), str(strumenti_visti))
+    strumenti_visti.clear()
     r = c.post(f"/gestione/riunioni-call/{tid}/turno", headers=H, json={"testo": "Marco e Dario, preparatemi un documento con il piano per l'estate"})
     d = c.get(f"/gestione/riunioni-call/{tid}", headers=H).json()
     ok("un incarico parte davvero: task create, preso in carico e consegna a voce", r.json().get("registrata") is False and sql("SELECT count(*) FROM task WHERE titolo LIKE 'Dalla riunione%%'")[0][0] == 2
        and any(i["testo"] == "Ci lavoro." for i in d["interventi"]) and not any("Preso in carico" in i["testo"] for i in d["interventi"]) and any("Ho scritto il piano estate" in i["testo"] for i in d["interventi"]), str([i["testo"][:50] for i in d["interventi"][-6:]]))
+    ok("l'incarico invece usa tutti gli strumenti (colleghi compresi)", any("chiedi_a_agente" in t for t in strumenti_visti), str(strumenti_visti))
     ok("il documento intero e' nella task, la sintesi parlata no", sql("SELECT count(*) FROM task_commenti WHERE testo LIKE 'Ecco il documento completo%%'")[0][0] == 1 and "PAROLE" not in " ".join(i["testo"] for i in d["interventi"]))
     ok("task completate e notifica", sql("SELECT count(*) FROM task WHERE titolo LIKE 'Dalla riunione%%' AND stato='completata'")[0][0] == 2 and sql("SELECT count(*) FROM notifiche WHERE testo LIKE '%%incarico della riunione%%'")[0][0] == 2)
     ok("una domanda che contiene «documento» resta una domanda", not call_riunioni.e_lavoro("Quanto costa fare il documento?") and call_riunioni.e_lavoro("Scrivi la relazione") and not call_riunioni.e_indicazione("Scrivi la relazione"))
@@ -181,7 +184,7 @@ with TestClient(app) as c:
     ok("errore di trascrizione riportato al browser (per passare al riconoscimento del browser)", c.post(f"/gestione/riunioni-call/{tid}/audio", headers=H, files=f).status_code == 409)
     ok("limite orario dedicato alle call", "limite_ora=MAX_ASCOLTI_ORA" in open("app/call_riunioni.py").read() and call_riunioni.MAX_ASCOLTI_ORA >= 600)
     ok("ElevenLabs: niente voce robotica di ripiego e precarico", all(k in c.get("/app/riunioni_call.js").text for k in ("precarica", "mancata")))
-    ok("scrittura/ascolto: il client ha il motore continuo", all(k in c.get("/app/riunioni_call.js").text for k in ("echoCancellation", "ora - ultimaVoce > 750", "bloccato", "/audio", "SpeechRecognition")))
+    ok("scrittura/ascolto: il client ha il motore continuo", all(k in c.get("/app/riunioni_call.js").text for k in ("echoCancellation", "ora - ultimaVoce > 650", "bloccato", "/audio", "SpeechRecognition", "SchermoAcceso", "wakeLock")))
 
     # voci
     vm = c.get("/gestione/voci-manager", headers=H).json()

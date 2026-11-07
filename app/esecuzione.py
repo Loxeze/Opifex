@@ -81,6 +81,9 @@ def _costo(a: dict, t_in: int, t_out: int) -> float:
     return round(t_in / 1_000_000 * c_in + t_out / 1_000_000 * c_out, 4)
 
 
+VELOCE = __import__("contextvars").ContextVar("risposta_veloce", default=False)   # conversazione a voce: niente ricerche lunghe, niente deleghe a colleghi, ragionamento minimo
+
+
 def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                   utente_id: int | None = None, memorizza: bool = False, max_token: int | None = None,
                   allegati: list[tuple[str, str]] | None = None) -> dict:
@@ -93,7 +96,7 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
     try:
         with connessione() as _c:
             _r = _c.execute("SELECT sforzo, passi_max FROM agenti WHERE id = %s", (agente_id,)).fetchone()
-        tk_p = agente_browser.PASSI_AGENTE.set(_r["passi_max"] if _r else None)
+        tk_p = agente_browser.PASSI_AGENTE.set(4 if VELOCE.get() else (_r["passi_max"] if _r else None))
         tk_s = fornitori.SFORZO.set(fornitori.SFORZO_FORZATO.get() or (_r["sforzo"] if _r else None))
         try:
             out = _esegui_agente_interno(agente_id, messaggio, fascia_dati, utente_id, memorizza, max_token, allegati)
@@ -223,7 +226,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         if sp_ctx:
             prefisso.append(sp_ctx); dim["scheda_progetto"] = len(sp_ctx)
         try:
-            bp_ctx = best_practice.contesto(conn, a_f) if sp_ctx else ""
+            bp_ctx = best_practice.contesto(conn, a_f) if (sp_ctx and not VELOCE.get()) else ""
         except Exception:  # noqa: BLE001
             bp_ctx = ""
         if bp_ctx:
@@ -234,7 +237,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         gi_ctx = ginnasio.contesto(conn, a_f, messaggio) if memoria._ok(a_f, "interno") else ""
         if gi_ctx:
             prefisso.append(gi_ctx); dim["competenze"] = len(gi_ctx)
-        kp_ctx = squadre.contesto_kpi(conn, a_f) if memoria._ok(a_f, "interno") else ""
+        kp_ctx = squadre.contesto_kpi(conn, a_f) if (memoria._ok(a_f, "interno") and not VELOCE.get()) else ""
         if kp_ctx:
             prefisso.append(kp_ctx); dim["kpi"] = len(kp_ctx)
         if a_f.get("ruolo_speciale") == "cerimoniere":
@@ -244,7 +247,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             from . import uso_ux
             ux_ctx = uso_ux.riepilogo(conn)
             prefisso.append(ux_ctx); dim["uso"] = len(ux_ctx)
-        al_ctx = memoria.contesto_allineamento(conn, a_f)
+        al_ctx = "" if VELOCE.get() else memoria.contesto_allineamento(conn, a_f)
         if al_ctx:
             prefisso.append(al_ctx); dim["allineamento"] = len(al_ctx)
         if memoria._ok(a_f, "interno"):
@@ -274,8 +277,11 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         testo_uscente = anonimizza(messaggio)
         n_strumenti, car_strumenti = 0, 0
         try:
-            web = {"siti": a["siti_consentiti"], "max_ricerche": a["max_ricerche"]} if a["accesso_web"] else None
-            if not web:
+            web = {"siti": a["siti_consentiti"], "max_ricerche": a["max_ricerche"]} if (a["accesso_web"] and not VELOCE.get()) else None
+            if VELOCE.get():
+                a["istruzioni"] = a["istruzioni"] + ("\n\nCONVERSAZIONE A VOCE: rispondi subito con quello che sai e con gli strumenti rapidi (documenti, CRM, archivio, schede). "
+                                                     "Niente ricerche sul web ne' deleghe a colleghi mentre Lorenzo aspetta: se serve un lavoro lungo o una ricerca, dillo in una frase e proponi di assegnarlo come incarico.")
+            elif not web:
                 a["istruzioni"] = a["istruzioni"] + ("\n\nNON HAI LA RICERCA WEB (scelta di Lorenzo per te): non cercare in rete e non chiedergli di attivarla. "
                                                      "Se ti serve un'informazione dal web chiedila a un collega che ce l'ha (ad es. Scout, Radar, Tendenze).")
             if web and a["fornitore"] == "anthropic":   # l'agente deve sapere di avere il web, altrimenti ne chiede l'accesso
@@ -326,6 +332,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             prog_crea = bool(scheda_progetto.strumenti_abilitati() and ok_int and a["livello"] in ("manager", "referente") and not _sent)
             sq_pm = bool(form_tool and pm_tool)
             sq_val = bool(form_tool and not _sent)
+            if VELOCE.get():   # a voce si aspetta una risposta in pochi secondi: via gli strumenti lenti (colleghi, web, siti, grafica, social, squadre)
+                colleghi_ok, siti = [], []
+                ricerca_tool = finestre_tool = canva_tool = siti_tool = creativi_tool = banco_tool = social_tool = sb_tool = rev_tool = iniz_tool = email_tool = False
+                form_tool = prog_crea = sq_pm = sq_val = False
             if creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val:
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""

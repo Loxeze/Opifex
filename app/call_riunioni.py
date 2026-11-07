@@ -14,10 +14,10 @@ from .permessi import solo_titolare
 router = APIRouter(prefix="/gestione", tags=["riunioni"])
 SINCRONO = False
 MAX_PARTECIPANTI = 8
-MAX_TOKEN_RISPOSTA = 400
+MAX_TOKEN_RISPOSTA = 300
 NIENTE = "niente da aggiungere"
 MODELLO_RIUNIONI = "claude-sonnet-5-5"   # Sonnet: abbastanza intelligente per parlare e molto piu' rapido
-SFORZO_RIUNIONI = "medium"
+SFORZO_RIUNIONI = "low"       # a voce conta la rapidita': il ragionamento esteso fa passare decine di secondi
 REGOLE_STILE_BREVE = "diretto, tra colleghi; mai dire di aver registrato, annotato o preso nota."
 
 STILE = ("si parla come in una conversazione vocale tra colleghi che si capiscono al volo: dritti al punto, sulla sostanza, nel tono di chi sa gia' cosa fare. "
@@ -195,14 +195,15 @@ def consegna_coda(conn, tid: int) -> int:
 
 def qualita(conn) -> dict:
     """Modello e sforzo di ragionamento usati dai manager in riunione (vuoto = quelli dell'agente)."""
-    r = {x["chiave"]: x["valore"] for x in conn.execute("SELECT chiave, valore FROM impostazioni_sistema WHERE chiave IN ('riunioni_modello','riunioni_sforzo')").fetchall()}
+    r = {x["chiave"]: x["valore"] for x in conn.execute("SELECT chiave, valore FROM impostazioni_sistema WHERE chiave IN ('riunioni_modello','riunioni_sforzo_v2')").fetchall()}
     return {"modello": r["riunioni_modello"] if "riunioni_modello" in r else MODELLO_RIUNIONI,
-            "sforzo": r["riunioni_sforzo"] if "riunioni_sforzo" in r else SFORZO_RIUNIONI}
+            "sforzo": r["riunioni_sforzo_v2"] if "riunioni_sforzo_v2" in r else SFORZO_RIUNIONI}
 
 
 def _applica_qualita():
-    """Nel thread corrente: i manager rispondono col modello e lo sforzo scelti per le riunioni."""
-    from . import fornitori
+    """Nel thread corrente: i manager rispondono col modello e lo sforzo scelti per le riunioni, in modalita' veloce (a voce non si aspetta un minuto)."""
+    from . import fornitori, esecuzione
+    esecuzione.VELOCE.set(True)
     with connessione() as conn:
         q = qualita(conn)
     fornitori.MODELLO_FORZATO.set(q["modello"] or None)
@@ -236,7 +237,7 @@ def imposta_qualita(d: Qualita, _: dict = Depends(solo_titolare)):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Sforzo non valido")
         if d.modello and not conn.execute("SELECT 1 FROM modelli_ai WHERE nome = %s", (d.modello,)).fetchone():
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Modello non registrato")
-        for k, v in (("riunioni_modello", d.modello), ("riunioni_sforzo", d.sforzo)):
+        for k, v in (("riunioni_modello", d.modello), ("riunioni_sforzo_v2", d.sforzo)):
             if v is not None:
                 conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (k, v))
     return {"ok": True}
@@ -285,8 +286,9 @@ def _rispondi(tid: int, ids: list[int]):
 
 def _lavora(tid: int, aid: int, task_id: int, testo: str):
     """Esegue l'incarico in autonomia (con tutti gli strumenti dell'agente, anche Drive) e lo riferisce nella riunione."""
-    from .esecuzione import esegui_agente
+    from .esecuzione import esegui_agente, VELOCE
     _applica_qualita()
+    VELOCE.set(False)     # l'incarico e' lavoro vero (ricerche, colleghi, documenti): niente scorciatoie
     _modello_per(aid)
     try:
         with connessione() as conn:

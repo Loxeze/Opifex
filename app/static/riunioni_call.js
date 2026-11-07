@@ -108,6 +108,45 @@ const CallVoce = {
 
 ["pointerdown", "touchstart", "touchend", "keydown", "click"].forEach(ev => document.addEventListener(ev, () => CallVoce.sblocca(), { passive: true }));
 
+// Schermo sempre acceso durante la call (in auto il telefono non deve spegnersi): Wake Lock dove c'e', altrimenti un video nero muto in ciclo (trucco per iPhone piu' vecchi)
+const SchermoAcceso = {
+  lock: null, video: null, attivo: false, modo: "", scritta: null,
+  VIDEO: "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAM3bW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAmF0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAACAAAAAgAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAHZbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAoAAAAKABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABhG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAURzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAACAAIABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZCWwEQAAAAwBAAAADAoPEiZIBAAVoy4PLIAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAABVgAAAVYAAAABhzdHRzAAAAAAAAAAEAAAAFAAAIAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAAFAAAAAQAAAChzdHN6AAAAAAAAAAAAAAAFAAAChQAAAAoAAAAKAAAACgAAAAkAAAAUc3RjbwAAAAAAAAABAAADZwAAAGJ1ZHRhAAAAWm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALWlsc3QAAAAlqXRvbwAAAB1kYXRhAAAAAQAAAABMYXZmNjAuMTYuMTAwAAAACGZyZWUAAAK0bWRhdAAAAnAGBf//bNxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjQgcjMxMDggMzFlMTlmOSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjMgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0wIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDE6MHgxMTEgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTUgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAANZYiEBHyYoAA2IyddeAAAAAZBmjgI+WAAAAAGQZpUAj5YAAAABkGaYBDywAAAAAVBmoA/yw==",
+  async richiedi() {
+    if (!this.attivo) return;
+    try {
+      if (navigator.wakeLock && navigator.wakeLock.request && document.visibilityState === "visible") {
+        if (this.lock && !this.lock.released) return;
+        this.lock = await navigator.wakeLock.request("screen"); this.modo = "wakelock";
+        this.lock.addEventListener("release", () => { this.mostra(); });
+        this.mostra(); return;
+      }
+    } catch (e) { /* si prova il piano B */ }
+    try {
+      if (!this.video) {
+        const v = document.createElement("video"); v.setAttribute("playsinline", ""); v.setAttribute("muted", ""); v.muted = true; v.loop = true; v.src = this.VIDEO;
+        v.style.cssText = "position:fixed;width:1px;height:1px;opacity:0.01;pointer-events:none;left:0;top:0"; document.body.appendChild(v); this.video = v;
+      }
+      await this.video.play(); this.modo = "video";
+    } catch (e) { this.modo = ""; }
+    this.mostra();
+  },
+  mostra() { if (this.scritta) this.scritta.textContent = !this.attivo ? "" : this.modo ? "📱 Schermo tenuto acceso durante la call" : "⚠️ Questo telefono non mi lascia tenere lo schermo acceso: imposta «Spegnimento schermo: mai» nelle impostazioni del telefono"; },
+  avvia(scritta) {
+    this.scritta = scritta; this.attivo = true; this.richiedi();
+    if (!this._ev) { this._ev = () => { if (document.visibilityState === "visible") this.richiedi(); }; document.addEventListener("visibilitychange", this._ev); }
+    ["pointerdown", "touchend"].forEach(ev => document.addEventListener(ev, this._tocco = this._tocco || (() => { if (this.attivo && !this.modo) this.richiedi(); }), { passive: true }));
+  },
+  ferma() {
+    this.attivo = false;
+    try { if (this.lock) this.lock.release(); } catch (e) { /* ok */ }
+    this.lock = null;
+    if (this.video) { try { this.video.pause(); this.video.remove(); } catch (e) { /* ok */ } this.video = null; }
+    if (this._ev) { document.removeEventListener("visibilitychange", this._ev); this._ev = null; }
+    this.modo = ""; this.mostra();
+  },
+};
+
 function pannelloQualita() {
   const box = h("div"), msg = h("div");
   (async () => {
@@ -119,7 +158,7 @@ function pannelloQualita() {
       sf.value = d.sforzo || "";
       const salva = async () => { try { await api("PUT", "/gestione/riunioni-call/qualita", { modello: mod.value, sforzo: sf.value }); msg.replaceChildren(avviso("Salvato: vale dalla prossima risposta.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } };
       mod.addEventListener("change", salva); sf.addEventListener("change", salva);
-      riempi(box, [h("p", { class: "aiuto" }, "Qui i manager rispondono col modello più capace e ragionano a fondo (consigliato: claude-sonnet-5-5, ragionamento medio: intelligente e veloce). Opus è più profondo ma più lento e costoso, «alto» ragiona di più ma risponde più lentamente; fuori dalle riunioni ogni agente usa il suo modello."),
+      riempi(box, [h("p", { class: "aiuto" }, "In riunione conta la rapidità (consigliato: claude-sonnet-5-5, ragionamento basso: risponde in pochi secondi). Opus è più profondo ma più lento e costoso, «alto» ragiona di più ma risponde più lentamente; fuori dalle riunioni ogni agente usa il suo modello."),
         h("div", { class: "riga", style: "align-items:center;gap:8px;flex-wrap:wrap" }, h("span", { style: "min-width:150px" }, "Modello"), mod), h("div", { class: "riga", style: "align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px" }, h("span", { style: "min-width:150px" }, "Ragionamento"), sf)]);
     } catch (e) { box.replaceChildren(avviso(e.message, "no")); }
   })();
@@ -197,11 +236,11 @@ function schermataCall(tid, esci) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const SERVER = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
   let ultimoBrowser = "", ultimaDetta = null, ultimo = 0, coda = [], parlando = false, vivo = true, riunione = null, occupato = false, inAttesa = "";
-  let motore = SERVER ? "server" : SR ? "browser" : "nessuno", muto = false, flusso = null, ctx = null, an = null, buf = null, timer = null;
+  let tAttesa = 0, motore = SERVER ? "server" : SR ? "browser" : "nessuno", muto = false, flusso = null, ctx = null, an = null, buf = null, timer = null;
   let mr = null, pezzi = [], registrando = false, inizioReg = 0, inizioVoce = 0, ultimaVoce = 0, rumore = 4, forte = 0, livello = 0, rec = null, trascrivendo = 0;
   const tessere = h("div", { class: "riga", style: "flex-wrap:wrap;gap:10px;margin-bottom:10px" });
   const log = h("div", { style: "max-height:42vh;overflow:auto;margin-bottom:10px" });
-  const stato = h("div", { style: "font-weight:600;margin:6px 0" }), msg = h("div");
+  const stato = h("div", { style: "font-weight:600;margin:6px 0" }), msg = h("div"), schermo = h("div", { class: "sotto", style: "margin:0 0 6px" });
   const barra = h("div", { style: "height:6px;border-radius:3px;background:#3fd3c0;width:0%;transition:width .08s" });
   const campo = h("input", { placeholder: "Oppure scrivi qui", maxlength: 4000, style: "flex:1" });
   const bInvia = h("button", { class: "p", type: "button" }, "Invia");
@@ -212,14 +251,14 @@ function schermataCall(tid, esci) {
   const nomeDi = (id) => ((riunione.partecipanti.find(p => p.id === id) || {}).nome) || "?";
   const aggiornaStato = () => {
     stato.textContent = !vivo ? "" : muto ? "🔇 Microfono spento: tocca «Microfono spento» per riprendere"
-      : parlando ? "🔊 Sta parlando… (tocca «Interrompi» per fermarli)" : occupato ? "💭 I manager stanno pensando…" : trascrivendo ? "✍️ Ti sto ascoltando…"
+      : parlando ? "🔊 Sta parlando… (tocca «Interrompi» per fermarli)" : occupato ? "💭 Sto preparando la risposta… " + (tAttesa ? Math.round((Date.now() - tAttesa) / 1000) + " s" : "") : trascrivendo ? "✍️ Ti sto ascoltando…"
       : registrando ? "🎙 Ti sento…" : motore === "nessuno" ? "Il browser non ha il microfono: scrivi nel campo" : "🎙 Ti ascolto: parla quando vuoi";
   };
 
   // ---- invio ----
   const manda = async (t, mostra) => {
     if (mostra) riga("Tu", t, true);
-    occupato = true; aggiornaStato();
+    occupato = true; tAttesa = Date.now(); aggiornaStato();
     try { const r = await api("POST", "/gestione/riunioni-call/" + tid + "/turno", { testo: t }); if (r.registrata) { occupato = false; log.append(h("div", { class: "sotto", style: "margin:0 0 6px 8px" }, "✔ Registrato")); log.scrollTop = log.scrollHeight; aggiornaStato(); } } catch (e) { occupato = false; msg.replaceChildren(avviso(e.message, "no")); aggiornaStato(); }
   };
   const invia = (t) => {
@@ -235,6 +274,7 @@ function schermataCall(tid, esci) {
     if (rec) { const r = rec; rec = null; try { r.onend = null; r.abort(); } catch (e) { /* ok */ } }
     if (mr && mr.state !== "inactive") { mr.onstop = null; try { mr.stop(); } catch (e) { /* ok */ } }
     registrando = false;
+    SchermoAcceso.ferma();
     if (flusso) flusso.getTracks().forEach(t => t.stop());
     if (ctx) ctx.close().catch(() => {});
     flusso = ctx = an = mr = null;
@@ -275,11 +315,11 @@ function schermataCall(tid, esci) {
       } else rumore = rumore * 0.96 + rms * 0.04;
     } else {
       if (rms > soglia) ultimaVoce = ora;
-      if (ora - ultimaVoce > 750 || ora - inizioReg > 60000) { chiudiRegistrazione(); }
+      if (ora - ultimaVoce > 650 || ora - inizioReg > 60000) { chiudiRegistrazione(); }
     }
   };
   const passaABrowser = () => {
-    motore = "browser"; arresta(); avviaBrowser();
+    motore = "browser"; arresta(); SchermoAcceso.avvia(schermo); avviaBrowser();
   };
   const avviaBrowser = () => {   // riconoscimento continuo del browser: si riavvia da solo e si ferma mentre parlano i manager
     if (!SR || !vivo || motore !== "browser") return;
@@ -338,7 +378,7 @@ function schermataCall(tid, esci) {
       aggiornaStato();
       if (d.stato === "conclusa" || d.stato === "errore") { vivo = false; arresta(); mostraVerbale(d); return; }
     } catch (e) { stato.textContent = e.message; }
-    setTimeout(sondaggio, occupato || parlando || trascrivendo ? 450 : 1000);
+    setTimeout(sondaggio, occupato || parlando || trascrivendo ? 250 : 900);
   };
   const mostraVerbale = (d) => { stato.textContent = ""; barra.style.width = "0%"; riempi(msg, [h("h3", {}, "Verbale"), h("div", { class: "risposta", style: "white-space:pre-wrap" }, d.verbale || "Il verbale non è disponibile." )]); };
   bInvia.addEventListener("click", () => { const t = campo.value; campo.value = ""; invia(t); });
@@ -367,11 +407,11 @@ function schermataCall(tid, esci) {
     const nuova = !d.interventi.some(i => i.da_utente) && d.interventi.length <= 1;   // apertura appena fatta: la leggo a voce
     d.interventi.forEach(i => { ultimo = Math.max(ultimo, i.id); riga(i.da_utente ? "Tu" : nomeDi(i.agente_id), i.testo, i.da_utente); if (nuova && !i.da_utente) coda.push(i); });
     occupato = d.occupato; if (coda.length) riproduci();
-    avviaMic(); sondaggio();
+    SchermoAcceso.avvia(schermo); avviaMic(); sondaggio();
   }).catch(e => msg.replaceChildren(avviso(e.message, "no")));
-  return h("div", {}, fuori, h2, tessere, log, stato, h("div", { style: "height:6px;background:rgba(255,255,255,.08);border-radius:3px;margin-bottom:8px" }, barra),
+  return h("div", {}, fuori, h2, tessere, log, stato, schermo, h("div", { style: "height:6px;background:rgba(255,255,255,.08);border-radius:3px;margin-bottom:8px" }, barra),
     h("div", { class: "riga", style: "align-items:center" }, bMuto, campo, bInvia),
     d_regole,
-    h("p", { class: "aiuto" }, "Parla normalmente, come in una videochiamata: quando fai una pausa rispondono. Per fermare chi sta parlando tocca «Interrompi»."),
+    h("p", { class: "aiuto" }, "Parla normalmente, come in una videochiamata: quando fai una pausa rispondono. Lo schermo resta acceso da solo (in auto metti il telefono sul supporto e collegalo al caricatore). Per fermare chi sta parlando tocca «Interrompi». Se preferisci tenere lo schermo spento, mandami vocali su Telegram (/voce on)."),
     h("div", { class: "azioni" }, bStop, bProva, bCoda, termina), msg);
 }
