@@ -68,21 +68,34 @@ async function api(metodo, percorso, corpo, opzioni) {
 
 // Un errore di caricamento conta una volta sola per episodio (stessa pagina, stesso tipo, stesso indirizzo entro un minuto): i ricaricamenti automatici non lo moltiplicano.
 const ultimiErrori = new Map();
+const _contatoreVisto = {};
 function segnalaErrore(vista, categoria, percorso, durataMs) {
   if (typeof registraUso !== "function") return;
   const chiave = vista + "|" + categoria + "|" + percorso, ora = Date.now();
   if (ultimiErrori.get(chiave) && ora - ultimiErrori.get(chiave) < 60000) return;
   ultimiErrori.set(chiave, ora);
-  registraUso(vista, "errore", { categoria, durata_ms: Math.min(Math.round(durataMs || 0), 600000) });
+  registraUso(vista, "errore", { categoria, componente: componenteDa(percorso), durata_ms: Math.min(Math.round(durataMs || 0), 600000) });
+}
+// Il componente che ha dato errore e' l'indirizzo della richiesta senza identificativi: "/gestione/agenti/12" diventa "/gestione/agenti/:x". Mai parametri, mai testi.
+function componenteDa(percorso) {
+  return String(percorso || "").split("?")[0].toLowerCase().split("/").filter(Boolean).slice(0, 5).map(s => /^[a-z_-]{1,24}$/.test(s) ? s : ":x").join("/").replace(/^/, "/").slice(0, 100);
 }
 
 // Banner unico per un riquadro che non si carica: cosa e' successo, cosa fare, Riprova, contatore dei tentativi. Con tieni=true i dati gia' mostrati restano sotto il banner.
+// Esito di "Riprova": se subito dopo compare di nuovo un errore e' fallito, altrimenti riuscito. Si registrano solo pagina, componente, esito e durata.
+function provaDiNuovo(host, e, riprova) {
+  const lavoro = { t0: Date.now(), vista: typeof etichettaVista === "function" ? etichettaVista() : "x", componente: componenteDa(e && e.percorso), categoria: e && e.categoria };
+  host._riprovando = lavoro;
+  const chiudi = (esito) => { if (host._riprovando === lavoro) { host._riprovando = null; if (typeof registraUso === "function") registraUso(lavoro.vista, "riprova", { esito, componente: lavoro.componente, categoria: ["rete", "timeout", "server", "validazione"].includes(lavoro.categoria) ? lavoro.categoria : undefined, durata_ms: Math.min(Date.now() - lavoro.t0, 600000) }); } };
+  Promise.resolve().then(() => riprova()).catch(() => chiudi("fallito")).then(() => setTimeout(() => chiudi("riuscito"), 1500));
+}
 function mostraErrore(host, e, riprova, tieni) {
+  if (host._riprovando) { const l = host._riprovando; host._riprovando = null; if (typeof registraUso === "function") registraUso(l.vista, "riprova", { esito: "fallito", componente: l.componente, categoria: ["rete", "timeout", "server", "validazione"].includes(l.categoria) ? l.categoria : undefined, durata_ms: Math.min(Date.now() - l.t0, 600000) }); }
   host._falliti = (host._falliti || 0) + 1;
   host._pausaFino = Date.now() + Math.min(60000, 5000 * Math.pow(2, host._falliti - 1));   // gli aggiornamenti automatici rallentano: 5 s, 10 s, 20 s... fino a 1 minuto
   const cat = e && e.categoria;
   const cosa = cat === "timeout" || cat === "rete" ? "" : cat === "server" ? "Riprova; se succede ancora, segnalalo a chi gestisce il server." : cat === "sessione" ? "Rientra con la tua password." : "Controlla i dati e riprova.";
-  const bottone = riprova ? h("button", { class: "s", type: "button", onclick: (ev) => { ev.currentTarget.disabled = true; host._pausaFino = 0; riprova(); } }, "Riprova") : null;
+  const bottone = riprova ? h("button", { class: "s", type: "button", onclick: (ev) => { ev.currentTarget.disabled = true; host._pausaFino = 0; provaDiNuovo(host, e, riprova); } }, "Riprova") : null;
   const banner = h("div", { class: "messaggio no banner-errore", role: "alert" },
     h("div", {}, (e && e.message) || "Errore"), h("div", { class: "sotto" }, [cosa, host._falliti > 1 ? host._falliti + " tentativi non riusciti" : ""].filter(Boolean).join(" · ")), bottone);
   const vecchio = host.querySelector(":scope > .banner-errore");
@@ -152,7 +165,7 @@ const VISTE_COLLABORATORE = [["task", "Task"], ["progetti", "Progetti"], ["inizi
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Collegamenti (Google, posta)"], ["connessioni", "Connessioni a siti e app"], ["siti", "Siti e hosting (chiavi)"],
   ["canali", "Canali (Telegram)"], ["social", "Social"], ["monitorsocial", "Profili social monitorati"], ["archivio", "Archivio NAS"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["imprese", "Schede d'impresa"], ["tavoli", "Tavoli di lavoro"], ["noteaurora", "Note di Aurora"], ["miglioramenti", "Miglioramento degli agenti"], ["spesareparti", "Spesa per reparto"], ["dipendenze", "Controllo delle librerie"], ["diagnostica", "Diagnostica (log scaricabile)"], ["esempio", "Impara da un esempio"], ["memoriavett", "Memoria condivisa (vettoriale)"], ["giro", "Giro di aggiornamento"], ["contenuti", "Contenuti: brief e stili di montaggio"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["misure", "Consumi (dove vanno i token)"], ["sistema", "Backup e costi"]];
 
-function vai(vista, sezione) { segnaVisto(vista); if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") { try { Voce.fermaTutto(); } catch (e) { /* la voce non deve mai impedire di cambiare pagina */ } } stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
+function vai(vista, sezione) { if (_contatoreVisto[vista] && stato.novita && stato.novita[vista] > 0) registraUso(etichettaVista(), "contatore_aperto", { elemento: vista }); segnaVisto(vista); if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") { try { Voce.fermaTutto(); } catch (e) { /* la voce non deve mai impedire di cambiare pagina */ } } stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
 function cornice(contenuto) {
   if (window.name === "opifex-organigramma" || location.hash === "#organigramma") {   // finestra a parte: solo l'organigramma
@@ -164,7 +177,7 @@ function cornice(contenuto) {
   const nav = [];
   for (const [id, nome] of voci) {
     if (stato.ruolo === "titolare" && GRUPPO_MENU[id]) nav.push(h("div", { class: "bt-gruppo" }, GRUPPO_MENU[id]));
-    nav.push(h("button", { class: attiva(id) ? "attivo" : "", "aria-current": attiva(id) ? "page" : null, onclick: () => vai(id) },
+    nav.push(h("button", { "data-uso": "menu-" + id, class: attiva(id) ? "attivo" : "", "aria-current": attiva(id) ? "page" : null, onclick: () => vai(id) },
       icona(id), h("span", { class: "bt-et" }, nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : "")),
       id === "progetti" && stato.ruolo === "titolare" ? h("span", { id: "badge-progetti", class: "badge-chat", title: "Domande degli agenti e squadre da approvare", style: (stato.richieste + (stato.squadreAttesa || 0)) ? "" : "display:none" }, String((stato.richieste || 0) + (stato.squadreAttesa || 0))) : null,
       (id === "ginnasio" || id === "documenti" || id === "progetti") && stato.ruolo === "titolare" ? h("span", { id: "novita-" + id, class: "badge-chat badge-novita", title: "Novità dall'ultima volta che hai guardato", style: stato.novita && stato.novita[id] ? "" : "display:none" }, stato.novita && stato.novita[id] ? String(stato.novita[id]) : "") : null,
@@ -1021,6 +1034,8 @@ setTimeout(controllaNovitaArchivio, 8000);
 function mostraNovita() {
   for (const id of ["progetti", "ginnasio", "documenti"]) {
     const b = document.getElementById("novita-" + id), n = (stato.novita || {})[id] || 0;
+    if (n > 0 && !_contatoreVisto[id] && b && b.offsetParent !== null) { _contatoreVisto[id] = true; registraUso(etichettaVista(), "contatore_visto", { elemento: id }); }
+    if (!n) _contatoreVisto[id] = false;
     if (b) { b.textContent = n ? String(n) : ""; b.style.display = n ? "" : "none"; }
   }
 }

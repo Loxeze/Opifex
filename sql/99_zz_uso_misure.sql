@@ -6,7 +6,7 @@ BEGIN
     EXECUTE format('ALTER TABLE uso_eventi DROP CONSTRAINT %I', c);
   END LOOP;
 END $$;
-ALTER TABLE uso_eventi ADD CONSTRAINT uso_eventi_azione_check CHECK (azione IN ('vista', 'errore', 'uscita'));
+ALTER TABLE uso_eventi ADD CONSTRAINT uso_eventi_azione_check CHECK (azione IN ('vista', 'errore', 'uscita', 'clic', 'riprova', 'attesa_inizio', 'attesa_fine', 'contatore_visto', 'contatore_aperto'));
 ALTER TABLE uso_eventi ADD COLUMN IF NOT EXISTS categoria TEXT;
 ALTER TABLE uso_eventi ADD COLUMN IF NOT EXISTS durata_s INTEGER;
 ALTER TABLE uso_eventi ADD COLUMN IF NOT EXISTS durata_ms INTEGER;

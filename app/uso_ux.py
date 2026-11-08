@@ -20,4 +20,7 @@ def riepilogo(conn, giorni: int = 14) -> str:
         out.append(f"- {_nome_vista(r['vista'])}: {r['aperture']} aperture" + (f", permanenza mediana {round(float(misurate[r['vista']]))} s" if r["vista"] in misurate else f", permanenza mediana {round(float(r['mediana_s']))} s (stima)" if r["mediana_s"] is not None else "") + (f", {r['errori']} errori mostrati" if r["errori"] else ""))
     if chat["n"]:
         out.append(f"- Chat: {chat['n']} risposte ricevute, attesa mediana {round(float(chat['med'] or 0))} s")
+    extra = __import__("app.uso_misure", fromlist=["x"]).testo(conn, giorni)
+    if extra:
+        out.append(extra)
     return "\n".join(out)

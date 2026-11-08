@@ -133,12 +133,27 @@ _NOME_VISTA = re.compile(r"^[a-z0-9_:\-]{1,60}$")
 CATEGORIE_ERRORE = {"rete", "timeout", "server", "validazione", "interfaccia"}
 
 
+AZIONI_USO = ("vista", "errore", "uscita", "clic", "riprova", "attesa_inizio", "attesa_fine", "contatore_visto", "contatore_aperto")
+AZIONI_ANONIME = ("clic", "riprova", "attesa_inizio", "attesa_fine", "contatore_visto", "contatore_aperto")   # queste non portano il nome della persona, solo la sessione casuale
+_SESSIONE = re.compile(r"^[a-f0-9]{8,32}$")
+_ELEMENTO = re.compile(r"^[a-z0-9_:.\-]{1,60}$")
+_COMPONENTE = re.compile(r"^[a-z0-9_:/.\-]{1,100}$")
+DISPOSITIVI = {"telefono", "tablet", "desktop"}
+ESITI = {"riuscito", "fallito", "risposta", "errore", "annullata"}
+
+
 class Evento(BaseModel):
     vista: str
     azione: str
     categoria: str | None = None
     durata_s: int | None = None
     durata_ms: int | None = None
+    sessione: str | None = None
+    dispositivo: str | None = None
+    elemento: str | None = None
+    componente: str | None = None
+    agente_id: int | None = None
+    esito: str | None = None
 
 
 class Eventi(BaseModel):
@@ -147,12 +162,20 @@ class Eventi(BaseModel):
 
 @router.post("/uso")
 def registra_uso(d: Eventi, utente: dict = Depends(utente_corrente)):
-    valide = [e for e in d.eventi if e.azione in ("vista", "errore", "uscita") and _NOME_VISTA.match(e.vista)]
+    valide = [e for e in d.eventi if e.azione in AZIONI_USO and _NOME_VISTA.match(e.vista)]
     if valide:
         with connessione() as conn:
             for e in valide:
-                cat = e.categoria if e.azione == "errore" and e.categoria in CATEGORIE_ERRORE else None
+                cat = e.categoria if e.azione in ("errore", "riprova") and e.categoria in CATEGORIE_ERRORE else None
                 ds = max(0, min(e.durata_s, 7200)) if e.azione == "uscita" and e.durata_s is not None else None
-                dm = max(0, min(e.durata_ms, 600000)) if e.azione == "errore" and e.durata_ms is not None else None
-                conn.execute("INSERT INTO uso_eventi (utente_id, vista, azione, categoria, durata_s, durata_ms) VALUES (%s, %s, %s, %s, %s, %s)", (utente["id"], e.vista, e.azione, cat, ds, dm))
+                dm = max(0, min(e.durata_ms, 600000)) if e.azione in ("errore", "attesa_fine", "riprova") and e.durata_ms is not None else None
+                ses = e.sessione if e.sessione and _SESSIONE.match(e.sessione) else None
+                disp = e.dispositivo if e.dispositivo in DISPOSITIVI else None
+                el = e.elemento if e.elemento and _ELEMENTO.match(e.elemento) and e.azione in ("clic", "contatore_visto", "contatore_aperto") else None
+                comp = e.componente if e.componente and _COMPONENTE.match(e.componente) and e.azione in ("errore", "riprova") else None
+                ag = e.agente_id if e.azione in ("attesa_inizio", "attesa_fine") and e.agente_id and 0 < e.agente_id < 10**9 else None
+                es = e.esito if e.esito in ESITI and e.azione in ("riprova", "attesa_fine") else None
+                uid = None if e.azione in AZIONI_ANONIME else utente["id"]
+                conn.execute("""INSERT INTO uso_eventi (utente_id, vista, azione, categoria, durata_s, durata_ms, sessione, dispositivo, elemento, componente, agente_id, esito)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""", (uid, e.vista, e.azione, cat, ds, dm, ses, disp, el, comp, ag, es))
     return {"registrati": len(valide)}

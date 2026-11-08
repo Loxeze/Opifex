@@ -30,6 +30,8 @@ function avviaConteggioChat() {
     if (!token) return;
     try {
       const r = await api("GET", "/chat/non-letti");
+      if (r.totale > 0 && !stato.chatNonLettiVisto) { stato.chatNonLettiVisto = true; registraUso(etichettaVista(), "contatore_visto", { elemento: "chat" }); }
+      if (!r.totale) stato.chatNonLettiVisto = false;
       stato.chatNonLetti = r.totale;
       const b = document.getElementById("badge-chat");
       if (b) { b.textContent = r.totale ? String(r.totale) : ""; b.style.display = r.totale ? "" : "none"; }
@@ -180,6 +182,7 @@ function conversazioniChat() {
       if (id !== S.agenteId) return;
       S.nomeAgente = r.agente.nome;
       const precedenti = S.pendenti; S.pendenti = new Set(r.messaggi.filter(m => m.stato === "in_coda" || m.stato === "in_lavoro").map(m => m.id));
+      misuraAttese(id, r.messaggi, precedenti);
       const nuove = r.messaggi.filter(m => precedenti.has(m.id) && m.stato === "finito" && m.risposta && !m.risposta.startsWith("⚠️"));
       const firma = firmaDi(r.messaggi);
       if (primaVolta) {
@@ -357,6 +360,16 @@ function conversazioniChat() {
     h("div", { class: "chat-conv" }, testata, messaggiEl, vaiFondo, compositore))];
 }
 
+// Attesa della risposta: inizio e fine con l'id dell'agente, la durata e l'esito (mai il testo dei messaggi).
+const _attese = new Map();
+function misuraAttese(agenteId, messaggi, precedenti) {
+  for (const m of messaggi) {
+    const k = m.id, inAttesa = m.stato === "in_coda" || m.stato === "in_lavoro";
+    if (inAttesa && !_attese.has(k)) { _attese.set(k, Date.now() - (m.attesa_s ? m.attesa_s * 1000 : 0)); registraUso("chat", "attesa_inizio", { agente_id: agenteId }); }
+    else if (!inAttesa && _attese.has(k)) { const t0 = _attese.get(k); _attese.delete(k); registraUso("chat", "attesa_fine", { agente_id: agenteId, durata_ms: Math.min(Date.now() - t0, 600000), esito: m.annullata ? "annullata" : (m.stato === "finito" && m.risposta && !String(m.risposta).startsWith("⚠️") ? "risposta" : "errore") }); }
+  }
+}
+
 // ---------- ripartire da dove si era: ultima pagina aperta ----------
 function etichettaVista() { return stato.vista + (stato.vista === "impostazioni" && stato.sezione ? ":" + stato.sezione : ""); }
 function ricordaVista() {
@@ -372,7 +385,20 @@ function ripristinaVista() {
 
 // ---------- come si usa la piattaforma: solo nomi delle pagine ed errori mostrati, mai i contenuti ----------
 const codaUso = [];
-function registraUso(vista, azione, extra) { if (token && codaUso.length < 60) codaUso.push({ vista: String(vista).toLowerCase().replace(/[^a-z0-9_:\-]/g, "").slice(0, 60) || "x", azione, ...(extra || {}) }); }
+// Sessione anonima: un numero casuale per scheda del browser, senza legame con la persona; classe di dispositivo: telefono, tablet o desktop.
+const SESSIONE_USO = (() => { const nuovo = () => { const a = new Uint8Array(8); crypto.getRandomValues(a); return Array.from(a, x => x.toString(16).padStart(2, "0")).join(""); }; try { let s = sessionStorage.getItem("sessione_uso"); if (!s) { s = nuovo(); sessionStorage.setItem("sessione_uso", s); } return s; } catch (e) { return nuovo(); } })();
+const classeDispositivo = () => { const w = window.innerWidth; return w <= 760 ? "telefono" : w <= 1100 ? "tablet" : "desktop"; };
+function registraUso(vista, azione, extra) { if (token && codaUso.length < 60) codaUso.push({ vista: String(vista).toLowerCase().replace(/[^a-z0-9_:\-]/g, "").slice(0, 60) || "x", azione, sessione: SESSIONE_USO, dispositivo: classeDispositivo(), ...(extra || {}) }); }
+// Clic: si registra l'identificativo tecnico dell'elemento (data-uso, id o classe), mai il testo che c'e' scritto.
+let _ultimoClic = { e: "", t: 0 };
+document.addEventListener("click", (ev) => {
+  const el = ev.target && ev.target.closest ? ev.target.closest("[data-uso],button,a,summary,[role=button],[role=tab]") : null;
+  if (!el || el.closest("input,textarea") && !el.matches("button")) return;
+  let id = el.getAttribute("data-uso") || el.id || (el.tagName.toLowerCase() + (el.classList[0] ? "." + el.classList[0] : ""));
+  id = String(id).toLowerCase().replace(/[^a-z0-9_:.\-]/g, "-").slice(0, 60);
+  const ora = Date.now(); if (_ultimoClic.e === id && ora - _ultimoClic.t < 400) return; _ultimoClic = { e: id, t: ora };
+  if (typeof etichettaVista === "function") registraUso(etichettaVista(), "clic", { elemento: id });
+}, true);
 // Quanto resta aperta una pagina: si misura sul browser (solo il tempo con la scheda visibile) e si invia all'uscita, perche' il server non conosce l'orario dei singoli eventi.
 const tempoVista = { inizio: Date.now(), acc: 0 };
 function secondiVista() { if (tempoVista.inizio) { tempoVista.acc += Date.now() - tempoVista.inizio; tempoVista.inizio = document.hidden ? null : Date.now(); } const s = Math.round(tempoVista.acc / 1000); tempoVista.acc = 0; return Math.min(s, 7200); }
