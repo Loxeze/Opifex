@@ -160,6 +160,7 @@ function vistaGinnasio() {
     h("p", { class: "aiuto" }, "A sinistra Padre Casati studia e custodisce la biblioteca; a destra forma gli agenti: ogni competenza ha cinque livelli (Junior, Medium, Senior, Expert, Master) e arriva a un agente solo dopo la tua approvazione. Si procede piano, nei limiti del budget giornaliero."),
     bannerCasati(),
     riquadroAssegna(),
+    bloccoPreparazione(),
     h("div", { class: "ginnasio" }, h("section", {}, sinistra), h("section", {}, destra))];
 }
 
@@ -242,4 +243,31 @@ function avanzamento(x, carica, errore, cache) {
   if (det.open) { caricato = true; carica_(); avviaTimer(); }
   if (cache) cache.set(x.id, det);
   return det;
+}
+
+
+// Preparazione reale degli agenti: Padre Casati li interroga sulle competenze ricevute (3 domande pratiche, correzione, voto 0-10).
+function bloccoPreparazione() {
+  const box = h("details", { class: "carta" }), corpo = h("div"), msg = h("div");
+  box.append(h("summary", { style: "cursor:pointer" }, "Preparazione degli agenti (verifiche di Padre Casati)"), corpo);
+  const colore = v => v == null ? "" : v >= 8 ? "ok" : v >= 6 ? "avv" : "no";
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/ginnasio/preparazione");
+      const att = h("input", { type: "checkbox" }), gg = h("input", { type: "number", min: 1, max: 90, style: "width:70px" }), pg = h("input", { type: "number", min: 1, max: 30, style: "width:70px" });
+      att.checked = d.attiva; gg.value = d.giorni; pg.value = d.per_giro;
+      const salva = h("button", { class: "s", type: "button" }, "Salva");
+      salva.addEventListener("click", async () => { try { await api("PUT", "/gestione/ginnasio/preparazione", { attiva: att.checked, giorni: Number(gg.value), per_giro: Number(pg.value) }); msg.replaceChildren(avviso("Salvato.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } });
+      riempi(corpo, [
+        h("p", { class: "aiuto" }, "Di notte Padre Casati prepara 3 domande pratiche dal testo che ha dato all'agente, l'agente risponde, Casati corregge e dà un voto da 0 a 10. Voto alto: passa al livello successivo. Voto basso: segnalato con le lacune. Il voto misura quanto l'agente sa davvero, non il livello che gli è stato assegnato."),
+        h("div", { class: "riga" }, h("label", { class: "spunta" }, att, "Verifiche automatiche"), h("label", {}, "Ogni quanti giorni per competenza", gg), h("label", {}, "Verifiche per notte", pg), salva), msg,
+        d.agenti.length ? h("table", { class: "tabella" }, h("thead", {}, h("tr", {}, ["Agente", "Voto medio", "Competenze verificate", "Con lacune"].map(t => h("th", {}, t)))),
+          h("tbody", {}, d.agenti.map(a => h("tr", {}, h("td", {}, a.nome), h("td", { class: colore(Number(a.media)) }, String(a.media) + " / 10"), h("td", {}, String(a.verifiche)), h("td", {}, String(a.con_lacune))))))
+          : h("p", { class: "sotto" }, "Nessuna verifica ancora: la prima notte utile parte da sola."),
+        d.ultime.length ? h("details", {}, h("summary", {}, "Ultime verifiche"), d.ultime.map(u => h("p", { class: "sotto" },
+          `${u.agente} · ${u.competenza_nome} (liv. ${u.livello}) · ` + (u.esito === "errore" ? "non riuscita: " + (u.errore || "") : `voto ${u.voto}/10` + (u.lacune && u.lacune !== "nessuna" ? " · lacune: " + u.lacune : ""))))) : null]);
+    } catch (e) { mostraErrore(corpo, e, carica); }
+  };
+  box.addEventListener("toggle", () => { if (box.open) carica(); });
+  return box;
 }

@@ -82,6 +82,7 @@ from .rotte_crm_modello import router as router_crm_modello
 from .rotte_crm_imprese import router as router_crm_imprese
 from .crm_ricerca import router as router_crm_ricerca
 from .n8n import router as router_n8n
+from .preparazione import router as router_preparazione
 from .rotte_pwa import router as router_pwa
 from .rotte_dossier import router as router_dossier
 from .rotte_crm import router as router_crm
@@ -174,6 +175,7 @@ async def _manutenzione():
         _passo("memoria vettoriale", lambda c: __import__("app.memoria_vettoriale", fromlist=["x"]).indicizza(c))
         _passo("relazioni tra documenti", lambda c: __import__("app.memoria_vettoriale", fromlist=["x"]).relaziona(c))
         _passo("studi in coda", lambda c: __import__("app.studio", fromlist=["x"]).giro(c))
+        _passo("verifica di preparazione", lambda c: __import__("app.preparazione", fromlist=["x"]).giro(c))
         _passo("formazione automatica", lambda c: __import__("app.formazione_auto", fromlist=["x"]).giro(c))
         _passo("risultati dei canali social", lambda c: __import__("app.social_nativo", fromlist=["x"]).giro_raccolta(c))
         _passo("monitoraggio dei profili social", lambda c: __import__("app.monitor_social", fromlist=["x"]).giro(c))
@@ -303,6 +305,7 @@ app.include_router(router_ponte)
 app.include_router(router_utenti)
 app.include_router(router_progetti)
 app.include_router(router_scheda)
+app.include_router(router_preparazione)
 app.include_router(router_ginnasio)
 app.include_router(router_esempio)
 app.include_router(router_memvett)
