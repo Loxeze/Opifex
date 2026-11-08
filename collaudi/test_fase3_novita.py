@@ -85,4 +85,18 @@ with TestClient(app) as c:
     c.post("/novita/ginnasio/visto", headers=H)
     ok("ginnasio: resta 1 finche' c'e' da approvare", c.get("/novita", headers=H).json()["ginnasio"] == 1)
     ok("senza accesso: 401", c.get("/novita").status_code in (401, 403))
+    import os
+    from app import novita as _nv
+    os.environ["OPIFEX_CACHE_STATO"] = "30"
+    _nv._CACHE["t"] = 0.0
+    a1 = c.get("/gestione/agenti-stato", headers=H).json()
+    sql("INSERT INTO eventi_lavoro (agente_id, tipo, dettaglio) VALUES (%s,'inizio','nuovo')", (ag2,))
+    a2 = c.get("/gestione/agenti-stato", headers=H).json()
+    ok("con la cache attiva due richieste ravvicinate danno la stessa risposta (una sola lettura)", a1 == a2)
+    ok("la cache non salta l'autorizzazione", c.get("/gestione/agenti-stato", headers=HC).status_code in (401, 403))
+    _nv._LOCK.acquire()
+    _nv._CACHE["t"] = 0.0
+    ok("se una lettura e' gia' in corso si risponde subito con l'ultimo stato noto", c.get("/gestione/agenti-stato", headers=H).json() == a1)
+    _nv._LOCK.release()
+    os.environ["OPIFEX_CACHE_STATO"] = "0"
 print("TOTALE", sum(ris), "/", len(ris))

@@ -84,6 +84,7 @@ from .crm_ricerca import router as router_crm_ricerca
 from .n8n import router as router_n8n
 from .preparazione import router as router_preparazione
 from .novita import router as router_novita
+from .progetto_cruscotto import router as router_cruscotto
 from .uso_misure import router as router_uso_misure
 from .rotte_pwa import router as router_pwa
 from .rotte_dossier import router as router_dossier
@@ -310,6 +311,7 @@ app.include_router(router_progetti)
 app.include_router(router_scheda)
 app.include_router(router_preparazione)
 app.include_router(router_novita)
+app.include_router(router_cruscotto)
 app.include_router(router_uso_misure)
 app.include_router(router_ginnasio)
 app.include_router(router_esempio)

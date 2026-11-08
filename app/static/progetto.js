@@ -20,6 +20,7 @@ function vistaProgetto() {
   const carica = async () => {
     try {
       const d = await api("GET", "/progetti/" + stato.progettoAperto + "/dashboard");
+      const cr = await api("GET", "/progetti/" + stato.progettoAperto + "/cruscotto");
       let domande = [];
       if (d.puo_modificare) { try { domande = await api("GET", "/gestione/richieste?stato=aperta&progetto_id=" + stato.progettoAperto); } catch (e) { /* senza domande */ } }
       const p = d.progetto, col = p.colore || "#f3b54a", tot = d.task.length, fatte = d.conteggi.completata;
@@ -38,29 +39,34 @@ function vistaProgetto() {
           h("div", { style: "color:var(--testo)" }, t.titolo + (t.in_ritardo ? " ⚠" : "")),
           [t.agente ? "🤖 " + t.agente : "", t.persona ? "👤 " + t.persona : "", t.scadenza ? "entro " + new Date(t.scadenza).toLocaleDateString("it-IT") : "", t.priorita !== "normale" ? t.priorita : ""].filter(Boolean).join(" · "))),
         d.conteggi[s] > 12 ? h("div", { class: "sotto" }, "…e altre " + (d.conteggi[s] - 12)) : null));
-      riempi(corpo, [
+      const TAB = [["panoramica", "Panoramica"], ["calendario", "Calendario"], ["gantt", "Gantt"], ["task", "Task"], ["squadra", "Squadra"], ["scheda", "Scheda e milestone"]];
+      const testaPagina = [
         h("div", { class: "azioni" }, h("button", { class: "s", onclick: () => vai("progetti") }, "← Tutti i progetti")),
         h("div", { class: "carta", style: "border-left:6px solid " + col },
           h("div", { class: "nome" }, h("span", { class: "punto-col", style: "background:" + col }), p.nome + (p.archiviato ? " (archiviato)" : "")),
           h("div", { class: "sotto" }, "Impresa: " + (p.azienda || "—")), p.descrizione ? h("div", {}, p.descrizione) : null,
           h("div", { style: "margin:10px 0 4px;height:8px;border-radius:99px;background:var(--bordo);overflow:hidden" }, h("div", { style: "height:100%;width:" + perc + "%;background:linear-gradient(90deg,#f3b54a,#e58bd0)" })),
           h("div", { class: "sotto" }, perc + "% completato · " + fatte + " task chiuse su " + tot + (d.in_ritardo ? " · ⚠ " + d.in_ritardo + " in ritardo" : "")),
-          p.allineamento ? h("details", { style: "margin-top:8px" }, h("summary", {}, "Documento di allineamento"), h("pre", { style: "white-space:pre-wrap" }, p.allineamento)) : null),
-        bloccoDomande,
-        bloccoScheda(p.id),
-        bloccoSquadra(p.id),
-        tit ? [h("h3", {}, "Manager di riferimento"),
+          p.allineamento ? h("details", { style: "margin-top:8px" }, h("summary", {}, "Documento di allineamento"), h("pre", { style: "white-space:pre-wrap" }, p.allineamento)) : null)];
+      const pannelli = {
+        panoramica: () => panoramicaProgetto(p, d, cr, tit, bloccoDomande, msg),
+        calendario: () => calendarioProgetto(cr),
+        gantt: () => ganttProgetto(cr),
+        task: () => [
+        h("h3", {}, "Task"), h("div", { class: "riga", style: "align-items:flex-start" }, colonne)],
+        squadra: () => [bloccoSquadra(p.id),
+        tit ? [h("h3", {}, "Manager di riferimento"), bottoneRiunione(cr.soggetti, p, msg),
           h("div", { class: "riga" }, [d.pm ? { ambito: "Project management", id: d.pm.id, nome: d.pm.nome } : null, ...d.manager].filter(Boolean).map(m => h("div", { class: "carta", style: "flex:0 1 220px" },
             h("div", { class: "sotto" }, m.ambito), h("div", { class: "nome" }, m.nome), h("div", { class: "azioni" }, h("button", { class: "p", onclick: () => parla(m.id) }, "Parla con lui"))))),
           !d.pm ? h("div", { class: "azioni" }, h("button", { class: "s", onclick: async () => { try { await api("POST", "/gestione/progetti/" + p.id + "/project-manager"); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Crea il project manager")) : null] : null,
-        h("h3", {}, "Task"), h("div", { class: "riga", style: "align-items:flex-start" }, colonne),
         h("h3", {}, "Chi ci lavora"),
         h("div", { class: "riga", style: "align-items:flex-start" },
           d.agenti.map(a => h("div", { class: "carta", style: "flex:0 1 240px" }, h("div", { class: "nome" }, "🤖 " + a.nome), h("div", { class: "sotto" }, [a.ambito, a.ruolo].filter(Boolean).join(" · ")),
             h("div", { class: "sotto" }, a.aperte + " aperte · " + a.chiuse + " chiuse · " + a.attivita_7g + " aggiornamenti negli ultimi 7 giorni"),
             tit ? h("div", { class: "azioni" }, h("button", { class: "s", onclick: () => parla(a.id) }, "Chat")) : null)),
           d.persone.map(x => h("div", { class: "carta", style: "flex:0 1 240px" }, h("div", { class: "nome" }, "👤 " + x.nome), h("div", { class: "sotto" }, x.aperte + " aperte · " + x.chiuse + " chiuse"))),
-          !d.agenti.length && !d.persone.length ? h("p", { class: "sotto" }, "Nessuna task assegnata: nessuno ci sta ancora lavorando.") : null),
+          !d.agenti.length && !d.persone.length ? h("p", { class: "sotto" }, "Nessuna task assegnata: nessuno ci sta ancora lavorando.") : null)],
+        scheda: () => [bloccoScheda(p.id),
         h("h3", {}, "Milestone"),
         d.milestone.length ? d.milestone.map(m => h("div", { class: "carta", style: "margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
           h("div", { style: "flex:1" }, h("div", { class: "nome" }, (m.raggiunta_il ? "✅ " : "⬜ ") + m.titolo),
@@ -69,8 +75,14 @@ function vistaProgetto() {
             h("button", { class: "r", onclick: async () => { if (!confirm("Eliminare la milestone?")) return; try { await api("DELETE", "/gestione/milestone/" + m.id); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Elimina")] : null))
           : h("p", { class: "sotto" }, "Nessuna milestone ancora."),
         tit ? h("div", { class: "riga" }, h("label", {}, "Nuova milestone", nuovaMs), h("label", {}, "Scadenza", scadMs),
-          h("button", { class: "p", style: "align-self:flex-end", onclick: async () => { try { await api("POST", "/gestione/progetti/" + p.id + "/milestone", { titolo: nuovaMs.value.trim(), scadenza: scadMs.value || null }); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Aggiungi")) : null,
-        msg]);
+          h("button", { class: "p", style: "align-self:flex-end", onclick: async () => { try { await api("POST", "/gestione/progetti/" + p.id + "/milestone", { titolo: nuovaMs.value.trim(), scadenza: scadMs.value || null }); await carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Aggiungi")) : null]};
+      const disegna = () => {
+        const sel = pannelli[stato.progettoTab] ? stato.progettoTab : "panoramica";
+        riempi(corpo, [testaPagina,
+          h("div", { class: "cr-tabs", role: "tablist" }, TAB.map(([k, et]) => h("button", { role: "tab", "aria-selected": String(k === sel), "data-uso": "progetto-tab-" + k, onclick: () => { stato.progettoTab = k; disegna(); } }, et))),
+          pannelli[sel](), msg]);
+      };
+      disegna();
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };
   carica();

@@ -114,6 +114,6 @@ function avviaStatoAgenti(radice) {
     });
   };
   const sicuro = async () => { try { await giro(); radice._falliti = 0; } catch (e) { /* il riepilogo resta com'è */ } };
-  ticker(radice, sicuro, 6000);
+  ticker(radice, sicuro, 12000);
   sicuro();
 }

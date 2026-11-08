@@ -227,6 +227,7 @@ function vistaRiunioniCall() {
       msg, h("h3", {}, "Le tue riunioni"), lista]);
     carica();
   };
+  if (stato.apriCall) { const id = stato.apriCall; stato.apriCall = null; apri(id); return corpo; }
   schermaElenco();
   return corpo;
 }

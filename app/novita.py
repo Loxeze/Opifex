@@ -1,5 +1,9 @@
 """Fase 3: stato in tempo reale degli agenti (cosa fanno, ultima attivita', formazione in corso) e contatori delle novita' non viste.
 Sola lettura del registro eventi e delle tabelle: nessuna chiamata ai modelli, nessun costo."""
+import os
+import threading
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from .db import connessione
@@ -19,9 +23,13 @@ def stato_agenti(conn) -> dict:
             (x["agente_id"], x["da_secondi"] + 5)).fetchall()
         out[x["agente_id"]] = {"lavoro": {"sta_facendo": x["sta_facendo"][:160], "da_secondi": x["da_secondi"], "progetto": x["progetto"], "compito": x["compito"],
                                           "passi": [{"tipo": p["tipo"], "dettaglio": p["dettaglio"], "fa_s": p["fa_s"]} for p in reversed(passi)]}}
-    for r in conn.execute("""SELECT agente_id, max(creato_il) AS u, EXTRACT(EPOCH FROM (NOW() - max(creato_il)))::int AS fa_s,
-                                    (array_agg(tipo ORDER BY id DESC))[1] AS tipo
-                             FROM eventi_lavoro WHERE tipo IN ('fine','errore') AND agente_id IS NOT NULL GROUP BY agente_id""").fetchall():
+    # ultima conclusione per agente: una ricerca con indice per ciascuno (non una scansione di tutto il registro)
+    for r in conn.execute("""SELECT a.id AS agente_id, e.tipo, EXTRACT(EPOCH FROM (NOW() - e.creato_il))::int AS fa_s FROM agenti a
+                             CROSS JOIN LATERAL (SELECT tipo, creato_il FROM (
+                                 (SELECT id, tipo, creato_il FROM eventi_lavoro WHERE agente_id = a.id AND tipo = 'fine' ORDER BY id DESC LIMIT 1)
+                                 UNION ALL (SELECT id, tipo, creato_il FROM eventi_lavoro WHERE agente_id = a.id AND tipo = 'errore' ORDER BY id DESC LIMIT 1)) x
+                               ORDER BY id DESC LIMIT 1) e
+                             WHERE a.attivo""").fetchall():
         out.setdefault(r["agente_id"], {})["ultimo"] = {"fa_s": r["fa_s"], "esito": "errore" if r["tipo"] == "errore" else "concluso"}
     for r in conn.execute("""SELECT f.agente_id, f.id, f.competenza_nome, f.livello, f.fase, f.token_usati, f.stato,
                                     (SELECT count(*) FROM formazione_materiale m WHERE m.richiesta_id = f.id) AS documenti
@@ -50,10 +58,35 @@ def conteggi(conn, utente_id: int) -> dict:
     }
 
 
+_CACHE = {"t": 0.0, "v": {}}
+_LOCK = threading.Lock()
+
+
+def _validita() -> float:
+    try:
+        return float(os.environ.get("OPIFEX_CACHE_STATO", "5"))
+    except ValueError:
+        return 5.0
+
+
 @router.get("/gestione/agenti-stato")
 def agenti_stato(_: dict = Depends(solo_titolare)):
-    with connessione() as conn:
-        return stato_agenti(conn)
+    """Risposta condivisa per 5 secondi tra tutte le schede aperte; mai piu' di una lettura alla volta e mai piu' di 4 secondi di calcolo:
+    se il database e' occupato si restituisce l'ultimo stato noto invece di accodare altre richieste."""
+    if time.monotonic() - _CACHE["t"] < _validita():
+        return _CACHE["v"]
+    if not _LOCK.acquire(blocking=False):
+        return _CACHE["v"]
+    try:
+        with connessione() as conn:
+            conn.execute("SET LOCAL statement_timeout = '4s'")
+            _CACHE["v"] = stato_agenti(conn)
+            _CACHE["t"] = time.monotonic()
+    except Exception:  # noqa: BLE001
+        _CACHE["t"] = time.monotonic() - _validita() + 1      # riprova tra un secondo, nel frattempo vale l'ultimo stato noto
+    finally:
+        _LOCK.release()
+    return _CACHE["v"]
 
 
 @router.get("/novita")
