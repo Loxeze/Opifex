@@ -152,7 +152,7 @@ const VISTE_COLLABORATORE = [["task", "Task"], ["progetti", "Progetti"], ["inizi
 const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Collegamenti (Google, posta)"], ["connessioni", "Connessioni a siti e app"], ["siti", "Siti e hosting (chiavi)"],
   ["canali", "Canali (Telegram)"], ["social", "Social"], ["monitorsocial", "Profili social monitorati"], ["archivio", "Archivio NAS"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["imprese", "Schede d'impresa"], ["tavoli", "Tavoli di lavoro"], ["noteaurora", "Note di Aurora"], ["miglioramenti", "Miglioramento degli agenti"], ["spesareparti", "Spesa per reparto"], ["dipendenze", "Controllo delle librerie"], ["diagnostica", "Diagnostica (log scaricabile)"], ["esempio", "Impara da un esempio"], ["memoriavett", "Memoria condivisa (vettoriale)"], ["giro", "Giro di aggiornamento"], ["contenuti", "Contenuti: brief e stili di montaggio"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["misure", "Consumi (dove vanno i token)"], ["sistema", "Backup e costi"]];
 
-function vai(vista, sezione) { if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") { try { Voce.fermaTutto(); } catch (e) { /* la voce non deve mai impedire di cambiare pagina */ } } stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
+function vai(vista, sezione) { segnaVisto(vista); if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") { try { Voce.fermaTutto(); } catch (e) { /* la voce non deve mai impedire di cambiare pagina */ } } stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
 function cornice(contenuto) {
   if (window.name === "opifex-organigramma" || location.hash === "#organigramma") {   // finestra a parte: solo l'organigramma
@@ -167,6 +167,7 @@ function cornice(contenuto) {
     nav.push(h("button", { class: attiva(id) ? "attivo" : "", "aria-current": attiva(id) ? "page" : null, onclick: () => vai(id) },
       icona(id), h("span", { class: "bt-et" }, nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : "")),
       id === "progetti" && stato.ruolo === "titolare" ? h("span", { id: "badge-progetti", class: "badge-chat", title: "Domande degli agenti e squadre da approvare", style: (stato.richieste + (stato.squadreAttesa || 0)) ? "" : "display:none" }, String((stato.richieste || 0) + (stato.squadreAttesa || 0))) : null,
+      (id === "ginnasio" || id === "documenti" || id === "progetti") && stato.ruolo === "titolare" ? h("span", { id: "novita-" + id, class: "badge-chat badge-novita", title: "Novità dall'ultima volta che hai guardato", style: stato.novita && stato.novita[id] ? "" : "display:none" }, stato.novita && stato.novita[id] ? String(stato.novita[id]) : "") : null,
       id === "chat" ? h("span", { id: "badge-chat", class: "badge-chat", style: stato.chatNonLetti ? "" : "display:none" }, stato.chatNonLetti ? String(stato.chatNonLetti) : "") : null));
   }
   radice.replaceChildren(
@@ -265,7 +266,7 @@ function vistaAgenti() {
       });
       const tutti = (chiudi) => { sezioni.forEach(x => { x.imposta(chiudi); chiudi ? chiusi.add(x.nome) : chiusi.delete(x.nome); }); salva(); };
       const blocco = h("div", {}, h("div", { class: "gruppo-comandi" }, h("button", { class: "s", type: "button", onclick: () => tutti(true) }, "Chiudi tutti"), h("button", { class: "s", type: "button", onclick: () => tutti(false) }, "Apri tutti")), sezioni.map(x => x.nodo));
-      riempiExtraAgenti(blocco); riempiVociAgenti(blocco); return blocco;
+      riempiExtraAgenti(blocco); riempiVociAgenti(blocco); avviaStatoAgenti(blocco); return blocco;
     })(),
   ];
 }
@@ -322,6 +323,7 @@ function carta(a) {
       a.accesso_web ? null : h("span", { class: "etichetta avv" }, "Senza web"),
       a.connessioni.length ? h("span", { class: "etichetta" }, a.connessioni.length + " conn.") : null),
     h("div", { class: "sotto" }, "Questo mese: " + a.token_mese.toLocaleString("it-IT") + " token"),
+    h("div", { class: "agente-stato", "data-id": String(a.id), "aria-live": "off", onclick: (e) => e.stopPropagation(), onkeydown: (e) => e.stopPropagation() }),
     h("div", { class: "agente-voce-posto", "data-id": String(a.id), onclick: (e) => e.stopPropagation(), onkeydown: (e) => e.stopPropagation() }),
     h("div", { class: "agente-extra-posto", "data-id": String(a.id) }));
 }
@@ -1013,3 +1015,27 @@ async function controllaNovitaArchivio() {
 }
 setInterval(controllaNovitaArchivio, 60000);
 setTimeout(controllaNovitaArchivio, 8000);
+
+
+// Novità non viste (Progetti, Ginnasio, Documenti): il numero compare sul menu e si azzera dopo aver guardato la pagina per un paio di secondi.
+function mostraNovita() {
+  for (const id of ["progetti", "ginnasio", "documenti"]) {
+    const b = document.getElementById("novita-" + id), n = (stato.novita || {})[id] || 0;
+    if (b) { b.textContent = n ? String(n) : ""; b.style.display = n ? "" : "none"; }
+  }
+}
+async function caricaNovita() {
+  if (document.hidden || stato.ruolo !== "titolare" || !token) return;
+  try { stato.novita = await api("GET", "/novita"); mostraNovita(); } catch (e) { /* riprova al prossimo giro */ }
+}
+let _timerVisto = null;
+function segnaVisto(vista) {
+  clearTimeout(_timerVisto);
+  if (stato.ruolo !== "titolare" || !["progetti", "ginnasio", "documenti"].includes(vista)) return;
+  _timerVisto = setTimeout(async () => {
+    if (stato.vista !== vista || document.hidden) return;
+    try { await api("POST", "/novita/" + vista + "/visto"); if (stato.novita) stato.novita[vista] = 0; mostraNovita(); } catch (e) { /* ignora */ }
+  }, 2000);
+}
+setInterval(caricaNovita, 60000);
+setTimeout(() => { caricaNovita(); segnaVisto(stato.vista); }, 3000);

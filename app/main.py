@@ -83,6 +83,7 @@ from .rotte_crm_imprese import router as router_crm_imprese
 from .crm_ricerca import router as router_crm_ricerca
 from .n8n import router as router_n8n
 from .preparazione import router as router_preparazione
+from .novita import router as router_novita
 from .rotte_pwa import router as router_pwa
 from .rotte_dossier import router as router_dossier
 from .rotte_crm import router as router_crm
@@ -306,6 +307,7 @@ app.include_router(router_utenti)
 app.include_router(router_progetti)
 app.include_router(router_scheda)
 app.include_router(router_preparazione)
+app.include_router(router_novita)
 app.include_router(router_ginnasio)
 app.include_router(router_esempio)
 app.include_router(router_memvett)

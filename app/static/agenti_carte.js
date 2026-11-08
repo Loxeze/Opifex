@@ -86,3 +86,34 @@ async function riempiVociAgenti(radice) {
     });
   } catch (e) { posti.forEach(el => el.remove()); }
 }
+
+
+// Stato in tempo reale su ogni carta: cosa sta facendo, da quanto, i suoi ultimi passaggi, l'ultima attività e la formazione in corso.
+function durataBreve(s) { return s < 60 ? s + " s" : s < 3600 ? Math.floor(s / 60) + " min " + (s % 60) + " s" : s < 86400 ? Math.floor(s / 3600) + " h " + Math.floor((s % 3600) / 60) + " min" : Math.floor(s / 86400) + " g"; }
+function avviaStatoAgenti(radice) {
+  let firma = "";
+  const giro = async () => {
+    const d = await api("GET", "/gestione/agenti-stato");
+    const f = JSON.stringify(d); if (f === firma) return; firma = f;
+    radice.querySelectorAll(".agente-stato").forEach(el => {
+      const r = d[el.dataset.id], parti = [];
+      if (r && r.lavoro) {
+        const l = r.lavoro;
+        parti.push(h("div", { class: "etichetta ok", style: "display:inline-block" }, "● Al lavoro da " + durataBreve(l.da_secondi)),
+          h("div", { class: "sotto" }, l.sta_facendo || "…"),
+          l.progetto ? h("div", { class: "sotto" }, "Progetto: " + l.progetto + (l.compito ? " · " + l.compito : "")) : null,
+          l.passi.length ? h("details", {}, h("summary", { class: "sotto", style: "cursor:pointer" }, "Cosa sta facendo (" + l.passi.length + " passaggi)"),
+            l.passi.map(p => h("div", { class: "sotto" }, durataBreve(p.fa_s) + " fa · " + (p.tipo === "errore_strumento" ? "⚠ " : "") + p.dettaglio))) : null);
+      } else if (r && r.ultimo) parti.push(h("div", { class: "sotto" }, "Ultima attività: " + durataBreve(r.ultimo.fa_s) + " fa" + (r.ultimo.esito === "errore" ? " (con errore)" : "")));
+      else parti.push(h("div", { class: "sotto" }, "Nessuna attività registrata"));
+      if (r && r.formazione) {
+        const z = r.formazione;
+        parti.push(h("div", { class: "sotto" }, "📚 In formazione: " + z.competenza + " (livello " + z.livello + ") · " + ({ in_corso: "in corso", appunti_pronti: "appunti pronti", da_approvare: "bozza da approvare" })[z.stato] + (z.fase && z.fase !== z.stato ? " · fase " + z.fase : "") + " · " + z.documenti + " documenti · " + Number(z.token).toLocaleString("it-IT") + " token"));
+      }
+      riempiConservando(el, parti.filter(Boolean));
+    });
+  };
+  const sicuro = async () => { try { await giro(); radice._falliti = 0; } catch (e) { /* il riepilogo resta com'è */ } };
+  ticker(radice, sicuro, 6000);
+  sicuro();
+}
