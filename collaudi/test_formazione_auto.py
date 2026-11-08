@@ -1,3 +1,4 @@
+from datetime import datetime
 import os, sys, tempfile, json
 from pathlib import Path
 os.environ.pop("OPIFEX_SENZA_SCHEDA", None)
@@ -126,9 +127,15 @@ with TestClient(app) as c:
         ok("non riparte subito (e' passato poco)", formazione_auto.avvia(cn) is None)
         sql("UPDATE desideri_giri SET avviato_il = NOW() - interval '10 days'")
         sql("INSERT INTO studi (tema, origine, stato) VALUES ('Studio ancora in coda','iniziativa','approvato')")
-        ok("non parte se ci sono studi in coda", formazione_auto.avvia(cn) is None)
+        formazione_auto.IGNORA_NOTTE = False; _n = formazione_auto.NOTTE; formazione_auto.NOTTE = (25, 26)
+        ok("fuori dalla finestra notturna non parte", formazione_auto.avvia(cn) is None)
+        formazione_auto.NOTTE = _n; formazione_auto.IGNORA_NOTTE = True
+        ok("parte anche con studi in coda (non dipende piu' da Casati)", formazione_auto.avvia(cn) is not None)
+        ok("default: ogni 2 giorni, 5 richieste", formazione_auto.giorni(cn) == 2 and formazione_auto.numero_desideri(cn) == 5)
+        ok("il prompt chiede 5 desideri", "fino a 5" in formazione_auto._prompt(cn, {"id": 1, "nome": "X", "ruolo": "Y"}, 5))
+        ok("la lettura accetta 5 desideri", len(formazione_auto._leggi("\n".join(f"DESIDERIO: Tema {i} di prova | motivo concreto abbastanza lungo numero {i}" for i in range(7)), 5)[1]) == 5)
         sql("DELETE FROM studi WHERE stato='approvato'")
-        ok("parte a coda vuota e dopo i giorni previsti", formazione_auto.avvia(cn) is not None)
+        sql("UPDATE desideri_giri SET avviato_il = NOW() - interval '10 days', stato='concluso'")
         sql("UPDATE desideri_giri SET avviato_il = NOW() - interval '10 days'")
         sql("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('desideri_giorni','0') ON CONFLICT (chiave) DO UPDATE SET valore='0'")
         ok("0 giorni = mai in automatico", formazione_auto.avvia(cn) is None)

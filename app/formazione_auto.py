@@ -3,6 +3,7 @@ vorrebbe approfondire e quali sono necessarie al suo ruolo. I desideri diventano
 in una competenza necessaria passa avanti a tutti: nella graduatoria della formazione quelle richieste hanno la precedenza assoluta."""
 import re
 import threading
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -15,7 +16,10 @@ router = APIRouter(prefix="/gestione/formazione-auto", tags=["formazione"])
 SINCRONO = False
 MAX_AGENTI_GIRO = 60
 MAX_NECESSARIE = 6
-MAX_DESIDERI = 2
+MAX_DESIDERI = 5          # competenze (o temi) che ogni agente chiede a ogni giro
+MAX_IN_CODA = 80          # se la coda del Ginnasio e' gia' cosi' lunga il giro aspetta
+NOTTE = (1, 6)            # il giro parte solo tra l'1 e le 6 (ora del server), salvo forzatura
+IGNORA_NOTTE = False      # solo per i collaudi
 _blocco = threading.Lock()
 
 
@@ -25,9 +29,20 @@ def _imp(conn, chiave, default):
 
 def giorni(conn) -> int:
     try:
-        return max(0, min(90, int(_imp(conn, "desideri_giorni", "7"))))
+        return max(0, min(90, int(_imp(conn, "desideri_giorni", "2"))))
     except ValueError:
-        return 7
+        return 2
+
+
+def solo_di_notte(conn) -> bool:
+    return _imp(conn, "desideri_notte", "1") == "1"
+
+
+def numero_desideri(conn) -> int:
+    try:
+        return max(1, min(8, int(_imp(conn, "desideri_numero", str(MAX_DESIDERI)))))
+    except ValueError:
+        return MAX_DESIDERI
 
 
 def minimo_attivo(conn) -> bool:
@@ -66,25 +81,25 @@ def richiedi_minimi(conn) -> int:
 
 
 # ---------- giro dei desideri ----------
-def _prompt(conn, a: dict) -> str:
+def _prompt(conn, a: dict, n: int = MAX_DESIDERI) -> str:
     miei = g.competenze_agente(conn, a["id"])
     nec = [r["nome"] for r in conn.execute("SELECT nome FROM competenze_necessarie WHERE agente_id = %s ORDER BY nome", (a["id"],)).fetchall()]
     esistenti = [r["nome"] for r in conn.execute("SELECT nome FROM competenze ORDER BY nome LIMIT 80").fetchall()]
-    p = (f"Sei {a['nome']} ({a['ruolo']}). Padre Casati fa il giro di formazione e ti chiede, in poche righe, cosa ti serve per lavorare meglio.\n"
+    p = (f"Sei {a['nome']} ({a['ruolo']}). E' il giro periodico di formazione: indica, in poche righe, cosa vorresti imparare o approfondire per lavorare meglio.\n"
          "Le tue competenze oggi: " + (", ".join(f"{c['nome']} (livello {c['livello']})" for c in miei) or "nessuna ancora") + ".\n")
     if nec:
         p += "Competenze che hai indicato come necessarie al tuo ruolo: " + ", ".join(nec) + ".\n"
     else:
         p += (f"1) Elenca le competenze NECESSARIE al tuo ruolo, al massimo {MAX_NECESSARIE}: quelle senza le quali non puoi lavorare bene. Una per riga, nel formato\n"
               "NECESSARIA: nome della competenza\n")
-    p += (f"2) Elenca al massimo {MAX_DESIDERI} competenze che desideri APPROFONDIRE (anche tra quelle che hai gia') solo se ti servono davvero nel lavoro che fai. Una per riga, nel formato\n"
+    p += (f"2) Elenca fino a {n} competenze o temi che desideri APPROFONDIRE (anche tra quelle che hai gia', anche nuovi) purche' ti servano davvero nel lavoro che fai; vanno bene argomenti diversi tra loro e sempre nuovi rispetto a quelli che hai. Una per riga, nel formato\n"
           "DESIDERIO: nome della competenza | motivo concreto in almeno 30 caratteri (quale lacuna hai visto, in quale lavoro)\n"
           + ("Se un nome esiste gia' usa quello: " + "; ".join(esistenti[:80]) + ".\n" if esistenti else "")
           + "Se non hai nulla da chiedere rispondi solo: NIENTE. Non scrivere altro.")
     return p
 
 
-def _leggi(testo: str) -> tuple[list[str], list[tuple[str, str]]]:
+def _leggi(testo: str, massimo: int = MAX_DESIDERI) -> tuple[list[str], list[tuple[str, str]]]:
     nec, des = [], []
     for riga in str(testo or "").splitlines():
         riga = re.sub(r"^\s*[-*•\d.)]*\s*", "", riga).strip()
@@ -99,7 +114,7 @@ def _leggi(testo: str) -> tuple[list[str], list[tuple[str, str]]]:
             n, mot = g._nome(m.group(1)), m.group(2).strip()
             if 3 <= len(n) <= 100 and len(mot) >= 30 and n.lower() not in (x[0].lower() for x in des):
                 des.append((n, mot))
-    return nec[:MAX_NECESSARIE], des[:MAX_DESIDERI]
+    return nec[:MAX_NECESSARIE], des[:massimo]
 
 
 def _prossimo_livello(conn, agente_id: int, nome: str) -> int:
@@ -115,6 +130,7 @@ def giro_desideri(giro_id: int):
             if not cas:
                 raise g.ErroreGinnasio("Padre Casati non e' attivo")
             # prima chi non e' mai stato interrogato, poi chi lo e' stato meno di recente
+            quanti = numero_desideri(conn)
             agenti = conn.execute("""SELECT a.id, a.nome, a.ruolo FROM agenti a LEFT JOIN desideri_agenti d ON d.agente_id = a.id
                                      WHERE a.attivo AND a.ruolo_speciale IS NULL AND NOT COALESCE(a.sentinella, FALSE)
                                      ORDER BY d.ultimo_il NULLS FIRST, a.id LIMIT %s""", (MAX_AGENTI_GIRO,)).fetchall()
@@ -122,9 +138,9 @@ def giro_desideri(giro_id: int):
         for a in agenti:
             try:
                 with connessione() as conn:
-                    prompt = _prompt(conn, a)
-                ris = esegui_agente(a["id"], prompt, "interno", None, max_token=500)
-                nec, des = _leggi(ris.get("risposta", ""))
+                    prompt = _prompt(conn, a, quanti)
+                ris = esegui_agente(a["id"], prompt, "interno", None, max_token=900)
+                nec, des = _leggi(ris.get("risposta", ""), quanti)
                 with connessione() as conn:
                     for n in nec:
                         conn.execute("INSERT INTO competenze_necessarie (agente_id, nome) VALUES (%s,%s) ON CONFLICT DO NOTHING", (a["id"], n))
@@ -151,7 +167,7 @@ def giro_desideri(giro_id: int):
 
 
 def avvia(conn, forza: bool = False) -> int | None:
-    """Avvia il giro se la coda degli studi e' vuota ed e' passato abbastanza tempo (o se forzato). Un solo giro alla volta."""
+    """Avvia il giro se sono passati i giorni previsti (di notte, se cosi' impostato) e la coda del Ginnasio non e' gia' enorme (o se forzato). Un solo giro alla volta."""
     with _blocco:
         if conn.execute("SELECT 1 FROM desideri_giri WHERE stato = 'in_corso' AND avviato_il > NOW() - interval '3 hours'").fetchone():
             return None
@@ -159,7 +175,9 @@ def avvia(conn, forza: bool = False) -> int | None:
             gg = giorni(conn)
             if gg == 0:
                 return None
-            if conn.execute("SELECT 1 FROM studi WHERE stato IN ('approvato','in_corso')").fetchone():
+            if solo_di_notte(conn) and not IGNORA_NOTTE and not (NOTTE[0] <= datetime.now().hour < NOTTE[1]):
+                return None
+            if conn.execute("SELECT count(*) AS n FROM richieste_formazione WHERE stato = 'in_coda'").fetchone()["n"] >= MAX_IN_CODA:
                 return None
             if conn.execute("SELECT 1 FROM desideri_giri WHERE avviato_il > NOW() - make_interval(days => %s)", (gg,)).fetchone():
                 return None
@@ -179,7 +197,7 @@ def dopo_coda():
 
 
 def giro(conn):
-    """Dal lavoro di fondo (ogni 10 minuti): i livelli minimi mancanti diventano richieste con precedenza; se la coda e' vuota e' ora, giro dei desideri."""
+    """Dal lavoro di fondo (ogni 10 minuti): i livelli minimi mancanti diventano richieste con precedenza; ogni 2 giorni, di notte, giro dei desideri."""
     richiedi_minimi(conn)
     avvia(conn)
 
@@ -189,13 +207,15 @@ class Impostazioni(BaseModel):
     studi_automatici: bool
     giorni: int = Field(ge=0, le=90)
     minimo_attivo: bool
+    notte: bool = True
+    numero: int = Field(default=MAX_DESIDERI, ge=1, le=8)
 
 
 @router.get("")
 def vista(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         return {"studi_automatici": conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'studi_automatici'").fetchone() is None or _imp(conn, "studi_automatici", "1") == "1",
-                "giorni": giorni(conn), "minimo_attivo": minimo_attivo(conn), "ginnasio_attivo": g.stato_generale(conn)["attivo"],
+                "giorni": giorni(conn), "notte": solo_di_notte(conn), "numero": numero_desideri(conn), "minimo_attivo": minimo_attivo(conn), "ginnasio_attivo": g.stato_generale(conn)["attivo"],
                 "studi_in_coda": conn.execute("SELECT count(*) AS n FROM studi WHERE stato IN ('approvato','in_corso')").fetchone()["n"],
                 "giri": conn.execute("SELECT id, stato, interrogati, richieste, errore, avviato_il, concluso_il FROM desideri_giri ORDER BY id DESC LIMIT 5").fetchall(),
                 "minimi_mancanti": [{"agente": m["agente"], "competenza": m["nome"]} for m in mancanti(conn)][:60]}
@@ -207,6 +227,8 @@ def imposta(d: Impostazioni, _: dict = Depends(solo_titolare)):
         g.imposta(conn, "studi_automatici", "1" if d.studi_automatici else "0")
         g.imposta(conn, "desideri_giorni", str(d.giorni))
         g.imposta(conn, "minimo_attivo", "1" if d.minimo_attivo else "0")
+        g.imposta(conn, "desideri_notte", "1" if d.notte else "0")
+        g.imposta(conn, "desideri_numero", str(d.numero))
         return {"ok": True}
 
 
