@@ -9,6 +9,7 @@ from .db import connessione
 from .esecuzione import EsecuzioneBloccata, esegui_agente
 from .fornitori import ErroreFornitore
 from .navigatore import ErroreNavigazione
+from . import progresso
 
 _blocchi: dict[int, threading.Lock] = {}
 _g = threading.Lock()
@@ -23,19 +24,31 @@ def _lavora(coda_id: int, agente_id: int, utente_id: int, messaggio: str, fascia
     with _blocco(agente_id):
         t0 = time.monotonic()
         with connessione() as conn:
-            conn.execute("UPDATE chat_coda SET stato='in_lavoro', iniziato_il=NOW() WHERE id=%s", (coda_id,))
+            if not conn.execute("UPDATE chat_coda SET stato='in_lavoro', iniziato_il=NOW(), fase='comincia' WHERE id=%s AND stato='in_coda' AND NOT annullata RETURNING 1", (coda_id,)).fetchone():
+                return   # annullata mentre aspettava il suo turno
+
+        def _ascolta(testo):
+            with connessione() as c2:
+                r_ = c2.execute("UPDATE chat_coda SET fase=%s, fase_il=NOW() WHERE id=%s RETURNING annullata", (testo[:80], coda_id)).fetchone()
+            if r_ and r_["annullata"]:
+                raise progresso.Annullata()
+        tk = progresso.ASCOLTATORE.set(_ascolta)
         try:
             r = esegui_agente(agente_id, messaggio, fascia, utente_id, memorizza=True, allegati=allegati)
             r.update(extra)
             stato, errore = "finito", None
+        except progresso.Annullata:
+            r, stato, errore = None, "errore", "Annullata da te"
         except EsecuzioneBloccata as e:
             r, stato, errore = None, "errore", str(e)
         except (ErroreFornitore, CassaforteNonConfigurata, ErroreNavigazione) as e:
             r, stato, errore = None, "errore", str(e)
         except Exception as e:  # noqa: BLE001
             r, stato, errore = None, "errore", "Risposta non riuscita (" + type(e).__name__ + ")"
+        finally:
+            progresso.ASCOLTATORE.reset(tk)
         with connessione() as conn:
-            conn.execute("UPDATE chat_coda SET stato=%s, risultato=%s::jsonb, errore=%s, finito_il=NOW(), secondi=%s WHERE id=%s",
+            conn.execute("UPDATE chat_coda SET stato=%s, risultato=%s::jsonb, errore=%s, finito_il=NOW(), secondi=%s, fase=NULL WHERE id=%s",
                          (stato, json.dumps(r, default=str) if r is not None else None, errore, round(time.monotonic() - t0, 1), coda_id))
 
 

@@ -7,6 +7,7 @@ import httpx
 
 from . import eventi
 from .config import impostazioni
+from . import progresso
 from .fornitori import ErroreFornitore, Risposta, chiave as fornitori_chiave, invia, token_ingresso as fornitori_token_ingresso
 from .navigatore import ErroreNavigazione, Navigatore
 
@@ -103,6 +104,7 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
     passi = 0
     for _ in range(_passi()):
         passi += 1
+        progresso.fase("ragiona e scrive" if passi == 1 else "rielabora i risultati")
         d = _chiama_api({"model": modello, "max_tokens": max_token, "system": sistema,
                          "messages": messaggi, "tools": strumenti})
         t_in += fornitori_token_ingresso(d["usage"]); t_out += d["usage"]["output_tokens"]
@@ -129,6 +131,7 @@ def esegui_con_strumenti(modello: str, istruzioni: str, messaggio: str, max_toke
         risultati = []
         for b in d["content"]:
             if b.get("type") == "tool_use":
+                progresso.strumento(b["name"])
                 esito = _esegui_strumento(nav, b["name"], b.get("input") or {}, extra)
                 eventi.strumento(b["name"], b.get("input") or {}, esito)
                 if b["name"] == "chiedi_a_agente":

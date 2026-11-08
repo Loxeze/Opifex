@@ -43,7 +43,7 @@ def conversazioni(utente: dict = Depends(utente_corrente)):
           LEFT JOIN chat_bozze b ON b.utente_id = %(u)s AND b.agente_id = a.id
           WHERE (u.totale > 0 OR (b.testo IS NOT NULL AND btrim(b.testo) <> ''))
             AND (%(v)s::int[] IS NULL OR a.divisione_id = ANY(%(v)s::int[]))
-          ORDER BY GREATEST(u.ultima_attivita, COALESCE(b.aggiornato_il, 'epoch'::timestamptz)) DESC NULLS LAST, a.nome""",
+          ORDER BY COALESCE(u.ultima_attivita, b.aggiornato_il) DESC NULLS LAST, a.nome""",
           {"u": utente["id"], "v": sorted(visibili) if visibili is not None else None}).fetchall()
     return righe
 
@@ -60,6 +60,7 @@ def _messaggio(r: dict) -> dict:
     x = r["risultato"] or {}
     return {"id": r["id"], "canale": r["canale"], "messaggio": r["messaggio"], "stato": r["stato"], "errore": r["errore"], "creato_il": r["creato_il"], "finito_il": r["finito_il"],
             "secondi": float(r["secondi"]) if r["secondi"] is not None else None,
+            "attesa_s": r.get("attesa_s"), "iniziato_il": r.get("iniziato_il"), "fase": r.get("fase"), "annullata": bool(r.get("annullata")),
             "risposta": x.get("risposta"), "file": x.get("file_creati") or [], "token": (x.get("token_input") or 0) + (x.get("token_output") or 0),
             "usati": x.get("documenti_usati") or [], "esclusi": x.get("documenti_esclusi_per_riservatezza") or [], "avvisi": x.get("avvisi") or [],
             "allegati": x.get("allegati_letti") or [], "allegati_troncati": x.get("allegati_troncati") or []}
@@ -71,13 +72,28 @@ def apri(agente_id: int, prima_di: int | None = None, limite: int = 40, utente: 
     limite = max(1, min(limite, 200))
     with connessione() as conn:
         a = _agente_ok(conn, agente_id, utente)
-        righe = conn.execute("""SELECT id, messaggio, stato, risultato, errore, creato_il, finito_il, secondi, canale FROM chat_coda
+        righe = conn.execute("""SELECT id, messaggio, stato, risultato, errore, creato_il, finito_il, secondi, canale, iniziato_il, fase, annullata, EXTRACT(EPOCH FROM (NOW() - COALESCE(iniziato_il, creato_il)))::int AS attesa_s FROM chat_coda
                                 WHERE utente_id = %s AND agente_id = %s AND (%s::int IS NULL OR id < %s) ORDER BY id DESC LIMIT %s""",
                              (utente["id"], agente_id, prima_di, prima_di, limite + 1)).fetchall()
         b = conn.execute("SELECT testo, fascia FROM chat_bozze WHERE utente_id = %s AND agente_id = %s", (utente["id"], agente_id)).fetchone()
     altri = len(righe) > limite
     return {"agente": {"id": a["id"], "nome": a["nome"], "ruolo": a["ruolo"], "attivo": a["attivo"]}, "altri": altri,
             "messaggi": [_messaggio(r) for r in reversed(righe[:limite])], "bozza": (b or {}).get("testo") or "", "fascia": (b or {}).get("fascia")}
+
+
+@router.post("/chat/messaggi/{coda_id}/annulla")
+def annulla(coda_id: int, utente: dict = Depends(utente_corrente)):
+    """Annulla un messaggio in attesa (subito) o in lavorazione (si ferma al prossimo passaggio)."""
+    with connessione() as conn:
+        r = conn.execute("SELECT stato FROM chat_coda WHERE id = %s AND utente_id = %s", (coda_id, utente["id"])).fetchone()
+        if r is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Messaggio inesistente")
+        if r["stato"] not in ("in_coda", "in_lavoro"):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Il messaggio e' gia' concluso")
+        conn.execute("UPDATE chat_coda SET annullata = TRUE WHERE id = %s", (coda_id,))
+        if r["stato"] == "in_coda":
+            conn.execute("UPDATE chat_coda SET stato='errore', errore='Annullata da te', finito_il=NOW() WHERE id = %s AND stato='in_coda'", (coda_id,))
+    return {"ok": True, "subito": r["stato"] == "in_coda"}
 
 
 @router.post("/chat/conversazioni/{agente_id}/letto")

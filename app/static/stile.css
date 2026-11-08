@@ -365,3 +365,11 @@ table.anteprima{border-collapse:collapse;font-size:12px}table.anteprima th,table
 .fin-schermo{width:100%;height:auto;display:block;cursor:pointer;user-select:none;-webkit-user-drag:none}
 .fin-vuoto{padding:30px;border:1px dashed var(--bordo);border-radius:12px;color:var(--sotto,#666)}
 .fin-riga select{width:auto;min-width:200px;flex:0 0 auto}
+
+/* Chat: accessibilità */
+.solo-lettori{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.chat-app button:focus-visible,.chat-app textarea:focus-visible,.chat-app select:focus-visible{outline:3px solid var(--primario);outline-offset:2px}
+.bolla.attesa .punti{letter-spacing:2px;color:var(--primario);animation:punti 1.2s ease-in-out infinite}
+@keyframes punti{0%,100%{opacity:.3}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.bolla.attesa .punti{animation:none}}
+@media (pointer:coarse),(max-width:760px){.chat-app button,.chat-app .chat-voce{min-height:44px!important}.chat-app .chat-indietro,.chat-app .chat-riga-invio button{min-width:44px}}

@@ -72,7 +72,8 @@ function conversazioniChat() {
   const attivi = stato.agenti.filter(a => a.attivo);
   const perId = new Map(stato.agenti.map(a => [a.id, a]));
   const S = { agenteId: null, messaggi: [], altri: false, firma: "", elenco: [], pendenti: new Set(), nuova: false };
-  const lista = h("div", { class: "chat-lista-voci" });
+  const lista = h("div", { class: "chat-lista-voci", role: "list", "aria-label": "Conversazioni" });
+  const annuncio = h("div", { class: "solo-lettori", role: "status", "aria-live": "polite" });
   const pannelloNuova = h("div", { class: "chat-nuova", style: "display:none" });
   const testata = h("div", { class: "chat-testata" });
   const messaggiEl = h("div", { class: "chat-messaggi" });
@@ -116,7 +117,13 @@ function conversazioniChat() {
     if (m.canale === "ronda") out.push(h("div", { class: "chat-giorno" }, "🔔 Ronda automatica sui progetti · " + tempoChat(m.creato_il)));
     else out.push(h("div", { class: "bolla mia" }, h("div", { class: "risposta" }, m.messaggio + allegatiTxt), h("div", { class: "ora" }, (m.canale === "telegram" ? "📱 da Telegram · " : "") + tempoChat(m.creato_il))));
     if (m.stato === "in_coda" || m.stato === "in_lavoro") {
-      out.push(h("div", { class: "bolla loro attesa" }, h("div", { class: "sotto" }, "⏳ " + (S.nomeAgente || "L'agente") + (m.stato === "in_lavoro" ? " sta scrivendo…" : " risponderà appena è libero…"))));
+      const nome = S.nomeAgente || "L'agente";
+      const quando = h("span", { class: "tempo-att", "data-s": String(m.attesa_s || 0), "data-t": String(Date.now()) });
+      const ann = h("button", { class: "s", type: "button", "aria-label": "Annulla questo messaggio", onclick: async () => { try { await api("POST", "/chat/messaggi/" + m.id + "/annulla"); S.firma = ""; await aggiornaConversazione(false); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Annulla");
+      out.push(h("div", { class: "bolla loro attesa" },
+        h("div", { class: "sotto" }, h("span", { class: "punti", "aria-hidden": "true" }, "● ● ●"), " ",
+          m.stato === "in_lavoro" ? nome + " sta lavorando" + (m.fase && m.fase !== "comincia" ? ": " + m.fase : "") : nome + " risponderà appena è libero", " · ", quando),
+        h("div", { class: "azioni" }, ann)));
     } else if (m.stato === "errore") {
       out.push(h("div", { class: "bolla loro errore" }, h("div", { class: "risposta" }, "⚠️ " + (m.errore || "Risposta non riuscita")), h("div", { class: "ora" }, tempoChat(m.finito_il))));
     } else if (m.risposta !== null && m.risposta !== undefined) {
@@ -132,6 +139,14 @@ function conversazioniChat() {
     }
     return out;
   };
+  const scorriTempo = () => {
+    if (!document.body.contains(messaggiEl)) return;
+    for (const el of messaggiEl.querySelectorAll(".tempo-att")) {
+      const s = Number(el.dataset.s) + Math.round((Date.now() - Number(el.dataset.t)) / 1000);
+      el.textContent = s < 2 ? "" : s < 60 ? s + " s" : Math.floor(s / 60) + " min " + (s % 60) + " s";
+    }
+  };
+  setInterval(scorriTempo, 1000);
   const vaiFondo = h("button", { class: "s chat-fondo", type: "button", "aria-label": "Vai all'ultimo messaggio", hidden: true, onclick: () => { messaggiEl.scrollTop = messaggiEl.scrollHeight; } }, "↓ Ultimo messaggio");
   messaggiEl.addEventListener("scroll", () => { vaiFondo.hidden = messaggiEl.scrollHeight - messaggiEl.scrollTop - messaggiEl.clientHeight < 200; }, { passive: true });
   const disegnaMessaggi = (scendi) => {
@@ -178,6 +193,7 @@ function conversazioniChat() {
         disegnaMessaggi(primaVolta);
         if (aggiunti && document.visibilityState === "visible") api("POST", "/chat/conversazioni/" + id + "/letto").then(aggiornaElenco).catch(() => {});
       }
+      if (nuove.length) annuncio.textContent = "Risposta di " + r.agente.nome + " arrivata";
       if (nuove.length && (Voce.leggiRisposte || Voce.viva)) Voce.leggi(nuove[nuove.length - 1].risposta, () => { if (Voce.viva && Voce.avviaAscolto) Voce.avviaAscolto(); });
     } catch (e) { if (primaVolta) msg.replaceChildren(avviso(e.message, "no")); }
   };
@@ -186,36 +202,53 @@ function conversazioniChat() {
   const riga = (c) => {
     const a = perId.get(c.agente_id);
     const anteprima = c.ha_bozza && c.agente_id !== S.agenteId ? "✎ Bozza non inviata" : (c.ultimo_stato === "finito" && c.ultima_risposta) ? c.ultima_risposta : c.ultimo_messaggio ? "Tu: " + c.ultimo_messaggio : "";
-    return h("button", { class: "chat-voce" + (c.agente_id === S.agenteId ? " aperta" : ""), type: "button", onclick: () => apri(c.agente_id, true) },
+    return h("button", { class: "chat-voce" + (c.agente_id === S.agenteId ? " aperta" : ""), type: "button", role: "listitem", "aria-current": c.agente_id === S.agenteId ? "true" : null,
+      "aria-label": c.nome + (c.non_letti > 0 ? ", " + c.non_letti + " non lette" : "") + (c.in_attesa > 0 ? ", sta lavorando" : ""), onclick: () => apri(c.agente_id, true) },
       h("div", { class: "chat-sigla" }, (c.nome || "?").slice(0, 1).toUpperCase()),
       h("div", { class: "chat-voce-testo" },
         h("div", { class: "chat-voce-nome" }, h("span", {}, c.nome), h("span", { class: "ora" }, tempoChat(c.ultima_attivita))),
         h("div", { class: "chat-voce-anteprima" }, (c.in_attesa > 0 ? "⏳ " : "") + anteprima)),
       c.non_letti > 0 && c.agente_id !== S.agenteId ? h("span", { class: "badge-chat" }, String(c.non_letti)) : null);
   };
+  let firmaElenco = "";
   const disegnaElenco = () => {
+    const firma = S.agenteId + "|" + JSON.stringify(S.elenco);
+    if (firma === firmaElenco) return;   // niente da cambiare: l'elenco non si ridisegna (e il fuoco della tastiera non si perde)
+    firmaElenco = firma;
+    const nelFuoco = document.activeElement && lista.contains(document.activeElement) ? [...lista.children].indexOf(document.activeElement) : -1;
     lista.replaceChildren(...(S.elenco.length ? S.elenco.map(riga) : [h("p", { class: "sotto", style: "padding:12px" }, "Nessuna conversazione ancora. Premi «＋ Nuova» e scegli un agente.")]));
+    if (nelFuoco >= 0 && lista.children[nelFuoco]) lista.children[nelFuoco].focus();
   };
   const aggiornaElenco = async () => {
     try {
       S.elenco = await api("GET", "/chat/conversazioni");
+      lista._falliti = 0; lista._pausaFino = 0;
       if (S.agenteId && !S.elenco.some(c => c.agente_id === S.agenteId)) S.elenco.unshift({ agente_id: S.agenteId, nome: S.nomeAgente || (perId.get(S.agenteId) || {}).nome || "", in_attesa: 0, non_letti: 0 });
       disegnaElenco();
-    } catch (e) { /* riprova */ }
+    } catch (e) { lista._falliti = (lista._falliti || 0) + 1; lista._pausaFino = Date.now() + Math.min(30000, 2000 * Math.pow(2, lista._falliti)); }
   };
 
+  const chiudiMobile = () => { const ap = document.querySelector(".chat-app"); if (ap) ap.classList.remove("aperta-mobile"); };
+  window.addEventListener("popstate", function indietro() {
+    if (!document.body.contains(lista)) { window.removeEventListener("popstate", indietro); return; }
+    chiudiMobile();
+  });
+  const apriMobile = () => {
+    const ap = document.querySelector(".chat-app");
+    if (ap && !ap.classList.contains("aperta-mobile")) { ap.classList.add("aperta-mobile"); try { history.pushState({ chat: 1 }, ""); } catch (e) { /* ignora */ } }
+  };
   const apri = async (id, daClick) => {
-    if (S.agenteId === id) { if (daClick) { const ap = document.querySelector(".chat-app"); if (ap) ap.classList.add("aperta-mobile"); } return; }
+    if (S.agenteId === id) { if (daClick) apriMobile(); return; }
     if (stato.bozzaSospesa) { clearTimeout(timerBozza); salvaBozzaSospesa(); }
     S.agenteId = id; S.messaggi = []; S.firma = ""; S.pendenti = new Set(); stato.chatAgente = id; memLocale("chatAgente", String(id));
     testo.value = ""; msg.replaceChildren(); allegati.value = ""; elencoAll.textContent = "";
     const a = perId.get(id);
     S.nomeAgente = a ? a.nome : "";
-    riempi(testata, [h("button", { class: "s chat-indietro", type: "button", onclick: () => document.querySelector(".chat-app").classList.remove("aperta-mobile") }, "‹"),
+    riempi(testata, [h("button", { class: "s chat-indietro", type: "button", "aria-label": "Torna all'elenco delle conversazioni", onclick: () => { if (history.state && history.state.chat) history.back(); else chiudiMobile(); } }, "‹"),
       h("div", { class: "chat-sigla" }, (S.nomeAgente || "?").slice(0, 1).toUpperCase()),
       h("div", {}, h("div", { class: "nome" }, S.nomeAgente), h("div", { class: "sotto" }, a ? a.ruolo : ""))]);
     pannelloNuova.style.display = "none";
-    const app = document.querySelector(".chat-app"); if (app && daClick) app.classList.add("aperta-mobile");
+    if (daClick) apriMobile();
     messaggiEl.replaceChildren(h("p", { class: "sotto", style: "text-align:center" }, "Caricamento…"));
     disegnaElenco();
     await aggiornaConversazione(true);
@@ -237,6 +270,20 @@ function conversazioniChat() {
   };
   cerca.addEventListener("input", filtra);
   pannelloNuova.append(cerca, risultati);
+  lista.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const v = [...lista.querySelectorAll(".chat-voce")], i = v.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault(); const n = v[Math.max(0, Math.min(v.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))]; if (n) n.focus();
+  });
+  document.addEventListener("keydown", function tasti(e) {
+    if (!document.body.contains(lista)) { document.removeEventListener("keydown", tasti); return; }
+    if (e.altKey && (e.key === "ArrowDown" || e.key === "ArrowUp") && S.elenco.length) {
+      e.preventDefault();
+      const i = S.elenco.findIndex(x => x.agente_id === S.agenteId), n = S.elenco[Math.max(0, Math.min(S.elenco.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
+      if (n) apri(n.agente_id, true);
+    } else if (e.key === "Escape" && document.activeElement === testo && matchMedia("(max-width:760px)").matches) { chiudiMobile(); }
+  });
   const bNuova = h("button", { class: "p", type: "button", onclick: () => { const v = pannelloNuova.style.display === "none"; pannelloNuova.style.display = v ? "" : "none"; if (v) { cerca.value = ""; filtra(); cerca.focus(); } } }, "＋ Nuova");
 
   // ----- invio -----
@@ -287,11 +334,14 @@ function conversazioniChat() {
     if (scelto) await apri(scelto);
     else { const app = document.querySelector(".chat-app"); if (app) app.classList.remove("aperta-mobile"); riempi(messaggiEl, [h("p", { class: "sotto", style: "text-align:center;margin:40px 0" }, "Scegli un agente con «＋ Nuova» per iniziare una conversazione.")]); testo.disabled = true; }
   })();
+  let giri = 0;   // con messaggi in attesa si guarda ogni 2 s, altrimenti ogni 8; a pagina nascosta o con il server in pausa non si chiede nulla
   stato.timer2 = setInterval(async () => {
-    if (stato.vista !== "chat") return;
+    if (stato.vista !== "chat" || document.hidden || (typeof inPausa === "function" && inPausa(lista))) return;
+    giri++;
+    if (!S.pendenti.size && giri % 4) return;
     await aggiornaElenco();
     if (S.agenteId) await aggiornaConversazione(false);
-  }, 4000);
+  }, 2000);
 
   const compositore = h("div", { class: "chat-compositore" }, msg,
     h("div", { class: "chat-riga-invio" }, bAllega, allegati, testo, vocale && Voce.supportoDettatura ? bMic : null, bInvia),
@@ -302,6 +352,7 @@ function conversazioniChat() {
         h("label", {}, "Trascrizione della voce", modoVoce), provaMicrofono(),
         h("button", { class: "s", type: "button", onclick: () => { Voce.fermaTutto(); viva.checked = false; stile(false); } }, "⏹ Silenzio")) : null));
   return [h("div", { class: "chat-app" },
+    annuncio,
     h("div", { class: "chat-lista" }, h("div", { class: "chat-lista-testa" }, h("strong", {}, "Conversazioni"), bNuova), pannelloNuova, lista),
     h("div", { class: "chat-conv" }, testata, messaggiEl, vaiFondo, compositore))];
 }
