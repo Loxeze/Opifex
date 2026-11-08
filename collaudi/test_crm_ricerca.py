@@ -85,4 +85,15 @@ with TestClient(app) as c:
     ok("fonte non web / motivo corto / senza recapito: rifiutati", o1.startswith("ERRORE") and o2.startswith("ERRORE") and o3.startswith("ERRORE"), f"{o1}|{o2}|{o3}")
     p2 = sql("INSERT INTO crm_proposte (ente_cifrato, fonte_url, motivo) VALUES ('x','https://a.it','m') RETURNING id")[0][0]
     ok("scarto in blocco", c.post("/gestione/crm-ricerca/decidi", headers=H, json={"ids": [p2], "azione": "scarta"}).json()["scartate"] == 1)
+    # --- Esploratore di software open source (Sviluppo software) ---
+    from app import reparti_pronti
+    with connessione() as cn:
+        ok("senza il reparto non crea nulla", reparti_pronti.aggiungi_esploratore(cn) is None)
+        reparti_pronti.attiva(cn, "sviluppo")
+        eid = reparti_pronti.aggiungi_esploratore(cn)
+        ok("idempotente", reparti_pronti.aggiungi_esploratore(cn) == eid)
+    r = sql("SELECT d.nome, a.sandbox_attivo, a.accesso_web, a.istruzioni, s.nome FROM agenti a JOIN divisioni d ON d.id=a.divisione_id JOIN agenti s ON s.id=a.superiore_id WHERE a.id=%s", (eid,))[0]
+    ok("Esploratore in Sviluppo software, sotto il Capo sviluppo, con web e sandbox", r[0] == "Sviluppo software" and r[1] and r[2] and r[4] == "Capo sviluppo", str(r[:3]) + r[4])
+    ok("licenza, attivita', prova in sandbox, mai fuori dalla sandbox", all(x in r[3] for x in ("licenza", "sandbox", "GitHub", "18 mesi")))
+    ok("competenze necessarie", sql("SELECT count(*) FROM competenze_necessarie WHERE agente_id=%s", (eid,))[0][0] == 4)
 print("TOTALE", sum(ris), "/", len(ris))

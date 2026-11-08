@@ -235,6 +235,7 @@ async def ciclo_vita(app: FastAPI):
         from . import reparti_pronti
         with connessione() as conn:
             reparti_pronti.aggiungi_nuovi_ruoli(conn)
+            reparti_pronti.aggiungi_esploratore(conn)
             from . import crm_ricerca as _cr
             _cr.crea_agente(conn)
             from . import prezzi as _prezzi
