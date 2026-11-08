@@ -11,7 +11,8 @@ pool = ConnectionPool(
     min_size=1,
     max_size=40,      # ogni agente al lavoro tiene una connessione mentre aspetta il modello: servono margini
     timeout=60,
-    kwargs={"row_factory": dict_row},
+    # una connessione rimasta a meta' lavoro oltre 10 minuti viene chiusa dal database: non puo' piu' tenere in coda tutto il resto
+    kwargs={"row_factory": dict_row, "options": "-c idle_in_transaction_session_timeout=600000"},
     open=False,
 )
 

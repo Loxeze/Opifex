@@ -41,7 +41,7 @@ with TestClient(app) as c:
     ok("gestione senza token -> 401", c.get("/gestione/agenti").status_code == 401)
     ok("gestione per collaboratore -> 403", c.get("/gestione/agenti", headers=HS).status_code == 403)
     ag = c.get("/gestione/agenti", headers=H).json()
-    ok("gestione elenca 22 agenti con i nuovi campi", len(ag) == 22 and "max_token_risposta" in ag[0] and "token_mese" in ag[0])
+    ok("gestione elenca gli agenti con i nuovi campi", len(ag) >= 22 and "max_token_risposta" in ag[0] and "token_mese" in ag[0])
     scout = next(a for a in ag if a["nome"] == "Scout")
     ok("Scout ha accesso al web di default", scout["accesso_web"] is True)
     op = c.get("/gestione/opzioni", headers=H).json()

@@ -55,10 +55,16 @@ if [ "$(printf '%s\n%s\n' "$VECCHIA" "$VER" | sort -V | tail -1)" != "$VER" ] ||
   esito errore "$VER" "Versione non piu' recente di quella installata ($VECCHIA)"; rm -rf "$STAGE"; exit 1
 fi
 
+# libera le connessioni rimaste aperte a meta' lavoro da oltre un minuto: tengono bloccati backup e modifiche alle tabelle
+libera_connessioni() {
+  runuser -u postgres -- psql -q -At agenti -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='agenti' AND state='idle in transaction' AND now()-state_change > interval '60 seconds'" >/dev/null 2>&1 || true
+}
+
 # 4) copia di sicurezza del database
 mkdir -p "$BACKUP"; chmod 700 "$BACKUP"
 if [ -z "$PROVA" ]; then
-  if ! runuser -u postgres -- pg_dump agenti | gzip > "$BACKUP/prima-di-$VER-$(date +%F-%H%M).sql.gz"; then
+  libera_connessioni
+  if ! timeout 900 runuser -u postgres -- pg_dump agenti | gzip > "$BACKUP/prima-di-$VER-$(date +%F-%H%M).sql.gz"; then
     esito errore "$VER" "Backup del database non riuscito: nulla e' stato modificato"; rm -rf "$STAGE"; exit 1
   fi
 fi
@@ -90,7 +96,8 @@ if [ -z "$PROVA" ]; then
   for f in "$DIR"/sql/[0-9]*.sql; do
     n=$(basename "$f")
     if [ "$(q -c "SELECT count(*) FROM schema_migrazioni WHERE nome='$n'")" = "0" ]; then
-      if psql "$URL" -q -1 -v ON_ERROR_STOP=1 < "$f" >/dev/null 2>&1; then q -c "INSERT INTO schema_migrazioni (nome) VALUES ('$n')" >/dev/null
+      libera_connessioni
+      if PGOPTIONS="-c lock_timeout=60s" psql "$URL" -q -1 -v ON_ERROR_STOP=1 < "$f" >/dev/null 2>&1; then q -c "INSERT INTO schema_migrazioni (nome) VALUES ('$n')" >/dev/null
       else ritorna "Aggiornamento del database $n non riuscito (il database e' rimasto com'era, salvo le migrazioni precedenti, compatibili)."; exit 1; fi
     fi
   done
