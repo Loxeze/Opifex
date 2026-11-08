@@ -302,3 +302,27 @@ function bloccoSilenzio() {
   carica();
   return corpo;
 }
+
+
+// n8n: l'Esperto n8n legge i workflow e prepara bozze spente; URL e chiave API restano cifrati sul server.
+function bloccoN8n() {
+  const corpo = h("div"), msg = h("div");
+  const url = h("input", { type: "url", placeholder: "https://n8n.tuodominio.it", autocomplete: "off" });
+  const chiave = h("input", { type: "password", autocomplete: "off", placeholder: "Chiave API di n8n (Impostazioni > n8n API; non viene mai mostrata)" });
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/n8n");
+      if (d.url && !url.value) url.value = d.url;
+      riempi(corpo, [
+        h("p", { class: "aiuto" }, "Collega la tua istanza n8n: l'Esperto n8n (Sviluppo software) potrà leggere i workflow, vedere perché falliscono e preparare nuovi workflow come bozze spente. Non può attivare, eseguire o cancellare nulla."),
+        h("div", { class: "sotto" }, d.collegato ? "Collegato" + (d.workflow != null ? " · workflow: " + d.workflow : "") + (d.agente ? " · Esperto n8n attivo" : "") : "Non collegato"),
+        d.errore ? avviso(d.errore, "no") : null,
+        h("label", {}, "Indirizzo di n8n", url), h("label", {}, "Chiave API", chiave), msg,
+        h("div", { class: "azioni" },
+          h("button", { class: "p", type: "button", onclick: async () => { try { await api("PUT", "/gestione/n8n", { url: url.value, chiave: chiave.value }); chiave.value = ""; msg.replaceChildren(avviso("n8n collegato.", "ok")); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Collega"),
+          d.collegato ? h("button", { class: "s", type: "button", onclick: async () => { if (!confirm("Scollegare n8n?")) return; try { await api("DELETE", "/gestione/n8n"); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Scollega") : null)]);
+    } catch (e) { mostraErrore(corpo, e, carica); }
+  };
+  carica();
+  return [h("h3", {}, "n8n (automazioni)"), corpo];
+}

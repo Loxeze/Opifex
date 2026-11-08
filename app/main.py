@@ -81,6 +81,7 @@ from .rotte_crm_schede import router as router_crm_schede
 from .rotte_crm_modello import router as router_crm_modello
 from .rotte_crm_imprese import router as router_crm_imprese
 from .crm_ricerca import router as router_crm_ricerca
+from .n8n import router as router_n8n
 from .rotte_pwa import router as router_pwa
 from .rotte_dossier import router as router_dossier
 from .rotte_crm import router as router_crm
@@ -236,6 +237,9 @@ async def ciclo_vita(app: FastAPI):
         with connessione() as conn:
             reparti_pronti.aggiungi_nuovi_ruoli(conn)
             reparti_pronti.aggiungi_esploratore(conn)
+            from . import n8n as _n8n
+            if _n8n.collegato(conn):
+                _n8n.crea_agente(conn)
             from . import crm_ricerca as _cr
             _cr.crea_agente(conn)
             from . import prezzi as _prezzi
@@ -359,6 +363,7 @@ app.include_router(router_crm_schede)
 app.include_router(router_crm_modello)
 app.include_router(router_crm_imprese)
 app.include_router(router_crm_ricerca)
+app.include_router(router_n8n)
 app.include_router(router_pwa)
 app.include_router(router_dossier)
 app.include_router(router_crm)

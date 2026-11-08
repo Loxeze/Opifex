@@ -961,6 +961,7 @@ function vistaSicurezza() {
         msg, h("div", { class: "azioni" }, h("button", { class: "p", onclick: salva }, "Salva")));
     })),
     blocchiFornitori(),
+    bloccoN8n(),
   ];
 }
 
