@@ -358,8 +358,6 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             prog_crea = bool(scheda_progetto.strumenti_abilitati() and ok_int and a["livello"] in ("manager", "referente") and not _sent)
             sq_pm = bool(form_tool and pm_tool)
             sq_val = bool(form_tool and not _sent)
-            if a["fornitore"] == "locale":   # un modello locale non pubblica ne' spedisce in massa da solo
-                social_tool = email_tool = False
             if a["fornitore"] == "locale":   # i modelli piccoli si confondono con troppi strumenti: grafica e montaggio solo se la richiesta li nomina
                 _m = (messaggio or "").lower()
                 if not any(k in _m for k in ("grafic", "immagin", "locandin", "post ", "banner", "logo", "video", "montaggio", "copertina", "slide", "infografic")):
@@ -370,6 +368,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 form_tool = prog_crea = sq_pm = sq_val = False
             if ((a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get()) or creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val):
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
+                uscita_extra, uscita_gestori, uscita_avviso = [], {}, []
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
                     stato_dialogo = {"domande": 0, "conv": {}}
@@ -412,18 +411,22 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     g = strumenti_google.gestore(conn, agente_id)
                     for s_ in strumenti_google.STRUMENTI:
                         gestori[s_["name"]] = g
+                # modello locale: gli strumenti che scrivono verso l'esterno non sono suoi, li usa un modello Claude su richiesta (comunica_esterno)
+                u_extra, u_gest, u_avv = (uscita_extra, uscita_gestori, uscita_avviso) if a["fornitore"] == "locale" else (extra, gestori, None)
                 if social_tool:
-                    extra.extend(strumenti_social.STRUMENTI)
-                    avviso_extra += strumenti_social.AVVISO
+                    u_extra.extend(strumenti_social.STRUMENTI)
                     gs = strumenti_social.gestore(conn, agente_id)
                     for s_ in strumenti_social.STRUMENTI:
-                        gestori[s_["name"]] = gs
+                        u_gest[s_["name"]] = gs
+                    if u_avv is None: avviso_extra += strumenti_social.AVVISO
+                    else: u_avv.append(strumenti_social.AVVISO)
                 if email_tool:
-                    extra.extend(brevo_email.STRUMENTI)
-                    avviso_extra += brevo_email.AVVISO
+                    u_extra.extend(brevo_email.STRUMENTI)
                     ge = brevo_email.gestore(conn, agente_id)
                     for s_ in brevo_email.STRUMENTI:
-                        gestori[s_["name"]] = ge
+                        u_gest[s_["name"]] = ge
+                    if u_avv is None: avviso_extra += brevo_email.AVVISO
+                    else: u_avv.append(brevo_email.AVVISO)
                 if gmail_tool:
                     extra.extend(strumenti_gmail.STRUMENTI)
                     avviso_extra += strumenti_gmail.AVVISO
@@ -438,10 +441,15 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     for s_ in strumenti_posta.STRUMENTI:
                         gestori[s_["name"]] = gp
                 if (gmail_tool or posta_tool) and a["invio_posta"] in ("approvazione", "diretto"):
-                    modo_posta = "approvazione" if (a["fornitore"] == "locale" and a["invio_posta"] == "diretto") else a["invio_posta"]   # modello locale: mai invii senza la tua approvazione
-                    extra.append(invio_posta.STRUMENTO_INVIA)
-                    avviso_extra += invio_posta.avviso(modo_posta)
-                    gestori["posta_invia"] = invio_posta.gestore(conn, agente_id, modo_posta, a["gmail_account_id"] if gmail_tool else None, posta_c if posta_tool else [])
+                    modo_posta = a["invio_posta"]
+                    u_extra.append(invio_posta.STRUMENTO_INVIA)
+                    u_gest["posta_invia"] = invio_posta.gestore(conn, agente_id, modo_posta, a["gmail_account_id"] if gmail_tool else None, posta_c if posta_tool else [])
+                    if u_avv is None: avviso_extra += invio_posta.avviso(modo_posta)
+                    else: u_avv.append(invio_posta.avviso(modo_posta))
+                if uscita_extra:
+                    extra.append(delega_online.STRUMENTO_USCITA)
+                    avviso_extra += delega_online.AVVISO_USCITA
+                    gestori["comunica_esterno"] = delega_online.strumento_uscita(agente_id, a, fascia_dati, uscita_extra, uscita_gestori, "".join(uscita_avviso))
 
                 if n8n_tool:
                     extra.extend(n8n_mod.STRUMENTI)

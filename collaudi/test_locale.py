@@ -145,5 +145,23 @@ with TestClient(app) as c:
     g3 = delega_online.strumento(ag, a_, "interno")
     for _ in range(4): g3("cerca_online", {"domanda": "y"})
     ok("cerca_online: al massimo 4 ricerche per compito", g3("cerca_online", {"domanda": "z"}).startswith("ERRORE: troppe"))
+    # comunicazione esterna delegata: l'invio lo esegue Claude con i soli strumenti di uscita
+    from app import agente_browser
+    chiamate = []
+    reale_es = agente_browser.esegui_con_strumenti
+    def finto_es(modello, istr, msg, mt, nav, extra=None, gest=None, avv="", web=None):
+        chiamate.append((modello, [e["name"] for e in extra], msg)); out = gest("posta_invia", {"a": "x@y.it"})
+        return Risposta("Email inviata a x@y.it", 30, 10, {})
+    agente_browser.esegui_con_strumenti = finto_es
+    invii = []
+    gu = delega_online.strumento_uscita(ag, a_, "interno", [{"name": "posta_invia"}], {"posta_invia": lambda n, d: invii.append(d) or "ok"}, "")
+    out = gu("comunica_esterno", {"richiesta": "Manda a x@y.it: Gentile..."})
+    ok("comunica_esterno: Claude esegue l'invio con i soli strumenti di uscita", out == "Email inviata a x@y.it" and chiamate[0][0] == "claude-sonnet-5-5" and chiamate[0][1] == ["posta_invia"] and len(invii) == 1, str(chiamate))
+    ok("comunica_esterno: costi e azione registrati", sql("SELECT count(*) FROM registro_azioni WHERE agente_id=%s AND azione='comunicazione_esterna_delegata'", (ag,))[0][0] == 1)
+    sql("UPDATE fornitori_ai SET fascia_dati_max='pubblico' WHERE nome='anthropic'")
+    gu2 = delega_online.strumento_uscita(ag, a_, "riservato", [{"name": "posta_invia"}], {}, ""); n_ = len(chiamate)
+    ok("comunica_esterno: dato riservato non esce, tentativo tracciato", gu2("comunica_esterno", {"richiesta": "x"}).startswith("ERRORE") and len(chiamate) == n_
+       and sql("SELECT count(*) FROM registro_uscite WHERE agente_id=%s AND bloccato AND motivo_blocco LIKE 'Comunicazione esterna%%'", (ag,))[0][0] == 1)
+    agente_browser.esegui_con_strumenti = reale_es
     delega_online.chiama_modello = reale_cm; delega_online.fornitori.chiave = fornitori_chiave
 print("TOTALE %d / %d" % (sum(ris), len(ris)))

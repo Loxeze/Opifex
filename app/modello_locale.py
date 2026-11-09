@@ -109,12 +109,6 @@ def stato_prova(_: dict = Depends(solo_titolare)):
 def _motivi_esclusione(conn, a: dict) -> list[str]:
     """Agenti che restano online: possono scrivere fuori da Opifex o hanno bisogno di funzioni solo dei modelli Claude."""
     m = []
-    if a["invio_posta"] in ("approvazione", "diretto") and (a["gmail_account_id"] or conn.execute("SELECT 1 FROM agenti_connessioni ac JOIN connessioni c ON c.id = ac.connessione_id WHERE ac.agente_id = %s AND c.stato = 'attiva' LIMIT 1", (a["id"],)).fetchone()):
-        m.append("puo' inviare email all'esterno")
-    if a["email_attivo"]:
-        m.append("invia email di massa (Brevo)")
-    if a["social_attivo"]:
-        m.append("pubblica sui social")
     if conn.execute("""SELECT 1 FROM agenti_connessioni ac JOIN connessioni c ON c.id = ac.connessione_id AND c.stato = 'attiva'
                        JOIN accessi_siti s ON s.connessione_id = c.id WHERE ac.agente_id = %s LIMIT 1""", (a["id"],)).fetchone():
         m.append("naviga siti con accesso (solo modelli Claude)")
@@ -125,7 +119,7 @@ def _piano(conn, modello: str) -> dict:
     if not conn.execute("SELECT 1 FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE f.nome = 'locale' AND m.nome = %s", (modello,)).fetchone():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Modello locale non registrato: premi prima «Registra i modelli del portatile»")
     cambia, restano = [], []
-    for a in conn.execute("SELECT id, nome, modello, invio_posta, gmail_account_id, email_attivo, social_attivo, attivo FROM agenti WHERE attivo ORDER BY nome").fetchall():
+    for a in conn.execute("SELECT id, nome, modello, attivo FROM agenti WHERE attivo ORDER BY nome").fetchall():
         mot = _motivi_esclusione(conn, a)
         if mot:
             restano.append({"id": a["id"], "nome": a["nome"], "modello": a["modello"], "motivi": mot})
