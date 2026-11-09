@@ -30,7 +30,7 @@ try:
     import pypdf  # noqa: F401 - per leggere i PDF; se manca (compose vecchio) lo installo da solo
 except ImportError:
     try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", "-q", "pypdf==5.1.0"], timeout=300, capture_output=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", "-q", "pypdf==6.21.4"], timeout=300, capture_output=True)
     except Exception:  # noqa: BLE001
         pass
 
