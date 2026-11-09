@@ -74,8 +74,10 @@ with TestClient(app) as c:
 
     # un agente sul modello locale
     ag = sql("SELECT id FROM agenti WHERE nome='Marco'")[0][0]
+    sql("UPDATE agenti SET livello='operativo' WHERE id=%s", (ag,)); sql("UPDATE progetti SET pm_agente_id=NULL WHERE pm_agente_id=%s", (ag,))
     sql("UPDATE agenti SET modello='qwen3:8b' WHERE id=%s", (ag,))
     nube = {"n": 0}
+    TUTTI = esecuzione.STRUMENTI_FORNITORI; esecuzione.STRUMENTI_FORNITORI = ("anthropic",)   # agente senza strumenti: percorso semplice
     reale = esecuzione.chiama_modello
     def finta(fornitore, modello, istr, msg, mt, web=None):
         if fornitore == "locale": return reale(fornitore, modello, istr, msg, mt, web)
@@ -94,6 +96,7 @@ with TestClient(app) as c:
     except Exception as ex: e = ex
     ok("senza ripiego: l'agente non risponde e l'errore dice perche'", e is not None and "portatile" in str(e) and nube["n"] == 0, str(e)[:100])
     sql("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('locale_ripiego','claude-sonnet-5-5') ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore")
+    sql("UPDATE agenti SET modello='qwen3:8b' WHERE id=%s", (ag,))
     o = esecuzione.esegui_agente(ag, "ciao", "interno", None)
     ok("dato interno con ripiego consentito: risponde il cloud", o["risposta"] == "Risposta dal cloud di ripiego" and nube["n"] == 1, o["risposta"][:80])
     ok("il ripiego e' registrato nel registro azioni", sql("SELECT count(*) FROM registro_azioni WHERE agente_id=%s AND azione='ripiego_modello_locale'", (ag,))[0][0] == 1)
@@ -110,4 +113,14 @@ with TestClient(app) as c:
     o = esecuzione.esegui_agente(ag, "dati riservati", "riservato", None)
     ok("portatile riacceso: il dato riservato viene elaborato in locale", o["risposta"].startswith("Risposta dal portatile") and nube["n"] == 1)
     ok("il modello locale non viene scelto da solo per i dialoghi automatici", "locale" not in [r[0] for r in sql("SELECT f.nome FROM modelli_ai m JOIN fornitori_ai f ON f.id=m.fornitore_id WHERE m.usa_per_dialoghi")])
+    # con gli strumenti: il modello locale li usa e, se il portatile e' spento, NON c'e' ripiego sul cloud
+    esecuzione.STRUMENTI_FORNITORI = TUTTI
+    sql("UPDATE impostazioni_sistema SET valore=%s WHERE chiave='locale_url'", (URL,)); sql("UPDATE fornitori_ai SET fascia_dati_max='riservato' WHERE nome='anthropic'")
+    n0 = nube["n"]
+    o = esecuzione.esegui_agente(ag, "ciao", "interno", None)
+    ok("con gli strumenti il modello locale risponde (percorso a funzioni)", o["risposta"].startswith("Risposta dal portatile"), o["risposta"][:80])
+    sql("UPDATE impostazioni_sistema SET valore='http://127.0.0.1:1' WHERE chiave='locale_url'")
+    try: esecuzione.esegui_agente(ag, "ciao", "interno", None); e = None
+    except Exception as ex: e = ex
+    ok("con gli strumenti e portatile spento: errore, nessun ripiego sul cloud", e is not None and nube["n"] == n0, str(e)[:100])
 print("TOTALE %d / %d" % (sum(ris), len(ris)))

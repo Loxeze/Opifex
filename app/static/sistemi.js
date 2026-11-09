@@ -355,8 +355,40 @@ function bloccoModelloLocale(ricarica) {
         h("button", { class: "s", "data-uso": "locale-importa", onclick: async () => {
           try { const r = await api("POST", "/gestione/locale/modelli/importa"); msg.replaceChildren(avviso(r.nuovi + " modelli nuovi registrati (su " + r.totale + " trovati): ora puoi assegnarli agli agenti.", "ok")); await ricarica(); }
           catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Registra i modelli del portatile")),
-      q.registrati.length ? h("p", { class: "sotto" }, "Modelli locali registrati: " + q.registrati.join(" · ")) : null);
+      q.registrati.length ? h("p", { class: "sotto" }, "Modelli locali registrati: " + q.registrati.join(" · ")) : null,
+      bloccoProvaAffidabilita(q.registrati));
   };
   carica();
   return corpo;
+}
+
+// Prova di affidabilita': stessi compiti per ogni modello locale, con un punteggio
+function bloccoProvaAffidabilita(modelli) {
+  const sel = h("select", {}, modelli.map(n => h("option", { value: n }, n)));
+  const esito = h("div"), tab = h("div");
+  let timer = null;
+  const disegna = (stor, cur) => {
+    const righe = [];
+    if (cur && cur.in_corso) righe.push(h("p", { class: "sotto" }, "Prova in corso su " + cur.modello + ": " + cur.fatte + " di " + cur.totale + " compiti. Il primo avvio di un modello grande può richiedere qualche minuto."));
+    if (cur && cur.errore) righe.push(avviso(cur.errore, "no"));
+    stor.sort((x, y) => y.punteggio - x.punteggio);
+    if (stor.length) righe.push(h("table", {}, h("thead", {}, h("tr", {}, ["Modello", "Punteggio", "Velocità", "Compiti falliti"].map(t => h("th", {}, t)))),
+      h("tbody", {}, stor.map(x => h("tr", {}, h("td", {}, x.modello), h("td", {}, x.punteggio + " / " + x.totale),
+        h("td", {}, x.token_al_secondo ? x.token_al_secondo + " token/s" : "—"),
+        h("td", {}, (x.dettagli.filter(d => !d.ok).map(d => d.prova).join("; ")) || "nessuno"))))));
+    tab.replaceChildren(...righe);
+  };
+  const aggiorna = async () => {
+    try { const r = await api("GET", "/gestione/locale/affidabilita"); disegna(r.storico, r.corrente);
+      if (r.corrente.in_corso) timer = setTimeout(aggiorna, 3000); } catch (e) { tab.replaceChildren(avviso(e.message, "no")); }
+  };
+  aggiorna();
+  return h("div", {},
+    h("div", { class: "nome" }, "Prova di affidabilità"),
+    h("p", { class: "aiuto" }, "Otto compiti uguali per ogni modello: italiano corretto, formato rigido, scelta e uso degli strumenti, ammettere di non trovare, non obbedire a ordini nascosti nei documenti. Nessun dato reale e nessuna azione vera: gli strumenti sono simulati."),
+    h("label", {}, "Modello da provare", sel), esito,
+    h("div", { class: "azioni" }, h("button", { class: "s", "data-uso": "locale-affidabilita", onclick: async () => {
+      try { await api("POST", "/gestione/locale/affidabilita", { modello: sel.value }); esito.replaceChildren(avviso("Prova avviata.", "ok")); clearTimeout(timer); aggiorna(); }
+      catch (e) { esito.replaceChildren(avviso(e.message, "no")); } } }, "Avvia la prova")),
+    tab);
 }

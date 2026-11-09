@@ -7,7 +7,7 @@ from .db import connessione
 from .permessi import solo_titolare
 from .riservatezza import puo_uscire
 
-STRUMENTI_FORNITORI = ("anthropic", "openai", "xai")
+STRUMENTI_FORNITORI = ("anthropic", "openai", "xai", "locale")
 router = APIRouter(prefix="/gestione")
 
 

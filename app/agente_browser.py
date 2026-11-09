@@ -8,7 +8,7 @@ import httpx
 from . import eventi
 from .config import impostazioni
 from . import progresso
-from .fornitori import ErroreFornitore, Risposta, chiave as fornitori_chiave, invia, token_ingresso as fornitori_token_ingresso
+from .fornitori import ErroreFornitore, ErroreLocale, Risposta, chiave as fornitori_chiave, invia, token_ingresso as fornitori_token_ingresso, url_locale as fornitori_url_locale
 from .navigatore import ErroreNavigazione, Navigatore
 
 MAX_PASSI = 14
@@ -202,6 +202,21 @@ URL_COMPAT = {"openai": ("https://api.openai.com/v1/chat/completions", "OpenAI")
 
 
 def _chiama_compat(fornitore: str, corpo: dict) -> dict:
+    if fornitore == "locale":
+        # Ollama sul portatile: nessuna chiave; se non risponde l'errore e' ErroreLocale. Con gli strumenti NON si ripiega sul cloud
+        # (i risultati di Drive, CRM ecc. sono stati ammessi perche' il modello e' sul portatile di Lorenzo).
+        try:
+            r = httpx.post(fornitori_url_locale() + "/v1/chat/completions", json=corpo, timeout=httpx.Timeout(900, connect=5))
+        except httpx.HTTPError as e:
+            raise ErroreLocale(f"Il modello locale non risponde ({type(e).__name__}): il portatile e' acceso e collegato?") from None
+        if r.status_code == 404:
+            raise ErroreFornitore(f"Il modello locale «{corpo.get('model')}» non e' scaricato sul portatile (in Ollama: ollama pull {corpo.get('model')})")
+        if r.status_code != 200:
+            raise ErroreFornitore(f"Modello locale: {r.status_code} {r.text[:200]}")
+        d = r.json()
+        d.setdefault("usage", {})
+        d["usage"] = {"prompt_tokens": int(d["usage"].get("prompt_tokens") or 0), "completion_tokens": int(d["usage"].get("completion_tokens") or 0)}
+        return d
     url, nome = URL_COMPAT[fornitore]
     k = fornitori_chiave(fornitore)
     if not k:

@@ -3,7 +3,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from . import fornitori
+from . import fornitori, prova_modelli
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -83,3 +83,24 @@ def importa_modelli_locali(_: dict = Depends(solo_titolare)):
             conn.execute("INSERT INTO modelli_ai (fornitore_id, nome, costo_input_per_milione, costo_output_per_milione, fascia, importato, usa_per_dialoghi) VALUES (%s,%s,0,0,'economico',TRUE,FALSE)", (f["id"], nome))
             nuovi += 1
     return {"nuovi": nuovi, "totale": len(p["modelli"])}
+
+
+class ProvaModello(BaseModel):
+    modello: str = Field(min_length=1, max_length=120)
+
+
+@router.post("/locale/affidabilita")
+def avvia_prova(d: ProvaModello, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        if not conn.execute("SELECT 1 FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE f.nome = 'locale' AND m.nome = %s", (d.modello,)).fetchone():
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Modello locale non registrato: premi prima «Registra i modelli del portatile»")
+    if not prova_modelli.avvia(d.modello):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Una prova e' gia' in corso: aspetta che finisca")
+    return {"stato": "avviata"}
+
+
+@router.get("/locale/affidabilita")
+def stato_prova(_: dict = Depends(solo_titolare)):
+    s = prova_modelli.stato()
+    s.pop("inizio", None)
+    return {"corrente": s, "storico": prova_modelli.storico(), "soglia_velocita": prova_modelli.SOGLIA_VELOCITA}

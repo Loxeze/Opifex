@@ -13,7 +13,7 @@ from .fornitori import ErroreFornitore, Risposta, chiama_modello
 
 import contextvars
 PROVA_ISTRUZIONI = contextvars.ContextVar('prova_istruzioni', default=None)   # (agente_id, testo): prova di istruzioni non ancora applicate
-STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai')   # chi sa usare gli strumenti degli agenti
+STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai', 'locale')   # chi sa usare gli strumenti degli agenti
 from . import banco, creativi, best_practice, archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
 from . import progresso, n8n as n8n_mod, crm_contatti_agenti, ricerca_profonda, finestre, brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta
 from . import strumenti_social
@@ -362,7 +362,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 colleghi_ok, siti = [], []
                 ricerca_tool = finestre_tool = canva_tool = siti_tool = creativi_tool = banco_tool = social_tool = sb_tool = rev_tool = iniz_tool = email_tool = False
                 form_tool = prog_crea = sq_pm = sq_val = False
-            if a["fornitore"] != "locale" and (creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val):   # il modello locale risponde senza strumenti (per ora)
+            if (creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val):
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -639,6 +639,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 else:
                     nav = None
                 fornitori.CACHE_LETTA.set(0)
+                conn.commit()  # niente transazione aperta mentre il modello lavora
                 try:
                     if a["fornitore"] == "anthropic":
                         ris = agente_browser.esegui_con_strumenti(a["modello_nome"], a["istruzioni"], testo_uscente,
