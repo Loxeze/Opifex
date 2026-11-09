@@ -356,10 +356,42 @@ function bloccoModelloLocale(ricarica) {
           try { const r = await api("POST", "/gestione/locale/modelli/importa"); msg.replaceChildren(avviso(r.nuovi + " modelli nuovi registrati (su " + r.totale + " trovati): ora puoi assegnarli agli agenti.", "ok")); await ricarica(); }
           catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Registra i modelli del portatile")),
       q.registrati.length ? h("p", { class: "sotto" }, "Modelli locali registrati: " + q.registrati.join(" · ")) : null,
+      bloccoTachimetri(),
       bloccoProvaAffidabilita(q.registrati));
   };
   carica();
   return corpo;
+}
+
+// Tachimetri: quanto del portatile sta usando il modello (da Ollama), aggiornati ogni 3 secondi finche' la scheda e' aperta
+function bloccoTachimetri() {
+  const corpo = h("div", { class: "tach-riga" }), nota = h("p", { class: "sotto" });
+  const NS = "http://www.w3.org/2000/svg";
+  const arco = (cx, cy, r, a0, a1) => { const p = (a) => [cx + r * Math.cos(a), cy - r * Math.sin(a)]; const [x0, y0] = p(a0), [x1, y1] = p(a1); return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 ${Math.abs(a1 - a0) > Math.PI ? 1 : 0} ${a1 < a0 ? 1 : 0} ${x1.toFixed(1)} ${y1.toFixed(1)}`; };
+  const tach = (titolo, valore, massimo, unita, colore) => {
+    const f = Math.max(0, Math.min(1, massimo ? valore / massimo : 0)), a = Math.PI * (1 - f);
+    const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 200 120"); svg.setAttribute("width", "100%"); svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", titolo + ": " + valore + " di " + massimo + " " + unita);
+    const mk = (n, at) => { const e = document.createElementNS(NS, n); for (const k in at) e.setAttribute(k, at[k]); svg.append(e); return e; };
+    mk("path", { d: arco(100, 100, 80, Math.PI, 0), fill: "none", stroke: "var(--bordo, #8884)", "stroke-width": 14, "stroke-linecap": "round" });
+    if (f > 0) mk("path", { d: arco(100, 100, 80, Math.PI, a), fill: "none", stroke: f > 0.9 ? "#C0392B" : colore, "stroke-width": 14, "stroke-linecap": "round" });
+    mk("line", { x1: 100, y1: 100, x2: 100 + 62 * Math.cos(a), y2: 100 - 62 * Math.sin(a), stroke: "var(--testo, #888)", "stroke-width": 3, "stroke-linecap": "round" });
+    mk("circle", { cx: 100, cy: 100, r: 6, fill: "var(--testo, #888)" });
+    return h("div", { class: "tach" }, svg, h("div", { class: "nome", style: "text-align:center" }, valore.toLocaleString("it-IT") + " / " + massimo + " " + unita), h("div", { class: "sotto", style: "text-align:center" }, titolo));
+  };
+  const agg = async () => {
+    if (!corpo.isConnected && corpo.dataset.visto) return;
+    try {
+      const r = await api("GET", "/gestione/locale/risorse"); corpo.dataset.visto = "1";
+      if (!r.raggiungibile) { corpo.replaceChildren(); nota.textContent = "Portatile non raggiungibile: acceso, con Ollama e Tailscale attivi?"; }
+      else if (!r.modelli.length) { corpo.replaceChildren(tach("Scheda grafica", 0, r.vram_totale_gb, "GB", "#1E8466"), tach("Memoria (RAM)", 0, 32, "GB", "#2D6CDF")); nota.textContent = "Nessun modello caricato in questo momento: si carica alla prima richiesta."; }
+      else { corpo.replaceChildren(tach("Scheda grafica (modello)", r.gpu_usata_gb, r.vram_totale_gb, "GB", "#1E8466"), tach("Memoria (RAM) usata dal modello", r.ram_usata_gb, 32, "GB", "#2D6CDF"));
+        nota.textContent = r.modelli.map(m => m.nome + ": " + m.dimensione_gb + " GB, " + m.percentuale_gpu + "% sulla scheda grafica" + (m.contesto ? ", contesto " + m.contesto : "")).join(" · "); }
+    } catch (e) { nota.textContent = e.message; }
+    if (corpo.isConnected) setTimeout(agg, 3000);
+  };
+  setTimeout(agg, 50);
+  return h("div", {}, h("div", { class: "nome" }, "Il portatile al lavoro"), corpo, nota);
 }
 
 // Prova di affidabilita': stessi compiti per ogni modello locale, con un punteggio

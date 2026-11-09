@@ -418,3 +418,5 @@ i.task{background:var(--avv)}i.ritardo{background:var(--no)}i.milestone{backgrou
 .cr-el-anteprima{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cr-el-titolo .nome{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:600px){.cr-el-testa{flex-wrap:wrap}.cr-el-titolo{flex-basis:100%;order:3}}
+.tach-riga { display: flex; gap: 16px; flex-wrap: wrap; }
+.tach { flex: 1 1 200px; max-width: 280px; min-width: 0; }

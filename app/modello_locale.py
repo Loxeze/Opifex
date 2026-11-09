@@ -169,3 +169,24 @@ def ripristina_modelli(u: dict = Depends(solo_titolare)):
         conn.execute("DELETE FROM modelli_prima_locale")
         conn.execute("INSERT INTO registro_azioni (azione, utente_id, dettagli) VALUES ('modello_locale_ripristinato', %s, %s::jsonb)", (u["id"], __import__("json").dumps({"agenti": n})))
     return {"ripristinati": n}
+
+
+@router.get("/locale/risorse")
+def risorse_locale(_: dict = Depends(solo_titolare)):
+    """Cosa sta facendo Ollama sul portatile adesso (da /api/ps): modelli in memoria, quanta scheda grafica occupano, quanto restano caricati."""
+    import httpx
+    with connessione() as conn:
+        vram_gb = float(_imp(conn, "locale_vram_gb", "8") or 8)
+    try:
+        r = httpx.get(fornitori.url_locale() + "/api/ps", timeout=httpx.Timeout(4, connect=3))
+        r.raise_for_status()
+        mod = r.json().get("models") or []
+    except (httpx.HTTPError, ValueError):
+        return {"raggiungibile": False, "modelli": [], "vram_totale_gb": vram_gb}
+    out = []
+    for m in mod:
+        tot, gpu = int(m.get("size") or 0), int(m.get("size_vram") or 0)
+        out.append({"nome": m.get("name"), "dimensione_gb": round(tot / 1e9, 1), "gpu_gb": round(gpu / 1e9, 1),
+                    "percentuale_gpu": round(100 * gpu / tot) if tot else 0, "contesto": m.get("context_length"), "scade": m.get("expires_at")})
+    return {"raggiungibile": True, "modelli": out, "vram_totale_gb": vram_gb,
+            "gpu_usata_gb": round(sum(x["gpu_gb"] for x in out), 1), "ram_usata_gb": round(sum(x["dimensione_gb"] - x["gpu_gb"] for x in out), 1)}

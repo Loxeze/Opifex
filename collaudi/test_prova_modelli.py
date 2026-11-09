@@ -53,7 +53,9 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def _j(self, code, o):
         b = json.dumps(o).encode(); self.send_response(code); self.send_header("content-type", "application/json"); self.send_header("content-length", str(len(b))); self.end_headers(); self.wfile.write(b)
-    def do_GET(self): self._j(200, {"models": [{"name": "buono"}, {"name": "cattivo"}]})
+    def do_GET(self):
+        if self.path == "/api/ps": return self._j(200, {"models": [{"name": "buono", "size": 20_000_000_000, "size_vram": 7_000_000_000, "context_length": 8192}]})
+        self._j(200, {"models": [{"name": "buono"}, {"name": "cattivo"}]})
     def do_POST(self):
         n = int(self.headers.get("content-length", 0)); corpo = json.loads(self.rfile.read(n) or b"{}")
         m = risposta(corpo)
@@ -103,4 +105,8 @@ with TestClient(app) as c:
     ok("ripristino: tutti tornano al modello di prima", sql("SELECT count(*) FROM agenti WHERE modello='claude-sonnet-5-5'")[0][0] == sql("SELECT count(*) FROM agenti")[0][0])
     ok("ripristino: tornano anche i dialoghi e il predefinito dei dialoghi", sql("SELECT count(*) FROM agenti WHERE modello_dialogo IN ('buono','cattivo')")[0][0] == 0 and sql("SELECT valore FROM impostazioni_sistema WHERE chiave='modello_dialogo_predefinito'")[0][0] == "claude-haiku-5-5")
     ok("solo il titolare", c.post("/gestione/locale/assegnazione", json={"modello": "buono"}).status_code in (401, 403))
+    rs = c.get("/gestione/locale/risorse", headers=Hd).json()
+    ok("risorse: scheda grafica e RAM dal portatile", rs["raggiungibile"] and rs["gpu_usata_gb"] == 7.0 and rs["ram_usata_gb"] == 13.0 and rs["modelli"][0]["percentuale_gpu"] == 35 and rs["vram_totale_gb"] == 8.0, str(rs))
+    c.put("/gestione/locale", headers=Hd, json={"url": "http://127.0.0.1:1", "ripiego": ""})
+    ok("risorse: portatile spento = non raggiungibile, senza errori", c.get("/gestione/locale/risorse", headers=Hd).json()["raggiungibile"] is False)
 print("TOTALE", sum(ris), "/", len(ris))
