@@ -358,6 +358,8 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             prog_crea = bool(scheda_progetto.strumenti_abilitati() and ok_int and a["livello"] in ("manager", "referente") and not _sent)
             sq_pm = bool(form_tool and pm_tool)
             sq_val = bool(form_tool and not _sent)
+            if a["fornitore"] == "locale":   # un modello locale non pubblica ne' spedisce in massa da solo
+                social_tool = email_tool = False
             if a["fornitore"] == "locale":   # i modelli piccoli si confondono con troppi strumenti: grafica e montaggio solo se la richiesta li nomina
                 _m = (messaggio or "").lower()
                 if not any(k in _m for k in ("grafic", "immagin", "locandin", "post ", "banner", "logo", "video", "montaggio", "copertina", "slide", "infografic")):
@@ -436,9 +438,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     for s_ in strumenti_posta.STRUMENTI:
                         gestori[s_["name"]] = gp
                 if (gmail_tool or posta_tool) and a["invio_posta"] in ("approvazione", "diretto"):
+                    modo_posta = "approvazione" if (a["fornitore"] == "locale" and a["invio_posta"] == "diretto") else a["invio_posta"]   # modello locale: mai invii senza la tua approvazione
                     extra.append(invio_posta.STRUMENTO_INVIA)
-                    avviso_extra += invio_posta.avviso(a["invio_posta"])
-                    gestori["posta_invia"] = invio_posta.gestore(conn, agente_id, a["invio_posta"], a["gmail_account_id"] if gmail_tool else None, posta_c if posta_tool else [])
+                    avviso_extra += invio_posta.avviso(modo_posta)
+                    gestori["posta_invia"] = invio_posta.gestore(conn, agente_id, modo_posta, a["gmail_account_id"] if gmail_tool else None, posta_c if posta_tool else [])
 
                 if n8n_tool:
                     extra.extend(n8n_mod.STRUMENTI)
