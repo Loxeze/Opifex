@@ -104,3 +104,64 @@ def stato_prova(_: dict = Depends(solo_titolare)):
     s = prova_modelli.stato()
     s.pop("inizio", None)
     return {"corrente": s, "storico": prova_modelli.storico(), "soglia_velocita": prova_modelli.SOGLIA_VELOCITA}
+
+
+def _motivi_esclusione(conn, a: dict) -> list[str]:
+    """Agenti che restano online: possono scrivere fuori da Opifex o hanno bisogno di funzioni solo dei modelli Claude."""
+    m = []
+    if a["invio_posta"] in ("approvazione", "diretto") and (a["gmail_account_id"] or conn.execute("SELECT 1 FROM agenti_connessioni ac JOIN connessioni c ON c.id = ac.connessione_id WHERE ac.agente_id = %s AND c.stato = 'attiva' LIMIT 1", (a["id"],)).fetchone()):
+        m.append("puo' inviare email all'esterno")
+    if a["email_attivo"]:
+        m.append("invia email di massa (Brevo)")
+    if a["social_attivo"]:
+        m.append("pubblica sui social")
+    if conn.execute("""SELECT 1 FROM agenti_connessioni ac JOIN connessioni c ON c.id = ac.connessione_id AND c.stato = 'attiva'
+                       JOIN accessi_siti s ON s.connessione_id = c.id WHERE ac.agente_id = %s LIMIT 1""", (a["id"],)).fetchone():
+        m.append("naviga siti con accesso (solo modelli Claude)")
+    if a["accesso_web"]:
+        m.append("cerca sul web (solo modelli Claude)")
+    return m
+
+
+def _piano(conn, modello: str) -> dict:
+    if not conn.execute("SELECT 1 FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE f.nome = 'locale' AND m.nome = %s", (modello,)).fetchone():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Modello locale non registrato: premi prima «Registra i modelli del portatile»")
+    cambia, restano = [], []
+    for a in conn.execute("SELECT id, nome, modello, invio_posta, gmail_account_id, email_attivo, social_attivo, accesso_web, attivo FROM agenti WHERE attivo ORDER BY nome").fetchall():
+        mot = _motivi_esclusione(conn, a)
+        if mot:
+            restano.append({"id": a["id"], "nome": a["nome"], "modello": a["modello"], "motivi": mot})
+        elif a["modello"] != modello:
+            cambia.append({"id": a["id"], "nome": a["nome"], "modello": a["modello"]})
+    return {"cambia": cambia, "restano": restano}
+
+
+@router.get("/locale/assegnazione")
+def anteprima_assegnazione(modello: str, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return _piano(conn, modello)
+
+
+@router.post("/locale/assegnazione")
+def assegna_a_tutti(d: ProvaModello, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        p = _piano(conn, d.modello)
+        for x in p["cambia"]:
+            conn.execute("INSERT INTO modelli_prima_locale (agente_id, modello_precedente) VALUES (%s,%s) ON CONFLICT (agente_id) DO NOTHING", (x["id"], x["modello"]))
+            conn.execute("UPDATE agenti SET modello = %s WHERE id = %s", (d.modello, x["id"]))
+        conn.execute("INSERT INTO registro_azioni (azione, utente_id, dettagli) VALUES ('modello_locale_assegnato', %s, %s::jsonb)",
+                     (u["id"], __import__("json").dumps({"modello": d.modello, "agenti": len(p["cambia"])})))
+    return {"cambiati": len(p["cambia"]), "restano": len(p["restano"])}
+
+
+@router.post("/locale/assegnazione/ripristina")
+def ripristina_modelli(u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        righe = conn.execute("SELECT agente_id, modello_precedente FROM modelli_prima_locale").fetchall()
+        n = 0
+        for r in righe:
+            if r["modello_precedente"]:
+                conn.execute("UPDATE agenti SET modello = %s WHERE id = %s", (r["modello_precedente"], r["agente_id"])); n += 1
+        conn.execute("DELETE FROM modelli_prima_locale")
+        conn.execute("INSERT INTO registro_azioni (azione, utente_id, dettagli) VALUES ('modello_locale_ripristinato', %s, %s::jsonb)", (u["id"], __import__("json").dumps({"agenti": n})))
+    return {"ripristinati": n}
