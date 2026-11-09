@@ -33,6 +33,16 @@ Regole:
 5. Se il collega ti scrive #E, #C, #A o #I non devi rispondere con altro che «#A», e solo se serve.
 Italiano."""
 
+REGOLE_LOCALE = """Stai dialogando con un collega della stessa organizzazione di Lorenzo Zeppa (un altro agente AI). Lavorate su un modello locale: non ci sono limiti di lunghezza ne' costi per parola, quindi la qualita' viene prima della brevita'.
+Ogni messaggio INIZIA con un codice: """ + codici.LEGENDA + """
+Regole:
+1. Scrivi messaggi e prompt MOLTO PRECISI E APPROFONDITI. Quando assegni un compito (#R) scrivi un prompt completo: contesto e obiettivo, compito esatto, materiali e fonti (con identificativi di task, documenti, progetti), risultato atteso e formato, criteri di qualita', vincoli, scadenze, cosa NON fare. Il collega non deve dover indovinare nulla.
+2. Quando rispondi, consegna il lavoro intero e ben fatto: ragionamento, ipotesi dichiarate, dati verificati e dubbi residui. Niente risposte secche, niente rimandi generici.
+3. Se manca un'informazione necessaria NON indovinare: «#D» con domande precise e motivate. Non inventare dati: se non lo sai, dillo.
+4. RISOLVETE TRA VOI: non rimandare a Lorenzo. Chi e' piu' vicino al tema fornisce o decide; se il dubbio non e' sostanziale scegliete l'ipotesi piu' ragionevole e dichiaratela («#C decisione»). Lorenzo si interpella solo per spese, invii all'esterno a suo nome, azioni irreversibili, credenziali o scelte di strategia («#B»).
+5. Prima di consegnare, rileggi: il lavoro e' puntuale, completo e approfondito? Se no, miglioralo.
+Italiano."""
+
 REGOLE = REGOLE_BREVI
 
 
@@ -111,7 +121,8 @@ def _modello_dialogo(conn, agente_id: int) -> dict:
 def _token_dialoghi_oggi(conn) -> int:
     r = conn.execute(
         """SELECT COALESCE(SUM(COALESCE(token_input,0) + COALESCE(token_output,0)), 0) AS t
-           FROM costi_api WHERE tipo = 'dialogo' AND creato_il >= date_trunc('day', NOW())""").fetchone()
+           FROM costi_api WHERE tipo = 'dialogo' AND creato_il >= date_trunc('day', NOW())
+             AND modello NOT IN (SELECT m.nome FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE f.nome = 'locale')""").fetchone()
     return int(r["t"])
 
 
@@ -145,7 +156,8 @@ def _fai_parlare(conn, parlante_id: int, destinatario_id: int, conv_id: int, ist
                VALUES (%s,%s,%s,%s,FALSE,TRUE,%s)""", (parlante_id, p["fornitore_id"], p["modello_id"], fascia, "Dialogo: " + motivo))
         conn.commit()
         raise DialogoBloccato(motivo)
-    sistema = p["istruzioni"] + "\n\n" + (REGOLE_BREVI if impostazione(conn, "dialoghi_stile_breve", "true") == "true" else REGOLE_ESTESE) + richieste.REGOLA
+    regole = REGOLE_LOCALE if p["fornitore"] == "locale" else (REGOLE_BREVI if impostazione(conn, "dialoghi_stile_breve", "true") == "true" else REGOLE_ESTESE)
+    sistema = p["istruzioni"] + "\n\n" + regole + richieste.REGOLA
     if memoria._ok({**p}, "interno"):
         note = richieste.decisioni_note(conn)
         if note:

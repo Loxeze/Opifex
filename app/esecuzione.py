@@ -379,7 +379,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                                   "input_schema": {"type": "object", "properties": {"destinatario": {"type": "string"},
                                                    "domanda": {"type": "string"}}, "required": ["destinatario", "domanda"]}})
                     avviso_extra += ("\n\nCOLLEGHI: ognuno ha una scheda (nome — dipartimento — azienda — compito): scegli a chi chiedere in base a quella. Se non hai chiaro cosa ti viene chiesto o ti servono informazioni di altri, usa chiedi_a_agente "
-                                     "invece di indovinare. Scrivi la domanda breve e iniziala con un codice (#R richiesta, #D dubbio, #I informazione senza risposta, #E eseguito): solo cio' che serve al collega, con gli identificativi di task e documenti. "
+                                     "invece di indovinare. " + ("Scrivi domande e prompt MOLTO PRECISI E APPROFONDITI (non ci sono limiti di lunghezza): contesto, obiettivo, compito esatto, materiali con identificativi, risultato atteso, vincoli; iniziali con un codice (#R richiesta, #D dubbio, #I informazione senza risposta, #E eseguito). " if a["fornitore"] == "locale" else "Scrivi la domanda breve e iniziala con un codice (#R richiesta, #D dubbio, #I informazione senza risposta, #E eseguito): solo cio' che serve al collega, con gli identificativi di task e documenti. ") +
                                      f"Puoi fare al massimo {max_domande} domande per compito.")
 
                     def _chiedi(nome, dati):

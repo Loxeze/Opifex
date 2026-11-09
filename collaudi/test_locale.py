@@ -164,4 +164,12 @@ with TestClient(app) as c:
        and sql("SELECT count(*) FROM registro_uscite WHERE agente_id=%s AND bloccato AND motivo_blocco LIKE 'Comunicazione esterna%%'", (ag,))[0][0] == 1)
     agente_browser.esegui_con_strumenti = reale_es
     delega_online.chiama_modello = reale_cm; delega_online.fornitori.chiave = fornitori_chiave
+    from app import dialoghi
+    ok("dialoghi: il modello locale usa regole senza limiti di lunghezza, con prompt precisi e approfonditi", "MOLTO PRECISI E APPROFONDITI" in dialoghi.REGOLE_LOCALE and "80 parole" not in dialoghi.REGOLE_LOCALE)
+    with psycopg.connect(DSN, autocommit=True) as cc:
+        cc.execute("INSERT INTO costi_api (agente_id, modello, token_input, token_output, costo_stimato, tipo) VALUES (%s,'qwen3:8b',5000000,5000000,0,'dialogo')", (ag,))
+    from app.db import connessione as _cn
+    with _cn() as cc:
+        t_ = dialoghi._token_dialoghi_oggi(cc)
+    ok("budget dei dialoghi: i token del modello locale non contano", t_ < 1000000, str(t_))
 print("TOTALE %d / %d" % (sum(ris), len(ris)))
