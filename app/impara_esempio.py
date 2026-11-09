@@ -91,7 +91,6 @@ def _studia(eid: int):
                                (r["competenza_id"], r["livello"], corpo, descr, int(ris.get("token_input", 0)) + int(ris.get("token_output", 0)))).fetchone()["id"]
             conn.execute("UPDATE richieste_formazione SET stato = 'da_approvare', livello_id = %s, conclusa_il = NOW() WHERE id = %s", (lid, r["id"]))
             conn.execute("UPDATE esempi_appresi SET stato = 'da_approvare' WHERE id = %s", (eid,))
-            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"Padre Casati ha ricavato il metodo «{e['competenza']}» per {agente['nome']}: e' in Ginnasio, da approvare.",))
     except Exception as ex:  # noqa: BLE001
         with connessione() as conn:
             conn.execute("UPDATE esempi_appresi SET stato = 'errore', errore = %s WHERE id = %s", (str(ex)[:300], eid))

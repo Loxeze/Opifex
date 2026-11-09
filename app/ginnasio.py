@@ -223,7 +223,6 @@ def recupera(conn) -> int:
             conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"La formazione «{r['competenza_nome']}» si e' interrotta piu' volte: puoi riprovarla dal Ginnasio.",))
         else:
             conn.execute("UPDATE richieste_formazione SET stato = 'in_coda', riprese = riprese + 1 WHERE id = %s", (r["id"],))
-            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"La formazione «{r['competenza_nome']}» era rimasta ferma dopo un riavvio: l'ho rimessa in coda e riparte da sola.",))
         n += 1
     return n
 
@@ -500,8 +499,6 @@ def _lavora(rid: int):
                 if impostazione(conn, "ginnasio_pausa_studio", "1") == "1":
                     # pausa: Lorenzo legge gli appunti e decide se far scrivere la competenza
                     conn.execute("UPDATE richieste_formazione SET stato = 'appunti_pronti', fase = 'studio', token_usati = %s WHERE id = %s", (token_tot, rid))
-                    conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
-                                 (f"Padre Casati ha finito di studiare «{r['competenza_nome']}»: leggi gli appunti nel Ginnasio e decidi se farla scrivere.",))
                     return
         else:
             with connessione() as conn:
@@ -540,12 +537,7 @@ def _lavora(rid: int):
                 auto = True
             except ErroreGinnasio:
                 auto = False  # per esempio un livello precedente non ancora approvato: resta da approvare a mano
-        if auto:
-            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
-                         (f"Padre Casati ha scritto «{r['competenza_nome']}» livello {r['livello']} ({LIVELLI[r['livello']]}) e l'ha assegnata: la trovi nel Ginnasio con lo storico.",))
-        else:
-            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
-                         (f"Padre Casati ha scritto «{r['competenza_nome']}» livello {r['livello']} ({LIVELLI[r['livello']]}): leggila e approvala nel Ginnasio.",))
+        # nessuna notifica: cio' che aspetta l'approvazione di Lorenzo e' segnalato dal contatore del Ginnasio nel menu
 
 
 # ---------- approvazione e assegnazione ----------

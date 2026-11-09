@@ -71,7 +71,7 @@ with TestClient(app) as c:
     ok("compare tra le bozze del Ginnasio", any(x["competenza"] == "Sito vetrina" for x in c.get("/gestione/ginnasio", headers=H).json()["da_approvare"]))
     lid = sql("SELECT id FROM competenze_livelli")[0][0]
     ok("approvazione: l'agente riceve la competenza", c.post(f"/gestione/ginnasio/livelli/{lid}/decisione", headers=H, json={"azione": "approva"}).status_code == 200 and sql("SELECT livello FROM agenti_competenze WHERE agente_id=%s", (scout,)) == [(1,)])
-    ok("notifica", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Padre Casati ha ricavato il metodo%%'")[0][0] == 1)
+    ok("nessuna notifica per ogni formazione completata (c'e' il contatore del Ginnasio)", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Padre Casati ha ricavato il metodo%%'")[0][0] == 0)
     copione[:] = [fine("DESCRIZIONE: Livello due.\n" + "Altro passo importante. " * 40)]
     r = c.post("/gestione/ginnasio/da-esempio", headers=H, json={"agente_id": scout, "competenza": "Sito vetrina", "trascrizione": chat})
     ok("un secondo esempio sulla stessa competenza diventa il livello successivo", r.status_code == 202 and sql("SELECT livello FROM competenze_livelli WHERE stato='bozza'") == [(2,)])

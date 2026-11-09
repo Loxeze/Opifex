@@ -159,8 +159,6 @@ def giro_desideri(giro_id: int):
         with connessione() as conn:
             richiedi_minimi(conn)
             conn.execute("UPDATE desideri_giri SET stato = 'concluso', interrogati = %s, richieste = %s, concluso_il = NOW() WHERE id = %s", (fatti, richieste, giro_id))
-            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
-                         (f"Giro di formazione concluso: {fatti} agenti interrogati, {richieste} richieste nuove in Ginnasio.",))
     except Exception as e:  # noqa: BLE001
         with connessione() as conn:
             conn.execute("UPDATE desideri_giri SET stato = 'errore', errore = %s, concluso_il = NOW() WHERE id = %s", (str(e)[:300], giro_id))

@@ -212,7 +212,7 @@ with TestClient(app) as c:
     ok("avanzamento: tappe, ricerche, appunti", [x["stato"] for x in av["fasi"]] == ["finita", "finita", "in_attesa"] and len(av["ricerche"]) == 1 and "luce diffusa" in av["appunti"] and av["token_usati"] > 0, str(av["fasi"]))
     ok("la stesura non parte senza via libera sulla richiesta sbagliata", c.post(f"/gestione/ginnasio/richieste/{rid1}/stesura", headers=H).status_code == 422)
     ok("solo il titolare usa avanzamento e stesura", c.get(f"/gestione/ginnasio/richieste/{rp}/avanzamento", headers=HC).status_code == 403)
-    ok("notifica di appunti pronti", sql("SELECT count(*) FROM notifiche WHERE testo LIKE '%%finito di studiare%%Fotografia%%'")[0][0] == 1)
+    ok("nessuna notifica per ogni appunti pronti (c'e' il contatore del Ginnasio)", sql("SELECT count(*) FROM notifiche WHERE testo LIKE '%%finito di studiare%%Fotografia%%'")[0][0] == 0)
     copione[:] = [risposta_casati()]; ultimi_msg.clear()
     ok("via libera alla stesura", c.post(f"/gestione/ginnasio/richieste/{rp}/stesura", headers=H).status_code == 202)
     f = sql("SELECT stato, fase FROM richieste_formazione WHERE id=%s", (rp,))[0]
