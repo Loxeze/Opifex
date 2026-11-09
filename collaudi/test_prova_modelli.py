@@ -89,9 +89,9 @@ with TestClient(app) as c:
     sql("UPDATE agenti SET modello='claude-sonnet-5-5', social_attivo=FALSE, accesso_web=FALSE, email_attivo=FALSE, invio_posta='bozze'")
     a1, a2 = ags[0][0], ags[1][0]
     sql("UPDATE agenti SET social_attivo=TRUE WHERE id=%s", (a1,))
-    sql("UPDATE agenti SET accesso_web=TRUE WHERE id=%s", (a2,))
+    sql("UPDATE agenti SET email_attivo=TRUE WHERE id=%s", (a2,))
     pv = c.get("/gestione/locale/assegnazione", headers=Hd, params={"modello": "buono"}).json()
-    ok("anteprima: chi pubblica sui social o cerca sul web resta online", {x["id"] for x in pv["restano"]} == {a1, a2} and len(pv["cambia"]) == len(ags) - 2, str(pv)[:200])
+    ok("anteprima: chi pubblica sui social o scrive email di massa resta online", {x["id"] for x in pv["restano"]} == {a1, a2} and len(pv["cambia"]) == len(ags) - 2, str(pv)[:200])
     ok("anteprima: nessuna modifica", sql("SELECT count(*) FROM agenti WHERE modello='buono'")[0][0] == 0)
     ok("modello non registrato rifiutato", c.post("/gestione/locale/assegnazione", headers=Hd, json={"modello": "boh"}).status_code == 404)
     r = c.post("/gestione/locale/assegnazione", headers=Hd, json={"modello": "buono"}).json()

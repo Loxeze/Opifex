@@ -123,4 +123,27 @@ with TestClient(app) as c:
     try: esecuzione.esegui_agente(ag, "ciao", "interno", None); e = None
     except Exception as ex: e = ex
     ok("con gli strumenti e portatile spento: errore, nessun ripiego sul cloud", e is not None and nube["n"] == n0, str(e)[:100])
+    # ricerca online delegata
+    from app import delega_online
+    sql("UPDATE agenti SET accesso_web=TRUE, siti_consentiti='{}', max_ricerche=3 WHERE id=%s", (ag,))
+    sql("UPDATE fornitori_ai SET fascia_dati_max='riservato', non_conservazione_attiva=TRUE, dpa_firmato=TRUE WHERE nome='anthropic'")
+    viste = []
+    reale_cm = delega_online.chiama_modello
+    delega_online.chiama_modello = lambda f, m, i, t, mt, web=None: (viste.append((f, m, t, web)) or Risposta("Esito della ricerca con fonti", 40, 15, {}))
+    fornitori_chiave = delega_online.fornitori.chiave; delega_online.fornitori.chiave = lambda n: "k"
+    a_ = {"fascia_dati_max": "riservato", "siti_consentiti": [], "max_ricerche": 3}
+    g = delega_online.strumento(ag, a_, "interno")
+    out = g("cerca_online", {"domanda": "bandi europei cultura 2027"})
+    ok("cerca_online: la domanda passa a Claude con la ricerca web e torna il risultato", out == "Esito della ricerca con fonti" and viste[0][0] == "anthropic" and viste[0][3] == {"siti": [], "max_ricerche": 3}, str(viste))
+    ok("cerca_online: costi, uscita e azione registrati", sql("SELECT count(*) FROM costi_api WHERE agente_id=%s AND modello='claude-sonnet-5-5'", (ag,))[0][0] >= 1
+       and sql("SELECT count(*) FROM registro_azioni WHERE agente_id=%s AND azione='ricerca_online_delegata'", (ag,))[0][0] == 1)
+    sql("UPDATE fornitori_ai SET fascia_dati_max='pubblico' WHERE nome='anthropic'")
+    g2 = delega_online.strumento(ag, a_, "riservato"); n_ = len(viste)
+    out = g2("cerca_online", {"domanda": "x"})
+    ok("cerca_online: dato riservato non esce verso Claude, tentativo tracciato", out.startswith("ERRORE") and len(viste) == n_ and sql("SELECT count(*) FROM registro_uscite WHERE agente_id=%s AND bloccato AND motivo_blocco LIKE 'Ricerca online%%'", (ag,))[0][0] == 1)
+    sql("UPDATE fornitori_ai SET fascia_dati_max='riservato' WHERE nome='anthropic'")
+    g3 = delega_online.strumento(ag, a_, "interno")
+    for _ in range(4): g3("cerca_online", {"domanda": "y"})
+    ok("cerca_online: al massimo 4 ricerche per compito", g3("cerca_online", {"domanda": "z"}).startswith("ERRORE: troppe"))
+    delega_online.chiama_modello = reale_cm; delega_online.fornitori.chiave = fornitori_chiave
 print("TOTALE %d / %d" % (sum(ris), len(ris)))

@@ -16,7 +16,7 @@ PROVA_ISTRUZIONI = contextvars.ContextVar('prova_istruzioni', default=None)   # 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai', 'locale')   # chi sa usare gli strumenti degli agenti
 from . import banco, creativi, best_practice, archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
 from . import progresso, n8n as n8n_mod, crm_contatti_agenti, ricerca_profonda, finestre, brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta
-from . import strumenti_social
+from . import strumenti_social, delega_online
 from . import vademecum, note_aurora, scheda_impresa
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
@@ -368,7 +368,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 colleghi_ok, siti = [], []
                 ricerca_tool = finestre_tool = canva_tool = siti_tool = creativi_tool = banco_tool = social_tool = sb_tool = rev_tool = iniz_tool = email_tool = False
                 form_tool = prog_crea = sq_pm = sq_val = False
-            if (creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val):
+            if ((a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get()) or creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val):
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -609,6 +609,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 if ok_int and a["livello"] in ("manager", "referente"):
                     extra.append(scheda_impresa.STRUMENTO)
                     gestori["impresa_proponi"] = scheda_impresa.strumento(agente_id)
+                if a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get():
+                    extra.append(delega_online.STRUMENTO)
+                    avviso_extra += delega_online.AVVISO
+                    gestori["cerca_online"] = delega_online.strumento(agente_id, a, fascia_dati)
                 if mem_tool:
                     extra.append(memoria_lavoro.STRUMENTO)
                     avviso_extra += ("\n\nMEMORIA: se durante il lavoro emerge una decisione, un fatto o una preferenza di Lorenzo che servira' in futuro, "

@@ -392,7 +392,7 @@ function bloccoProvaAffidabilita(modelli) {
       catch (e) { esito.replaceChildren(avviso(e.message, "no")); } } }, "Avvia la prova")),
     tab,
     h("div", { class: "nome" }, "Assegna il modello agli agenti"),
-    h("p", { class: "aiuto" }, "Mette il modello scelto sopra a tutti gli agenti attivi, tranne quelli che possono scrivere fuori da Opifex (email all'esterno, email di massa, social) o che hanno bisogno di funzioni dei modelli Claude (siti con accesso, ricerca sul web): quelli restano online. I modelli di prima vengono ricordati e si possono ripristinare."),
+    h("p", { class: "aiuto" }, "Mette il modello scelto sopra a tutti gli agenti attivi, tranne quelli che possono scrivere fuori da Opifex (email all'esterno, email di massa, social) o che navigano siti con accesso (solo modelli Claude): quelli restano online. La ricerca sul web resta disponibile: l'agente locale passa a Claude solo la domanda. I modelli di prima vengono ricordati e si possono ripristinare."),
     anteprima, h("div", { class: "azioni" },
       h("button", { class: "s", "data-uso": "locale-anteprima", onclick: async () => {
         try { const r = await api("GET", "/gestione/locale/assegnazione?modello=" + encodeURIComponent(sel.value));
