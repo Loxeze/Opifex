@@ -84,6 +84,30 @@ def _costo(a: dict, t_in: int, t_out: int) -> float:
 VELOCE = __import__("contextvars").ContextVar("risposta_veloce", default=False)   # conversazione a voce: niente ricerche lunghe, niente deleghe a colleghi, ragionamento minimo
 
 
+def _ripiego_locale(conn, a: dict, errore: Exception, agente_id: int, utente_id, fascia_dati: str, testo: str, web):
+    """Il portatile non risponde: se Lorenzo ha scelto un modello di ripiego (Impostazioni → Modello locale) e SE il dato puo' uscire verso quel fornitore
+    (stesse regole di riservatezza di sempre) si risponde con quello; altrimenti l'errore passa com'e': un dato riservato non va mai nel cloud per ripiego."""
+    r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'locale_ripiego'").fetchone()
+    nome = (r["valore"] if r else "") or ""
+    m = conn.execute("""SELECT m.id AS modello_id, m.nome, m.costo_input_per_milione, m.costo_output_per_milione, f.id AS fornitore_id, f.nome AS fornitore,
+                               f.fascia_dati_max AS ff, f.non_conservazione_attiva AS nc, f.dpa_firmato AS dpa
+                        FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE m.nome = %s""", (nome,)).fetchone() if nome else None
+    if m is None or m["fornitore"] == "locale" or not fornitori.chiave(m["fornitore"]):
+        raise errore
+    ok_, motivo = puo_uscire(fascia_dati, a["fascia_dati_max"], m["ff"], m["nc"], m["dpa"])
+    if not ok_:
+        conn.execute("""INSERT INTO registro_uscite (agente_id, fornitore_id, modello_id, fascia_dati, anonimizzato, bloccato, motivo_blocco)
+                        VALUES (%s, %s, %s, %s, FALSE, TRUE, %s)""", (agente_id, m["fornitore_id"], m["modello_id"], fascia_dati, "Ripiego dal modello locale non consentito: " + str(motivo)))
+        conn.commit()
+        raise ErroreFornitore(f"{errore} Il ripiego su {m['nome']} non e' consentito per questo dato ({motivo}): resta in attesa che il portatile torni raggiungibile.") from None
+    conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s, 'ripiego_modello_locale', %s::jsonb, %s)",
+                 (agente_id, json.dumps({"errore": str(errore)[:200], "ripiego": m["nome"]}), utente_id))
+    conn.commit()
+    ris = chiama_modello(m["fornitore"], m["nome"], a["istruzioni"], testo, a["max_token_risposta"], web if m["fornitore"] == "anthropic" else None)
+    return ris, {**a, "fornitore": m["fornitore"], "fornitore_id": m["fornitore_id"], "modello_id": m["modello_id"], "modello_nome": m["nome"],
+                 "costo_input_per_milione": m["costo_input_per_milione"], "costo_output_per_milione": m["costo_output_per_milione"]}
+
+
 def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
                   utente_id: int | None = None, memorizza: bool = False, max_token: int | None = None,
                   allegati: list[tuple[str, str]] | None = None) -> dict:
@@ -338,7 +362,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 colleghi_ok, siti = [], []
                 ricerca_tool = finestre_tool = canva_tool = siti_tool = creativi_tool = banco_tool = social_tool = sb_tool = rev_tool = iniz_tool = email_tool = False
                 form_tool = prog_crea = sq_pm = sq_val = False
-            if creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val:
+            if a["fornitore"] != "locale" and (creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val):   # il modello locale risponde senza strumenti (per ora)
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 extra, gestori, avviso_extra = [], {}, ""
                 if colleghi_ok:
@@ -633,8 +657,12 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             else:
                 fornitori.CACHE_LETTA.set(0)
                 progresso.fase("scrive la risposta")
-                ris = chiama_modello(a["fornitore"], a["modello_nome"], a["istruzioni"], testo_uscente,
-                                     a["max_token_risposta"], web)
+                conn.commit()   # la risposta del modello puo' durare minuti: la connessione non resta aperta a meta' lavoro, tenendo in coda il resto del database
+                try:
+                    ris = chiama_modello(a["fornitore"], a["modello_nome"], a["istruzioni"], testo_uscente,
+                                         a["max_token_risposta"], web)
+                except fornitori.ErroreLocale as e_loc:
+                    ris, a = _ripiego_locale(conn, a, e_loc, agente_id, utente_id, fascia_dati, testo_uscente, web)
         except (ErroreFornitore, cassaforte.CassaforteNonConfigurata, ErroreNavigazione) as e:
             conn.execute(
                 "INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) "

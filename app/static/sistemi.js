@@ -35,6 +35,7 @@ function blocchiFornitori() {
       h("p", { class: "aiuto" }, "La chiave salvata qui è cifrata e ha la precedenza su quella del file .env. Le chiavi API sono a pagamento a consumo e separate dagli abbonamenti (ChatGPT Plus, Grok)."),
       h("h4", {}, "Modelli registrati"),
       h("p", { class: "sotto" }, (stato.opzioni.modelli || []).map(m => m.nome + " (" + m.fornitore + ")").join(" · ")),
+      bloccoModelloLocale(ricarica),
       bloccoModelli(ricarica),
       h("div", { class: "carta" }, h("div", { class: "nome" }, "Registra un modello"),
         h("div", { class: "riga" }, h("label", {}, "Fornitore", forn), h("label", {}, "Nome del modello", nome), h("label", {}, "Livello", fascia)),
@@ -325,4 +326,37 @@ function bloccoN8n() {
   };
   carica();
   return [h("h3", {}, "n8n (automazioni)"), corpo];
+}
+
+// Modello locale (Ollama sul portatile): indirizzo, prova del collegamento, modelli e ripiego
+function bloccoModelloLocale(ricarica) {
+  const corpo = h("div", { class: "carta" });
+  const carica = async () => {
+    let q;
+    try { q = await api("GET", "/gestione/locale"); } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); return; }
+    const url = h("input", { type: "text", maxlength: 200, value: q.url, placeholder: "http://100.x.y.z:11434 (indirizzo Tailscale del portatile)", autocomplete: "off" });
+    const rip = h("select", {}, h("option", { value: "" }, "Nessuno: se il portatile non risponde, l'agente aspetta"), q.candidati_ripiego.map(n => h("option", { value: n }, n)));
+    rip.value = q.ripiego;
+    const msg = h("div"), stato_ = h("div", { class: "sotto" });
+    corpo.replaceChildren(
+      h("div", { class: "nome" }, "Modello locale (sul tuo portatile)"),
+      h("p", { class: "aiuto" }, "I dati restano sui tuoi dispositivi: il portatile è collegato al server da un tunnel privato e cifrato (Tailscale). Il modello gira con Ollama. " +
+        "Se il portatile è spento o non risponde, Opifex può ripiegare sul modello qui sotto, ma solo per i dati che possono uscire verso quel fornitore: i dati riservati non escono mai dal portatile."),
+      h("label", {}, "Indirizzo di Ollama", url),
+      h("label", {}, "Ripiego se il portatile non risponde", rip),
+      msg, stato_,
+      h("div", { class: "azioni" },
+        h("button", { class: "p", "data-uso": "locale-salva", onclick: async () => { try { await api("PUT", "/gestione/locale", { url: url.value, ripiego: rip.value }); msg.replaceChildren(avviso("Salvato.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva"),
+        h("button", { class: "s", "data-uso": "locale-prova", onclick: async () => {
+          stato_.textContent = "Provo il collegamento…";
+          try { await api("PUT", "/gestione/locale", { url: url.value, ripiego: rip.value }); const r = await api("POST", "/gestione/locale/prova");
+            stato_.replaceChildren(r.raggiungibile ? avviso("Il portatile risponde. Modelli scaricati: " + (r.modelli.join(", ") || "nessuno ancora"), "ok") : avviso("Non risponde: " + r.errore, "no")); }
+          catch (e) { stato_.replaceChildren(avviso(e.message, "no")); } } }, "Prova il collegamento"),
+        h("button", { class: "s", "data-uso": "locale-importa", onclick: async () => {
+          try { const r = await api("POST", "/gestione/locale/modelli/importa"); msg.replaceChildren(avviso(r.nuovi + " modelli nuovi registrati (su " + r.totale + " trovati): ora puoi assegnarli agli agenti.", "ok")); await ricarica(); }
+          catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Registra i modelli del portatile")),
+      q.registrati.length ? h("p", { class: "sotto" }, "Modelli locali registrati: " + q.registrati.join(" · ")) : null);
+  };
+  carica();
+  return corpo;
 }

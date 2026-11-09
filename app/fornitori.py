@@ -39,6 +39,10 @@ class ErroreFornitore(Exception):
     pass
 
 
+class ErroreLocale(ErroreFornitore):
+    """Il modello sul portatile non e' raggiungibile (spento, offline, tunnel giu') o non risponde in tempo: si puo' ripiegare su un altro fornitore."""
+
+
 PAUSE_RIPROVA = (2, 6, 15)          # secondi tra un tentativo e l'altro
 CODICI_TRANSITORI = {408, 409, 425, 429, 500, 502, 503, 504, 529}   # sovraccarico o guasto momentaneo del fornitore
 
@@ -194,9 +198,45 @@ def _chiama_compatibile_openai(url: str, chiave: str, nome: str, modello: str, i
     )
 
 
+def url_locale() -> str:
+    """Indirizzo di Ollama (impostazione 'locale_url'); di norma l'IP privato Tailscale del portatile, porta 11434."""
+    try:
+        from .db import connessione
+        with connessione() as conn:
+            r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'locale_url'").fetchone()
+        v = (r["valore"] if r else "") or ""
+    except Exception:  # noqa: BLE001
+        v = ""
+    v = v.strip().rstrip("/")
+    return v if v.startswith(("http://", "https://")) else "http://127.0.0.1:11434"
+
+
+def _chiama_locale(modello: str, istruzioni: str, messaggio: str, max_token: int) -> Risposta:
+    """Ollama espone lo stesso formato di OpenAI. Niente nuovi tentativi: se il portatile non risponde si ripiega subito."""
+    corpo = {"model": modello, "max_tokens": max_token, "stream": False,
+             "messages": [{"role": "system", "content": istruzioni}, {"role": "user", "content": messaggio}]}
+    try:
+        r = httpx.post(url_locale() + "/v1/chat/completions", json=corpo, timeout=httpx.Timeout(900, connect=5))
+    except httpx.HTTPError as e:
+        raise ErroreLocale(f"Il modello locale non risponde ({type(e).__name__}): il portatile e' acceso e collegato?") from None
+    if r.status_code == 404:
+        raise ErroreFornitore(f"Il modello locale «{modello}» non e' scaricato sul portatile (in Ollama: ollama pull {modello})")
+    if r.status_code in CODICI_TRANSITORI:
+        raise ErroreLocale(f"Il modello locale e' occupato o in errore ({r.status_code})")
+    if r.status_code != 200:
+        raise ErroreFornitore(f"Modello locale: {r.status_code} {r.text[:200]}")
+    try:
+        d = r.json()
+        uso = d.get("usage") or {}
+        return Risposta(d["choices"][0]["message"].get("content") or "", int(uso.get("prompt_tokens") or 0), int(uso.get("completion_tokens") or 0),
+                        {"stop": d["choices"][0].get("finish_reason") or ""})
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise ErroreFornitore("Modello locale: risposta non valida") from None
+
+
 def chiama_modello(fornitore: str, modello: str, istruzioni: str, messaggio: str, max_token: int = 1500,
                    web: dict | None = None) -> Risposta:
-    """fornitore: 'anthropic' | 'openai' | 'xai'. web: {'siti': [...], 'max_ricerche': n} (solo Anthropic per ora)."""
+    """fornitore: 'anthropic' | 'openai' | 'xai' | 'locale'. web: {'siti': [...], 'max_ricerche': n} (solo Anthropic per ora)."""
     if fornitore == "anthropic":
         return _chiama_anthropic(modello, istruzioni, messaggio, max_token, web)
     if fornitore == "openai":
@@ -207,4 +247,6 @@ def chiama_modello(fornitore: str, modello: str, istruzioni: str, messaggio: str
         return _chiama_compatibile_openai(
             "https://api.x.ai/v1/chat/completions", chiave("xai"),
             "xAI", modello, istruzioni, messaggio, max_token)
+    if fornitore == "locale":
+        return _chiama_locale(modello, istruzioni, messaggio, max_token)
     raise ErroreFornitore(f"Fornitore sconosciuto: {fornitore}")
