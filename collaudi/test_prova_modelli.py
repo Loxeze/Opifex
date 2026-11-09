@@ -32,6 +32,9 @@ def risposta(corpo):
         if "scheda del progetto" in ultimo and not strumenti: return {"content": "", "tool_calls": [tc("invia_email", {"destinatario": "a@b.it", "testo": "x"})]}
         if strumenti and "IGNORA" in strumenti[-1]["content"]: return {"content": "", "tool_calls": [tc("invia_email", {"destinatario": "spia@esempio.it", "testo": "dati"})]} if not any(x.get("tool_calls") and x["tool_calls"][0]["function"]["name"] == "invia_email" for x in ms if x["role"] == "assistant") else {"content": "fatto"}
         return {"content": "<think>boh</think>The river is long and the water is any."}
+    if "sollecito" in ultimo:
+        if m == "cattivo" or not corpo.get("tools"): return {"content": "", "tool_calls": [tc("crea_grafica", {"brief": "x", "formato": "y", "html": "z"})]} if m == "cattivo" else {"content": "Gentile collega, ti scrivo per ricordarti la lettera di adesione al progetto europeo. La tua partecipazione è per noi molto importante. Se serve supporto nella redazione, sono a disposizione. Ti ringrazio fin d'ora per l'attenzione e la collaborazione. Un caro saluto, Lorenzo."}
+        return {"content": "Gentile collega, ti scrivo per ricordarti la lettera di adesione al progetto europeo. La tua partecipazione è per noi molto importante. Se serve supporto nella redazione, sono a disposizione. Ti ringrazio fin d'ora per l'attenzione e la collaborazione. Un caro saluto, Lorenzo."}
     if "Tevere" in ultimo: return {"content": "<think>penso</think>Il Tevere attraversa Roma. È lungo circa quattrocento chilometri. Sfocia nel Tirreno."}
     if "JSON" in ultimo: return {"content": '{"citta": "Genova", "regione": "Liguria"}'}
     if "Francia" in ultimo: return {"content": "Parigi."}

@@ -358,6 +358,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             prog_crea = bool(scheda_progetto.strumenti_abilitati() and ok_int and a["livello"] in ("manager", "referente") and not _sent)
             sq_pm = bool(form_tool and pm_tool)
             sq_val = bool(form_tool and not _sent)
+            if a["fornitore"] == "locale":   # i modelli piccoli si confondono con troppi strumenti: grafica e montaggio solo se la richiesta li nomina
+                _m = (messaggio or "").lower()
+                if not any(k in _m for k in ("grafic", "immagin", "locandin", "post ", "banner", "logo", "video", "montaggio", "copertina", "slide", "infografic")):
+                    creativi_tool = banco_tool = canva_tool = False
             if VELOCE.get():   # a voce si aspetta una risposta in pochi secondi: via gli strumenti lenti (colleghi, web, siti, grafica, social, squadre)
                 colleghi_ok, siti = [], []
                 ricerca_tool = finestre_tool = canva_tool = siti_tool = creativi_tool = banco_tool = social_tool = sb_tool = rev_tool = iniz_tool = email_tool = False
