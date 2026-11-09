@@ -365,7 +365,9 @@ function bloccoModelloLocale(ricarica) {
 // Prova di affidabilita': stessi compiti per ogni modello locale, con un punteggio
 function bloccoProvaAffidabilita(modelli) {
   const sel = h("select", {}, modelli.map(n => h("option", { value: n }, n)));
+  const selDial = h("select", {}, modelli.map(n => h("option", { value: n }, n)));
   const esito = h("div"), tab = h("div"), anteprima = h("div");
+  sel.onchange = () => { selDial.value = sel.value; };
   let timer = null;
   const disegna = (stor, cur) => {
     const righe = [];
@@ -393,14 +395,15 @@ function bloccoProvaAffidabilita(modelli) {
     tab,
     h("div", { class: "nome" }, "Assegna il modello agli agenti"),
     h("p", { class: "aiuto" }, "Mette il modello scelto sopra a tutti gli agenti attivi, tranne quelli che navigano siti con accesso (solo modelli Claude): quelli restano online. Ricerche sul web e invii all'esterno (email, social) restano disponibili: l'agente locale prepara il testo e li fa eseguire a Claude. I modelli di prima vengono ricordati e si possono ripristinare."),
+    h("label", {}, "Modello per i dialoghi tra agenti", h("p", { class: "aiuto" }, "Può essere lo stesso o uno più leggero e veloce. Imposta anche il predefinito dei dialoghi."), selDial),
     anteprima, h("div", { class: "azioni" },
       h("button", { class: "s", "data-uso": "locale-anteprima", onclick: async () => {
         try { const r = await api("GET", "/gestione/locale/assegnazione?modello=" + encodeURIComponent(sel.value));
           anteprima.replaceChildren(
-            h("p", {}, h("b", {}, r.cambia.length + " agenti passano a " + sel.value + ": "), r.cambia.map(x => x.nome).join(", ") || "nessuno"),
+            h("p", {}, h("b", {}, r.cambia.length + " agenti passano a " + sel.value + " (dialoghi: " + selDial.value + "): "), r.cambia.map(x => x.nome).join(", ") || "nessuno"),
             h("p", {}, h("b", {}, r.restano.length + " restano online: "), r.restano.map(x => x.nome + " (" + x.motivi.join(", ") + ")").join("; ") || "nessuno"),
             r.cambia.length ? h("button", { class: "p", "data-uso": "locale-assegna", onclick: async () => {
-              try { const q = await api("POST", "/gestione/locale/assegnazione", { modello: sel.value }); anteprima.replaceChildren(avviso(q.cambiati + " agenti ora usano " + sel.value + ".", "ok")); }
+              try { const q = await api("POST", "/gestione/locale/assegnazione", { modello: sel.value, dialogo: selDial.value }); anteprima.replaceChildren(avviso(q.cambiati + " agenti ora usano " + sel.value + ".", "ok")); }
               catch (e) { anteprima.replaceChildren(avviso(e.message, "no")); } } }, "Conferma: assegna a questi agenti") : null);
         } catch (e) { anteprima.replaceChildren(avviso(e.message, "no")); } } }, "Mostra cosa cambierebbe"),
       h("button", { class: "s", "data-uso": "locale-ripristina", onclick: async () => {

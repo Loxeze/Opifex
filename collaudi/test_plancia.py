@@ -45,6 +45,14 @@ with TestClient(app) as c:
     ok("vinte e perse negli ultimi 90 giorni", cr["operazioni"]["vinte_90g"] == 1 and cr["operazioni"]["perse_90g"] == 1 and cr["operazioni"]["valore_vinto_90g"] == 9000)
     ok("conversione contatto -> vinto", cr["conversione"] == 10.0, str(cr["conversione"]))
     ok("consumi: oggi e mese", k["oggi"]["token"] == 4200 and abs(k["mese"]["costo"] - 0.51) < 1e-6, str(k["oggi"]) + str(k["mese"]))
+    sql("INSERT INTO costi_api (agente_id, modello, token_input, token_output, costo_stimato) VALUES (%s,'qwen3:8b',1000000,500000,0)", (ag[0][0],))
+    sql("INSERT INTO modelli_ai (fornitore_id, nome, costo_input_per_milione, costo_output_per_milione) SELECT id,'qwen3:8b',0,0 FROM fornitori_ai WHERE nome='locale' ON CONFLICT DO NOTHING")
+    prz = sql("SELECT costo_input_per_milione, costo_output_per_milione FROM modelli_ai WHERE nome='claude-sonnet-5-5'")[0]
+    atteso = (1000000 * float(prz[0]) + 500000 * float(prz[1])) / 1e6
+    kl = c.get("/gestione/plancia", headers=H).json()["consumi"]
+    ok("plancia: token locali e risparmio equivalente (oggi, mese, serie)", kl["locale"]["oggi"]["token"] == 1500000 and abs(kl["locale"]["oggi"]["risparmio"] - atteso) < 1e-6 and abs(kl["locale"]["mese"]["risparmio"] - atteso) < 1e-6
+       and kl["giorni"][-1]["token_locali"] == 1500000 and abs(kl["giorni"][-1]["risparmio"] - atteso) < 1e-5 and abs(kl["mese"]["costo"] - 0.51) < 1e-6, str(kl["locale"]) + str(atteso))
+    sql("DELETE FROM costi_api WHERE modello='qwen3:8b'")
     ok("consumi: ultimo giorno della serie = oggi", k["giorni"][-1]["token"] == 4200 and sum(x["token"] for x in k["giorni"]) == 4200)
     ok("costo per agente ordinato dal piu' caro", k["per_agente"][0]["costo"] >= k["per_agente"][-1]["costo"] and len(k["per_agente"]) == 2)
     ok("modelli: quote in percentuale", {m["nome"]: m["percento"] for m in k["modelli"]} == {"Sonnet": 36, "Opus": 64} or {m["nome"] for m in k["modelli"]} == {"Sonnet", "Opus"}, str(k["modelli"]))

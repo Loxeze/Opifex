@@ -325,6 +325,17 @@ function schede(elenco, iniziale) {
   return h("div", { class: "schede" }, h("div", { class: "scheda-barra", role: "tablist" }, bott), corpi);
 }
 
+// I tre ruoli dei modelli: principale (locale), dialoghi, online (Claude solo per ricerche e invii)
+function etichetteModelli(a) {
+  const forn = (n) => ((stato.opzioni && stato.opzioni.modelli) || []).find(m => m.nome === n)?.fornitore;
+  const locale = forn(a.modello) === "locale";
+  const e = [h("span", { class: "etichetta" + (locale ? " ok" : ""), title: locale ? "Modello principale: gira sul tuo portatile" : "Modello principale" }, (locale ? "Locale · " : "") + a.modello)];
+  if (a.modello_dialogo && a.modello_dialogo !== a.modello) e.push(h("span", { class: "etichetta", title: "Modello per i dialoghi con i colleghi" }, "Dialoghi · " + a.modello_dialogo));
+  if (locale && (a.accesso_web || a.invio_posta === "approvazione" || a.invio_posta === "diretto" || a.social_attivo || a.email_attivo))
+    e.push(h("span", { class: "etichetta", title: "Claude interviene solo per le ricerche sul web e per gli invii all'esterno" }, "Online · Claude (ricerche e invii)"));
+  return e;
+}
+
 function carta(a) {
   return h("div", { class: "carta agente" + (a.attivo ? "" : " spento"), tabindex: 0, role: "button",
       onclick: () => modulo(a), onkeydown: (e) => { if (e.key === "Enter") modulo(a); } },
@@ -332,7 +343,7 @@ function carta(a) {
     h("div", { class: "sotto" }, a.ruolo),
     h("div", {},
       h("span", { class: "etichetta " + (a.attivo ? "ok" : "no") }, a.attivo ? "Attivo" : "Spento"),
-      h("span", { class: "etichetta" }, a.modello),
+      ...etichetteModelli(a),
       a.accesso_web ? null : h("span", { class: "etichetta avv" }, "Senza web"),
       a.connessioni.length ? h("span", { class: "etichetta" }, a.connessioni.length + " conn.") : null),
     h("div", { class: "sotto" }, "Questo mese: " + a.token_mese.toLocaleString("it-IT") + " token"),
@@ -555,7 +566,7 @@ function modulo(a) {
           h("div", { class: "riga" }, h("label", {}, "Dipartimento", div), h("label", {}, "Risponde a", sup)),
           h("label", {}, "Aziende per cui lavora", h("p", { class: "aiuto" }, "Una o più. Se non ne scegli nessuna lavora per tutte (agente trasversale)."),
             azCb.length ? azCb.map(([z, cb]) => h("label", { class: "spunta" }, cb, z.nome)) : h("p", { class: "aiuto" }, "Nessuna azienda: creale nella scheda Struttura.")),
-          h("div", { class: "riga" }, h("label", {}, "Categoria", h("p", { class: "aiuto" }, "La sentinella osserva e segnala, sta fuori dai dipartimenti. Per tutte le altre scegli dipartimento o superiore."), livello), h("label", {}, "Modello AI", modello))]],
+          h("div", { class: "riga" }, h("label", {}, "Categoria", h("p", { class: "aiuto" }, "La sentinella osserva e segnala, sta fuori dai dipartimenti. Per tutte le altre scegli dipartimento o superiore."), livello), h("label", {}, "Modello AI (principale)", h("p", { class: "aiuto" }, "Quello che pensa e svolge i compiti: di norma un modello locale. Claude interviene da solo, senza che tu lo scelga qui, solo per le ricerche sul web e per gli invii all'esterno; i dialoghi con i colleghi si scelgono più in basso."), modello))]],
         ["Prompt", [
           assistentePrompt(istr, () => ({ nome: nome.value.trim(), ruolo: ruolo.value.trim(), rimanda_a: rimanda.value.trim(), livello: livello.value,
             divisione: div.selectedOptions[0] ? div.selectedOptions[0].textContent : "", aziende: (stato.opzioni.aziende || []).filter(z => (d.aziende || []).includes(z.id)).map(z => z.nome).join(", ") })),

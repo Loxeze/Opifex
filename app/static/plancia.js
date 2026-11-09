@@ -2,9 +2,9 @@
 // Plancia 2.0: i numeri che contano a colpo d'occhio (CRM, consumi, uso, social) e le cose che aspettano te.
 // Tutti i testi arrivano dall'API e sono inseriti come testo; i grafici sono SVG disegnati qui, senza librerie.
 
-const PB_CHIARO = { verde: "#1E8466", ottone: "#B07A10", blu: "#3B7DC4", terra: "#C4502A", inchiostro: "#1B2421", tenue: "#5E6863", griglia: "#E3DED1",
+const PB_CHIARO = { risparmio: "#1E8466", verde: "#1E8466", ottone: "#B07A10", blu: "#3B7DC4", terra: "#C4502A", inchiostro: "#1B2421", tenue: "#5E6863", griglia: "#E3DED1",
   rampa: ["#EEF4F1", "#CFE3DA", "#9CCBBB", "#5FAA93", "#2E8A6F", "#0E5A45"], imbuto: ["#BFDACF", "#8CC0AC", "#5FAA93", "#2E8A6F", "#0E5A45"] };
-const PB_SCURO = { verde: "#E8924A", ottone: "#F3C46A", blu: "#7FB2E8", terra: "#F0866A", inchiostro: "#F1EBE3", tenue: "#BDB0A3", griglia: "rgba(255,255,255,.12)",
+const PB_SCURO = { risparmio: "#5CC49A", verde: "#E8924A", ottone: "#F3C46A", blu: "#7FB2E8", terra: "#F0866A", inchiostro: "#F1EBE3", tenue: "#BDB0A3", griglia: "rgba(255,255,255,.12)",
   rampa: ["rgba(255,255,255,.08)", "#5A3A24", "#8A5530", "#B5702F", "#E8924A", "#F7B97A"], imbuto: ["#7A4A28", "#A0612F", "#C9763A", "#E8924A", "#F7B97A"] };
 // i colori dei grafici seguono il tema scelto (Bottega chiaro o Bronzo scuro)
 const PB = new Proxy(PB_CHIARO, { get: (t, k) => (document.body.classList.contains("bronzo") ? PB_SCURO : t)[k] });
@@ -60,6 +60,23 @@ function graficoBarre(valori, etichette, colore, formato, alt) {
     s.append(svgEl("rect", { x, y: t + ih - alt_, width: larg, height: alt_, rx: 2, fill: colore, "fill-opacity": oggi ? 1 : 0.55 }, svgEl("title", {}, pbData(etichette[i]) + ": " + formato(v))));
     if (oggi || i === imax) s.append(svgEl("text", { x: x + larg / 2, y: Math.max(11, t + ih - alt_ - 4), "text-anchor": oggi && n - 1 - imax < 3 && i !== imax ? "end" : "middle", "font-size": 12, "font-weight": 600, fill: PB.inchiostro }, formato(v)));
   });
+  [0, 10, 20, n - 1].filter((i, k, a) => i < n && a.indexOf(i) === k).forEach(i => s.append(svgEl("text", { x: l + passo * i + passo / 2, y: H - 6, "text-anchor": i === 0 ? "start" : i === n - 1 ? "end" : "middle", "font-size": 12, fill: PB.tenue }, pbData(etichette[i]))));
+  return s;
+}
+
+function graficoBarreDoppie(v1, v2, etichette, c1, c2, formato, alt) {
+  const W = 480, H = 190, l = 46, r = 8, t = 16, b = 24, iw = W - l - r, ih = H - t - b;
+  const mx = Math.max(1e-9, ...v1, ...v2) * 1.12, n = v1.length, passo = iw / n, larg = Math.max(2, passo * 0.38);
+  const Y = (v) => t + ih * (1 - v / mx);
+  const s = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": alt, class: "bt-grafico" });
+  for (let k = 0; k <= 3; k++) {
+    const v = mx * k / 3;
+    s.append(svgEl("line", { x1: l, x2: W - r, y1: Y(v), y2: Y(v), stroke: PB.griglia }), svgEl("text", { x: l - 6, y: Y(v) + 4, "text-anchor": "end", "font-size": 12, fill: PB.tenue }, formato(v)));
+  }
+  [[v1, c1, "pagato"], [v2, c2, "risparmiato"]].forEach(([serie, colore, nome], j) => serie.forEach((v, i) => {
+    const x = l + passo * i + passo / 2 - larg + j * larg, oggi = i === n - 1, alt_ = Math.max(v ? 2 : 0, ih * v / mx);
+    s.append(svgEl("rect", { x, y: t + ih - alt_, width: larg - 1, height: alt_, rx: 2, fill: colore, "fill-opacity": oggi ? 1 : 0.6 }, svgEl("title", {}, pbData(etichette[i]) + " · " + nome + ": " + formato(v))));
+  }));
   [0, 10, 20, n - 1].filter((i, k, a) => i < n && a.indexOf(i) === k).forEach(i => s.append(svgEl("text", { x: l + passo * i + passo / 2, y: H - 6, "text-anchor": i === 0 ? "start" : i === n - 1 ? "end" : "middle", "font-size": 12, fill: PB.tenue }, pbData(etichette[i]))));
   return s;
 }
@@ -222,6 +239,9 @@ function vistaDashboard() {
       pbTessera("Vinti in totale", eurInt(op.valore_vinto_totale), nIt(op.vinte_totali) + " progetti"),
       pbTessera("Costo di oggi", eur(k.oggi.costo), "media 7 gg " + eur(media7), sparkline(g14.map(x => x.costo), PB.terra)),
       pbTessera("Token di oggi", compatto(k.oggi.token), "token usati"),
+      pbTessera("Token in locale oggi", compatto(k.locale.oggi.token), "sul portatile, a costo zero"),
+      pbTessera("Risparmiato oggi", eur(k.locale.oggi.risparmio), "equivalente a pagamento"),
+      pbTessera("Risparmiato nel mese", eur(k.locale.mese.risparmio), compatto(k.locale.mese.token) + " token in locale"),
       pbTessera("Costo del mese", eur(k.mese.costo), vc ? vc.testo + " sul mese scorso" : "mese in corso"),
       pbTessera("Token del mese", compatto(k.mese.token), "token usati"),
       pbTessera("Post preparati", nIt(sc0.creati), "questo mese"),
@@ -236,9 +256,10 @@ function vistaDashboard() {
       h("span", { class: "bt-tag" + (m.giorni > 0 ? " rosso" : "") }, m.giorni > 0 ? "scaduta da " + m.giorni + (m.giorni === 1 ? " giorno" : " giorni") : m.giorni === 0 ? "scade oggi" : "scade tra " + (-m.giorni) + " giorni")))] : null;
     const operazioni = pbScheda("Operazioni commerciali aperte", [tab, mov], h("button", { class: "s", onclick: () => vai("crm") }, "Apri"), "bt-s4");
 
-    const giorni = k.giorni.map(x => x.giorno);
+    const giorni = k.giorni.map(x => x.giorno), cambio = (stato.opzioni && stato.opzioni.cambio_eur) || 0.92;
     const consumi = pbScheda("Token e costi, ultimi 30 giorni", h("div", { class: "bt-due" }, h("div", {}, h("div", { class: "bt-cap" }, "Token al giorno"), graficoArea(k.giorni.map(x => x.token), giorni, PB.verde, compatto, "Token al giorno negli ultimi 30 giorni")),
-      h("div", {}, h("div", { class: "bt-cap" }, "Costo al giorno, euro (oggi in evidenza)"), graficoBarre(k.giorni.map(x => x.costo * ((stato.opzioni && stato.opzioni.cambio_eur) || 0.92)), giorni, PB.terra, (v) => "€ " + nIt(v, v < 10 ? 2 : 0), "Costo al giorno negli ultimi 30 giorni"))),
+      h("div", {}, h("div", { class: "bt-cap" }, "Costo al giorno, euro: pagato e risparmiato in locale"), graficoBarreDoppie(k.giorni.map(x => x.costo * cambio), k.giorni.map(x => x.risparmio * cambio), giorni, PB.terra, PB.risparmio, (v) => "€ " + nIt(v, v < 10 ? 2 : 0), "Costo pagato e risparmiato in locale, al giorno negli ultimi 30 giorni"),
+        h("div", {}, h("span", { class: "bt-leg" }, h("b", { style: "background:" + PB.terra }), "pagato"), h("span", { class: "bt-leg" }, h("b", { style: "background:" + PB.risparmio }), "risparmiato (equivalente a pagamento)")))),
       h("button", { class: "s", onclick: () => vai("impostazioni", "misure") }, "Dove vanno"), "bt-s4");
     riempi(riga1, [imbuto, operazioni, consumi]);
 

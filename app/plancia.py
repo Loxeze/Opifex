@@ -89,7 +89,22 @@ def consumi(conn) -> dict:
                               FROM costi_api WHERE creato_il > NOW() - INTERVAL '28 days' GROUP BY 1,2""").fetchall():
         uso[r["d"] - 1][r["h"]] = int(r["n"])
     attivi = conn.execute("SELECT count(*) FILTER (WHERE attivo) AS a, count(*) AS t FROM agenti").fetchone()
-    return {"giorni": [{"giorno": r["giorno"], "token": int(r["token"]), "costo": r["costo"]} for r in giorni],
+    # modello locale: i token usati sul portatile non costano; il «risparmio» e' quanto costerebbero col modello a pagamento di riferimento (Impostazioni → Modello locale)
+    rif = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'locale_equivalente'").fetchone()
+    prz = conn.execute("SELECT costo_input_per_milione AS ci, costo_output_per_milione AS co FROM modelli_ai WHERE nome = %s", ((rif["valore"] if rif and rif["valore"] else "claude-sonnet-5-5"),)).fetchone()
+    ci, co = float(prz["ci"] or 0) if prz else 0.0, float(prz["co"] or 0) if prz else 0.0
+    loc: dict[str, dict] = {}
+    for r in conn.execute(f"""SELECT to_char((c.creato_il AT TIME ZONE '{FUSO}')::date, 'YYYY-MM-DD') AS giorno,
+                                    COALESCE(SUM(c.token_input),0)::bigint AS ti, COALESCE(SUM(c.token_output),0)::bigint AS tu
+                             FROM costi_api c JOIN modelli_ai m ON m.nome = c.modello JOIN fornitori_ai f ON f.id = m.fornitore_id AND f.nome = 'locale'
+                             WHERE c.creato_il >= date_trunc('month', NOW()) - INTERVAL '31 days' GROUP BY 1""").fetchall():
+        loc[r["giorno"]] = {"token": int(r["ti"]) + int(r["tu"]), "risparmio": (int(r["ti"]) * ci + int(r["tu"]) * co) / 1_000_000}
+    oggi_g = conn.execute(f"SELECT to_char((NOW() AT TIME ZONE '{FUSO}')::date, 'YYYY-MM-DD') AS g, to_char(date_trunc('month', NOW() AT TIME ZONE '{FUSO}'), 'YYYY-MM-DD') AS m").fetchone()
+    z = {"token": 0, "risparmio": 0.0}
+    mese_loc = {"token": sum(v["token"] for k_, v in loc.items() if k_ >= oggi_g["m"]), "risparmio": sum(v["risparmio"] for k_, v in loc.items() if k_ >= oggi_g["m"])}
+    return {"giorni": [{"giorno": r["giorno"], "token": int(r["token"]), "costo": r["costo"],
+                        "token_locali": loc.get(r["giorno"], z)["token"], "risparmio": round(loc.get(r["giorno"], z)["risparmio"], 6)} for r in giorni],
+            "locale": {"oggi": loc.get(oggi_g["g"], z), "mese": mese_loc},
             "oggi": {"token": int(oggi["token"]), "costo": oggi["costo"]}, "mese": {"token": int(mese["token"]), "costo": mese["costo"], "costo_periodo_prima": prima["costo"]},
             "per_agente": top, "modelli": [{"nome": k, "token": v, "percento": round(100 * v / tot)} for k, v in sorted(mod.items(), key=lambda x: -x[1])],
             "uso": uso, "agenti": {"attivi": int(attivi["a"]), "totali": int(attivi["t"])}}

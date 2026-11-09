@@ -87,6 +87,7 @@ def importa_modelli_locali(_: dict = Depends(solo_titolare)):
 
 class ProvaModello(BaseModel):
     modello: str = Field(min_length=1, max_length=120)
+    dialogo: str | None = Field(default=None, max_length=120)   # modello per i dialoghi tra agenti (se omesso, lo stesso)
 
 
 @router.post("/locale/affidabilita")
@@ -138,9 +139,16 @@ def anteprima_assegnazione(modello: str, _: dict = Depends(solo_titolare)):
 def assegna_a_tutti(d: ProvaModello, u: dict = Depends(solo_titolare)):
     with connessione() as conn:
         p = _piano(conn, d.modello)
+        dialogo = d.dialogo or d.modello
+        if not conn.execute("SELECT 1 FROM modelli_ai WHERE nome = %s", (dialogo,)).fetchone():
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Modello per i dialoghi non registrato")
         for x in p["cambia"]:
-            conn.execute("INSERT INTO modelli_prima_locale (agente_id, modello_precedente) VALUES (%s,%s) ON CONFLICT (agente_id) DO NOTHING", (x["id"], x["modello"]))
-            conn.execute("UPDATE agenti SET modello = %s WHERE id = %s", (d.modello, x["id"]))
+            conn.execute("INSERT INTO modelli_prima_locale (agente_id, modello_precedente, dialogo_precedente) SELECT id, modello, modello_dialogo FROM agenti WHERE id = %s ON CONFLICT (agente_id) DO NOTHING", (x["id"],))
+            conn.execute("UPDATE agenti SET modello = %s, modello_dialogo = %s WHERE id = %s", (d.modello, dialogo, x["id"]))
+        if p["cambia"]:
+            prima = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'modello_dialogo_predefinito'").fetchone()
+            conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('dialogo_predefinito_prima_locale', %s) ON CONFLICT (chiave) DO NOTHING", ((prima["valore"] if prima else "") or "-",))
+            _salva(conn, "modello_dialogo_predefinito", dialogo)
         conn.execute("INSERT INTO registro_azioni (azione, utente_id, dettagli) VALUES ('modello_locale_assegnato', %s, %s::jsonb)",
                      (u["id"], __import__("json").dumps({"modello": d.modello, "agenti": len(p["cambia"])})))
     return {"cambiati": len(p["cambia"]), "restano": len(p["restano"])}
@@ -149,11 +157,15 @@ def assegna_a_tutti(d: ProvaModello, u: dict = Depends(solo_titolare)):
 @router.post("/locale/assegnazione/ripristina")
 def ripristina_modelli(u: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        righe = conn.execute("SELECT agente_id, modello_precedente FROM modelli_prima_locale").fetchall()
+        righe = conn.execute("SELECT agente_id, modello_precedente, dialogo_precedente FROM modelli_prima_locale").fetchall()
         n = 0
         for r in righe:
             if r["modello_precedente"]:
-                conn.execute("UPDATE agenti SET modello = %s WHERE id = %s", (r["modello_precedente"], r["agente_id"])); n += 1
+                conn.execute("UPDATE agenti SET modello = %s, modello_dialogo = %s WHERE id = %s", (r["modello_precedente"], r["dialogo_precedente"], r["agente_id"])); n += 1
+        pr = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'dialogo_predefinito_prima_locale'").fetchone()
+        if pr and pr["valore"]:
+            _salva(conn, "modello_dialogo_predefinito", "claude-haiku-5-5" if pr["valore"] == "-" else pr["valore"])
+        conn.execute("DELETE FROM impostazioni_sistema WHERE chiave = 'dialogo_predefinito_prima_locale'")
         conn.execute("DELETE FROM modelli_prima_locale")
         conn.execute("INSERT INTO registro_azioni (azione, utente_id, dettagli) VALUES ('modello_locale_ripristinato', %s, %s::jsonb)", (u["id"], __import__("json").dumps({"agenti": n})))
     return {"ripristinati": n}
