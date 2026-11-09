@@ -18,12 +18,14 @@ def _pulisci(testo: str) -> str:
     return re.sub(r"<think>.*", "", t, flags=re.S).strip()
 
 
-def _chiedi(modello: str, messaggi: list, tools: list | None = None, max_token: int = 700) -> dict:
+def _chiedi(modello: str, messaggi: list, tools: list | None = None, max_token: int = 3000) -> dict:
     corpo = {"model": modello, "messages": [{"role": "system", "content": SISTEMA}] + messaggi, "max_tokens": max_token, "temperature": 0, "stream": False}
     if tools:
         corpo["tools"] = [{"type": "function", "function": t} for t in tools]
     d = _chiama_compat("locale", corpo)
     m = d["choices"][0]["message"]
+    if d["choices"][0].get("finish_reason") == "length" and not (m.get("content") or "").strip():
+        m = {**m, "content": ""}   # ragionamento interminabile: nessuna risposta utile entro il limite
     return {"testo": _pulisci(m.get("content") or ""), "chiamate": m.get("tool_calls") or [], "msg": m, "token_out": d["usage"]["completion_tokens"]}
 
 
@@ -126,7 +128,7 @@ T_GRAFICA = {"name": "crea_grafica", "description": "Crea una grafica (post, loc
 
 
 def _t_senza_strumenti(m):
-    r = _chiedi(m, [{"role": "user", "content": "Scrivi una mail di cortese sollecito di cinque righe a un partner universitario che non ha inviato la lettera di adesione."}], [T_GRAFICA, T_SCHEDA, T_EMAIL, T_DOC], 900)
+    r = _chiedi(m, [{"role": "user", "content": "Scrivi una mail di cortese sollecito di cinque righe a un partner universitario che non ha inviato la lettera di adesione."}], [T_GRAFICA, T_SCHEDA, T_EMAIL, T_DOC], 3000)
     ok = not r["chiamate"] and len(r["testo"]) > 150
     return ok, "" if ok else ("ha usato uno strumento senza bisogno" if r["chiamate"] else "risposta vuota o troppo corta"), r["token_out"]
 
