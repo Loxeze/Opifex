@@ -211,6 +211,32 @@ def url_locale() -> str:
     return v if v.startswith(("http://", "https://")) else "http://127.0.0.1:11434"
 
 
+def controlla_troncamento(modello: str, token_prompt: int) -> bool:
+    """Ollama taglia in silenzio l'inizio del prompt se supera la finestra di contesto: memoria, istruzioni e dossier spariscono e l'agente «perde i riferimenti».
+    Se il prompt riempie tutta la finestra lo segnalo (una notifica l'ora, e nel registro azioni)."""
+    if token_prompt < 3000:
+        return False
+    try:
+        r = httpx.get(url_locale() + "/api/ps", timeout=httpx.Timeout(3, connect=2))
+        contesto = next((int(m.get("context_length") or 0) for m in (r.json().get("models") or []) if m.get("name") == modello), 0)
+    except (httpx.HTTPError, ValueError):
+        return False
+    if not contesto or token_prompt < contesto - 48:
+        return False
+    try:
+        from .db import connessione
+        with connessione() as conn:
+            gia = conn.execute("SELECT 1 FROM registro_azioni WHERE azione = 'locale_prompt_troncato' AND creata_il > NOW() - INTERVAL '1 hour' LIMIT 1").fetchone()
+            conn.execute("INSERT INTO registro_azioni (azione, dettagli) VALUES ('locale_prompt_troncato', %s::jsonb)", (__import__("json").dumps({"modello": modello, "contesto": contesto, "token_prompt": token_prompt}),))
+            if not gia:
+                conn.execute("INSERT INTO notifiche (testo, urgente, critica) VALUES (%s, TRUE, FALSE)",
+                             (f"Il modello locale {modello} ha ricevuto piu' testo di quanto la sua finestra di contesto ({contesto} token) contenga: l'inizio (istruzioni, memoria, dossier) viene tagliato e gli agenti perdono i riferimenti. "
+                              "Aumenta OLLAMA_CONTEXT_LENGTH sul portatile (per esempio 16384) e riavvia Ollama, oppure assegna agli agenti con molta memoria un modello online.",))
+    except Exception:  # noqa: BLE001 - un avviso mancato non deve fermare l'agente
+        pass
+    return True
+
+
 def _chiama_locale(modello: str, istruzioni: str, messaggio: str, max_token: int) -> Risposta:
     """Ollama espone lo stesso formato di OpenAI. Niente nuovi tentativi: se il portatile non risponde si ripiega subito."""
     corpo = {"model": modello, "max_tokens": max_token, "stream": False,
@@ -228,6 +254,7 @@ def _chiama_locale(modello: str, istruzioni: str, messaggio: str, max_token: int
     try:
         d = r.json()
         uso = d.get("usage") or {}
+        controlla_troncamento(modello, int(uso.get("prompt_tokens") or 0))
         return Risposta(d["choices"][0]["message"].get("content") or "", int(uso.get("prompt_tokens") or 0), int(uso.get("completion_tokens") or 0),
                         {"stop": d["choices"][0].get("finish_reason") or ""})
     except (ValueError, KeyError, IndexError, TypeError):

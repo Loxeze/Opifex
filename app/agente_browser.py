@@ -8,7 +8,7 @@ import httpx
 from . import eventi
 from .config import impostazioni
 from . import progresso
-from .fornitori import ErroreFornitore, ErroreLocale, Risposta, chiave as fornitori_chiave, invia, token_ingresso as fornitori_token_ingresso, url_locale as fornitori_url_locale
+from .fornitori import ErroreFornitore, ErroreLocale, Risposta, chiave as fornitori_chiave, invia, token_ingresso as fornitori_token_ingresso, url_locale as fornitori_url_locale, controlla_troncamento as fornitori_controlla_troncamento
 from .navigatore import ErroreNavigazione, Navigatore
 
 MAX_PASSI = 14
@@ -216,6 +216,7 @@ def _chiama_compat(fornitore: str, corpo: dict) -> dict:
         d = r.json()
         d.setdefault("usage", {})
         d["usage"] = {"prompt_tokens": int(d["usage"].get("prompt_tokens") or 0), "completion_tokens": int(d["usage"].get("completion_tokens") or 0)}
+        fornitori_controlla_troncamento(corpo.get("model") or "", d["usage"]["prompt_tokens"])
         return d
     url, nome = URL_COMPAT[fornitore]
     k = fornitori_chiave(fornitore)

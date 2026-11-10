@@ -172,4 +172,18 @@ with TestClient(app) as c:
     with _cn() as cc:
         t_ = dialoghi._token_dialoghi_oggi(cc)
     ok("budget dei dialoghi: i token del modello locale non contano", t_ < 1000000, str(t_))
+    # troncamento del prompt (finestra di contesto piena)
+    from app import fornitori as _f
+    import httpx as _hx
+    reale_get = _f.httpx.get
+    class _R:  # finta risposta di /api/ps
+        def __init__(s, ctx): s.ctx = ctx
+        def json(s): return {"models": [{"name": "qwen3:8b", "context_length": s.ctx}]}
+    _f.httpx.get = lambda *a_, **k_: _R(8192)
+    n0 = sql("SELECT count(*) FROM notifiche")[0][0]
+    ok("troncamento: prompt che riempie la finestra viene segnalato", _f.controlla_troncamento("qwen3:8b", 8180) is True and sql("SELECT count(*) FROM notifiche")[0][0] == n0 + 1)
+    _f.controlla_troncamento("qwen3:8b", 8190)
+    ok("troncamento: una sola notifica l'ora, ma ogni caso e' nel registro", sql("SELECT count(*) FROM notifiche")[0][0] == n0 + 1 and sql("SELECT count(*) FROM registro_azioni WHERE azione='locale_prompt_troncato'")[0][0] == 2)
+    ok("troncamento: prompt che ci sta non segnala", _f.controlla_troncamento("qwen3:8b", 5000) is False and _f.controlla_troncamento("qwen3:8b", 900) is False)
+    _f.httpx.get = reale_get
 print("TOTALE %d / %d" % (sum(ris), len(ris)))
