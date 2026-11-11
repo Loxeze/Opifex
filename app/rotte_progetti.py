@@ -279,3 +279,38 @@ def recupera(pid: int, u: dict = Depends(solo_titolare)):
         conn.execute("UPDATE progetti SET archiviato = FALSE, eliminato_il = NULL WHERE id=%s", (pid,))
         registro.registra(conn, u, "organizzazione", "progetto recuperato", p["nome"][:150], "progetto", pid)
     return {"ok": True}
+
+
+# ---------- Ordine della cartella Opifex su Drive ----------
+class OrdineDrive(BaseModel):
+    automatico: bool
+
+
+@router.get("/gestione/google/ordine")
+def piano_ordine_drive(_: dict = Depends(solo_titolare)):
+    """Che cosa verrebbe spostato adesso (senza toccare nulla) e se il riordino automatico e' attivo."""
+    from . import drive_ordine
+    with connessione() as conn:
+        try:
+            p = drive_ordine.riordina(conn, False)
+        except google.ErroreGoogle as e:
+            raise _err(e) from None
+        p["automatico"] = google._leggi(conn, "drive_ordine_attivo") == "true"
+        return p
+
+
+@router.post("/gestione/google/ordine")
+def esegui_ordine_drive(_: dict = Depends(solo_titolare)):
+    from . import drive_ordine
+    with connessione() as conn:
+        try:
+            return drive_ordine.riordina(conn, True)
+        except google.ErroreGoogle as e:
+            raise _err(e) from None
+
+
+@router.put("/gestione/google/ordine")
+def automatico_ordine_drive(d: OrdineDrive, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        google._scrivi(conn, "drive_ordine_attivo", "true" if d.automatico else "false")
+    return {"automatico": d.automatico}

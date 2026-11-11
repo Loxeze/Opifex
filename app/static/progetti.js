@@ -246,6 +246,7 @@ function vistaCollegamenti() {
               try { const r = await api("POST", "/gestione/google/autorizza", { etichetta: etic.value, servizi: serv.filter(x => x.c.checked).map(x => x.k) }); window.location.href = r.url; }
               catch (x) { mostra(x.message, "no"); } } }, "Collega con Google"))),
           h("h3", {}, "Agenti e Drive"), accessiDriveAgenti(), diagnosiTrascrizione(), h("h3", {}, "Banco di lavoro"), bancoLavoro(),
+          h("h3", {}, "Ordine della cartella Opifex"), ordineDrive(),
           h("h3", {}, "Drive per i progetti"),
           h("div", { class: "carta" }, h("label", {}, "Account che crea le cartelle", sceltaDrive),
             h("label", {}, "ID della cartella «Opifex» su Drive", radice),
@@ -269,4 +270,31 @@ function vistaCollegamenti() {
   };
   carica();
   return [h("h2", {}, "Collegamenti"), corpo];
+}
+
+
+// Regola dell'ordine su Drive: Opifex/Agenti, Opifex/Progetti, Opifex/Sistema. Prima si guarda il piano, poi si conferma.
+function ordineDrive() {
+  const corpo = h("div"), esito = h("div");
+  const elenco = (titolo, voci) => voci.length ? h("p", {}, h("b", {}, titolo + " (" + voci.length + "): "), voci.map(v => v.nome).join(", ")) : null;
+  const carica = async () => {
+    try {
+      const p = await api("GET", "/gestione/google/ordine"), n = p.agenti.length + p.progetti.length + p.sistema.length;
+      const auto = h("input", { type: "checkbox", "data-uso": "drive-ordine-auto", onchange: async () => { try { await api("PUT", "/gestione/google/ordine", { automatico: auto.checked }); esito.replaceChildren(avviso(auto.checked ? "Ogni giorno Opifex rimetterà a posto ciò che finisce nella radice." : "Riordino automatico spento.", "ok")); } catch (e) { esito.replaceChildren(avviso(e.message, "no")); } } });
+      auto.checked = p.automatico;
+      corpo.replaceChildren(
+        n ? h("p", {}, "Nella radice di Opifex ci sono " + n + " elementi fuori posto.") : h("p", { class: "sotto" }, "La radice è in ordine: niente da spostare."),
+        elenco("Vanno in Agenti", p.agenti), elenco("Vanno in Progetti", p.progetti), elenco("Vanno in Sistema", p.sistema),
+        p.da_chiarire.length ? h("p", {}, h("b", {}, "Non so di chi sono, restano dove sono (" + p.da_chiarire.length + "): "), p.da_chiarire.map(v => v.nome).join(", ")) : null,
+        n ? h("div", { class: "azioni" }, h("button", { class: "p", "data-uso": "drive-ordine-esegui", onclick: async (ev) => {
+          ev.target.disabled = true; esito.replaceChildren(avviso("Sposto gli elementi… può volerci un minuto.", "ok"));
+          try { const r = await api("POST", "/gestione/google/ordine"); esito.replaceChildren(avviso(r.spostati + " elementi spostati." + (r.errori.length ? " Non riusciti: " + r.errori.join("; ") : ""), r.errori.length ? "no" : "ok")); carica(); }
+          catch (e) { esito.replaceChildren(avviso(e.message, "no")); ev.target.disabled = false; } } }, "Metti in ordine adesso")) : null,
+        h("label", { style: "display:flex;gap:8px;align-items:center" }, auto, "Tieni in ordine da solo, una volta al giorno"));
+    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return h("div", { class: "carta" },
+    h("p", { class: "aiuto" }, "La regola: le cartelle degli agenti stanno in Opifex/Agenti, quelle dei progetti in Opifex/Progetti, i backup in Opifex/Sistema. Le cartelle nuove nascono già al posto giusto e nella radice gli agenti non possono più crearne. Lo spostamento lo fa il sistema riconoscendo ogni cartella dal suo identificativo: nomi, contenuti e collegamenti restano identici."),
+    corpo, esito);
 }

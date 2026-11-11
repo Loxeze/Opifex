@@ -222,7 +222,8 @@ def sincronizza_progetto(conn, progetto_id: int) -> dict:
         tok = token_accesso(conn, account)
         radice = radice_valida(conn, tok)
         p = conn.execute("SELECT * FROM progetti WHERE id=%s", (progetto_id,)).fetchone()  # riletto: la radice nuova azzera gli id vecchi
-        cart = cartella(tok, p["nome"], radice, p["drive_cartella_id"])
+        from . import drive_ordine
+        cart = drive_ordine.cartella_ordinata(conn, tok, radice, "progetti", p["nome"], p["drive_cartella_id"])   # regola dell'ordine: Opifex/Progetti/<nome>
         agent = cartella(tok, "agent", cart, p["drive_agent_id"])
         repo = cartella(tok, "repository", cart, p["drive_repository_id"])
         for r in conn.execute("""SELECT pa.agente_id, pa.drive_cartella_id, a.nome FROM progetti_agenti pa JOIN agenti a ON a.id=pa.agente_id

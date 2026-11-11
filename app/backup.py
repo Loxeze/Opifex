@@ -90,7 +90,8 @@ def _su_drive(conn, dati: bytes, nome: str) -> str:
         return "Drive non collegato: backup solo sul server"
     tok = google.token_accesso(conn, account)
     radice = google.radice_valida(conn, tok)
-    cart = google.cartella(tok, "Backup", radice)
+    from . import drive_ordine
+    cart = drive_ordine.cartella_ordinata(conn, tok, radice, "sistema", "Backup")   # regola dell'ordine: Opifex/Sistema/Backup
     limite = "opifexbackup"
     meta = json.dumps({"name": nome, "parents": [cart]}).encode()
     corpo = (f"--{limite}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n").encode() + meta + \

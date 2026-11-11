@@ -243,7 +243,8 @@ def _drive_cartelle(conn, nome_sito: str):
     try:
         tok = google.token_accesso(conn, account)
         radice = google.radice_valida(conn, tok)
-        mia = google.cartella(tok, CARTELLA_DRIVE, radice)
+        from . import drive_ordine
+        mia = drive_ordine.cartella_ordinata(conn, tok, radice, "sistema", CARTELLA_DRIVE)   # regola dell'ordine: Opifex/Sistema/<backup dei siti>
         return tok, google.cartella(tok, nome_sito[:80], mia)
     except google.ErroreGoogle as e:
         raise ErroreCustode(str(e)) from None

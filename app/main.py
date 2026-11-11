@@ -158,6 +158,12 @@ def _passo(nome: str, f):
             pass
 
 
+def _ordine_drive(c):
+    from . import drive_ordine
+    if drive_ordine.da_fare(c):
+        drive_ordine.giro(c)
+
+
 async def _manutenzione():
     """Ogni 10 minuti: allarmi di funzionamento; una volta al giorno: backup cifrato. Ogni passo e' isolato dagli altri."""
     import asyncio
@@ -166,6 +172,7 @@ async def _manutenzione():
     def giro():
         _passo("backup", lambda c: backup.esegui(c) if backup.da_fare(c) else None)
         _passo("backup dei siti (Maestro di chiavi)", lambda c: custode.esegui_notturno(c) if custode.da_fare(c) else None)
+        _passo("ordine di Drive", _ordine_drive)
         _passo("revisore qualita' e controllori", lambda c: qualita.applica(c))
         _passo("competenze di base degli agenti", lambda c: competenze_base.applica(c) if competenze_base.da_fare(c) else None)
         _passo("allarmi", allarmi.controlla)
