@@ -3,6 +3,7 @@ il server la legge con il browser e gliela restituisce come testo.
 
 Il contenuto delle pagine e' DATO, mai istruzioni: viene racchiuso in un riquadro e il modello e' avvisato.
 """
+import time
 import httpx
 
 from . import eventi
@@ -33,7 +34,42 @@ AVVISO = ("\n\nNAVIGAZIONE: hai tre strumenti per leggere i siti collegati (apri
           "Se un sito non funziona, dillo senza inventare dati. Cita sempre l'indirizzo delle pagine da cui prendi le informazioni.")
 
 
+def _ultimo_ingresso(corpo: dict):
+    """Per la scatola nera: le istruzioni restano nella prima chiamata, poi basta l'ultimo messaggio (la richiesta o i risultati degli strumenti)."""
+    m = corpo.get("messages") or []
+    return {"ultimo_messaggio": m[-1] if m else None, "messaggi": len(m), "strumenti_offerti": len(corpo.get("tools") or [])}
+
+
+def _uscita(d: dict):
+    if "choices" in d:
+        msg = (d.get("choices") or [{}])[0].get("message") or {}
+        return {"testo": msg.get("content"), "strumenti_chiesti": [c.get("function", {}).get("name") for c in (msg.get("tool_calls") or [])]}
+    return {"testo": "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text"),
+            "strumenti_chiesti": [b.get("name") for b in d.get("content", []) if b.get("type") in ("tool_use", "server_tool_use")], "stop": d.get("stop_reason")}
+
+
+def _registra(nome: str, corpo: dict, d: dict | None, ms: int, errore: Exception | None = None):
+    from . import scatola_nera
+    if errore is not None:
+        scatola_nera.passo("errore", nome, _ultimo_ingresso(corpo), f"{type(errore).__name__}: {errore}", ms=ms)
+        return
+    u = d.get("usage") or {}
+    scatola_nera.passo("modello", nome, _ultimo_ingresso(corpo), _uscita(d), token_input=int(u.get("input_tokens") or u.get("prompt_tokens") or 0),
+                       token_output=int(u.get("output_tokens") or u.get("completion_tokens") or 0), ms=ms)
+
+
 def _chiama_api(corpo: dict) -> dict:
+    t0 = time.monotonic()
+    try:
+        d = _chiama_api_vera(corpo)
+    except Exception as e:
+        _registra("anthropic · " + str(corpo.get("model")), corpo, None, int((time.monotonic() - t0) * 1000), e)
+        raise
+    _registra("anthropic · " + str(corpo.get("model")), corpo, d, int((time.monotonic() - t0) * 1000))
+    return d
+
+
+def _chiama_api_vera(corpo: dict) -> dict:
     k = fornitori_chiave("anthropic")
     if not k:
         raise ErroreFornitore("Chiave Anthropic non configurata")
@@ -202,6 +238,17 @@ URL_COMPAT = {"openai": ("https://api.openai.com/v1/chat/completions", "OpenAI")
 
 
 def _chiama_compat(fornitore: str, corpo: dict) -> dict:
+    t0 = time.monotonic()
+    try:
+        d = _chiama_compat_vera(fornitore, corpo)
+    except Exception as e:
+        _registra(f"{fornitore} · {corpo.get('model')}", corpo, None, int((time.monotonic() - t0) * 1000), e)
+        raise
+    _registra(f"{fornitore} · {corpo.get('model')}", corpo, d, int((time.monotonic() - t0) * 1000))
+    return d
+
+
+def _chiama_compat_vera(fornitore: str, corpo: dict) -> dict:
     if fornitore == "locale":
         # Ollama sul portatile: nessuna chiave; se non risponde l'errore e' ErroreLocale. Con gli strumenti NON si ripiega sul cloud
         # (i risultati di Drive, CRM ecc. sono stati ammessi perche' il modello e' sul portatile di Lorenzo).

@@ -522,3 +522,67 @@ function bloccoProvaAffidabilita(modelli) {
         try { const q = await api("POST", "/gestione/locale/assegnazione/ripristina"); anteprima.replaceChildren(avviso(q.ripristinati + " agenti tornati al modello di prima.", "ok")); }
         catch (e) { anteprima.replaceChildren(avviso(e.message, "no")); } } }, "Ripristina i modelli di prima")));
 }
+
+
+// ---------- Scatola nera: che cosa e' successo dentro ogni lavoro di un agente ----------
+function _durataSN(s) { s = Number(s || 0); return s < 60 ? s.toFixed(s < 10 ? 1 : 0).replace(".", ",") + " s" : Math.floor(s / 60) + " min " + Math.round(s % 60) + " s"; }
+function _euroSN(usd) { const c = (stato.opzioni && stato.opzioni.cambio_eur) || 0.92; return usd ? "€ " + (usd * c).toFixed(4).replace(".", ",") : "€ 0"; }
+const ICONE_SN = { modello: "🧠", strumento: "🔧", nota: "📝", errore: "⚠️" };
+
+function disegnaTraccia(t, livello) {
+  const testa = h("div", { class: "sn-testa" },
+    h("b", {}, (t.agente || "Agente") + (livello ? " · lavoro collegato" : "")),
+    h("span", { class: "sotto" }, " · " + (t.stato === "errore" ? "⚠️ errore" : t.stato === "in_corso" ? "in corso" : "riuscita") + " · " + _durataSN(t.secondi) + " · "
+      + ((t.token_input || 0) + (t.token_output || 0)).toLocaleString("it-IT") + " token · " + _euroSN(t.costo) + " · " + t.passi + " passi"));
+  const passi = (t.passi_dettaglio || []).map(p => h("details", { class: "sn-passo sn-" + p.tipo },
+    h("summary", {}, (ICONE_SN[p.tipo] || "•") + " " + (p.nome || p.tipo),
+      h("span", { class: "sotto" }, (p.millisecondi != null ? " · " + _durataSN(p.millisecondi / 1000) : "") + (p.token_input != null ? " · " + (p.token_input || 0).toLocaleString("it-IT") + " → " + (p.token_output || 0).toLocaleString("it-IT") + " token" : ""))),
+    p.ingresso ? h("div", {}, h("div", { class: "sotto" }, "Ingresso"), h("pre", { class: "sn-pre" }, p.ingresso)) : null,
+    p.uscita ? h("div", {}, h("div", { class: "sotto" }, "Risultato"), h("pre", { class: "sn-pre" }, p.uscita)) : null));
+  return h("div", { class: "sn-traccia" + (livello ? " sn-figlia" : "") }, testa,
+    livello ? null : h("details", {}, h("summary", { class: "sotto" }, "Richiesta"), h("pre", { class: "sn-pre" }, t.richiesta || "")),
+    t.errore ? avviso(t.errore, "no") : null,
+    passi.length ? passi : h("p", { class: "sotto" }, "Nessun passaggio registrato."),
+    (t.figlie || []).map(f => disegnaTraccia(f, (livello || 0) + 1)));
+}
+
+async function apriTraccia(id) {
+  const corpo = h("div", {}, h("p", { class: "sotto" }, "Carico la scatola nera…"));
+  const chiudi = () => velo.remove();
+  const velo = h("div", { class: "sn-velo", onclick: (e) => { if (e.target === velo) chiudi(); } },
+    h("div", { class: "sn-finestra", role: "dialog", "aria-label": "Scatola nera" }, h("div", { class: "azioni", style: "justify-content:space-between" }, h("h3", { style: "margin:0" }, "Come ci è arrivato"), h("button", { class: "s", onclick: chiudi }, "Chiudi")), corpo));
+  document.body.append(velo);
+  document.addEventListener("keydown", function esc(e) { if (e.key === "Escape") { chiudi(); document.removeEventListener("keydown", esc); } });
+  try {
+    const t = await api("GET", "/gestione/scatola-nera/" + id);
+    const voto = (v) => h("button", { class: t.voto === v ? "p" : "s", type: "button", onclick: async () => { try { await api("PUT", "/gestione/scatola-nera/" + id + "/voto", { voto: t.voto === v ? 0 : v }); t.voto = t.voto === v ? null : v; corpo.replaceChildren(...contenuto()); } catch (e) { corpo.prepend(avviso(e.message, "no")); } } }, v > 0 ? "👍 Buon lavoro" : "👎 Da migliorare");
+    const contenuto = () => [h("div", { class: "azioni" }, voto(1), voto(-1), h("span", { class: "sotto" }, "Il voto resta legato a questa traccia: servirà agli esami.")), disegnaTraccia(t, 0)];
+    corpo.replaceChildren(...contenuto());
+  } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+}
+
+function vistaScatolaNera() {
+  const corpo = h("div"), filtro = { agente_id: "", solo_errori: false };
+  const carica = async () => {
+    try {
+      const q = new URLSearchParams(); if (filtro.agente_id) q.set("agente_id", filtro.agente_id); if (filtro.solo_errori) q.set("solo_errori", "true");
+      const d = await api("GET", "/gestione/scatola-nera?" + q.toString());
+      const agenti = h("select", { onchange: (e) => { filtro.agente_id = e.target.value; carica(); } }, h("option", { value: "" }, "Tutti gli agenti"),
+        (stato.agenti || []).map(a => h("option", { value: a.id, selected: String(a.id) === String(filtro.agente_id) ? "" : null }, a.nome)));
+      const err = h("input", { type: "checkbox", checked: filtro.solo_errori, onchange: (e) => { filtro.solo_errori = e.target.checked; carica(); } });
+      corpo.replaceChildren(
+        h("p", { class: "sotto" }, "Oggi: " + d.oggi.n + " lavori, " + d.oggi.errori + " con errore, " + _euroSN(d.oggi.costo) + ", durata media " + _durataSN(d.oggi.secondi_medi) + "."),
+        h("div", { class: "azioni" }, agenti, h("label", { style: "display:flex;gap:6px;align-items:center" }, err, "Solo gli errori")),
+        d.tracce.length ? h("div", { class: "tabella-scorre" }, h("table", {}, h("thead", {}, h("tr", {}, ["Quando", "Agente", "Richiesta", "Esito", "Durata", "Token", "Costo", "Passi"].map(x => h("th", {}, x)))),
+          h("tbody", {}, d.tracce.map(t => h("tr", { style: "cursor:pointer", title: "Apri la traccia", onclick: () => apriTraccia(t.id) },
+            h("td", {}, new Date(t.iniziata_il).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })), h("td", {}, t.agente || "—"),
+            h("td", {}, (t.richiesta || "").slice(0, 120)), h("td", {}, (t.stato === "errore" ? "⚠️ errore" : t.stato === "in_corso" ? "in corso" : "ok") + (t.voto ? (t.voto > 0 ? " 👍" : " 👎") : "")),
+            h("td", {}, _durataSN(t.secondi)), h("td", {}, ((t.token_input || 0) + (t.token_output || 0)).toLocaleString("it-IT")), h("td", {}, _euroSN(t.costo)),
+            h("td", {}, String(t.passi) + (t.figlie ? " + " + t.figlie + " collegati" : ""))))))) : h("p", { class: "sotto" }, "Ancora nessuna traccia."));
+    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return [h("h2", {}, "Scatola nera"),
+    h("p", { class: "aiuto" }, "Per ogni lavoro di un agente: le chiamate al modello con token e tempi, gli strumenti usati con dati e risultati, gli adattamenti del prompt, i passaggi a Claude, i colleghi interpellati e gli errori. Clicca una riga per vedere tutto, e dai un voto: servirà agli esami. Le tracce restano 30 giorni. Dalla chat la apri con «Come ci è arrivato»."),
+    corpo];
+}

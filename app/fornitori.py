@@ -423,7 +423,21 @@ def _chiama_locale(modello: str, istruzioni: str, messaggio: str, max_token: int
 
 def chiama_modello(fornitore: str, modello: str, istruzioni: str, messaggio: str, max_token: int = 1500,
                    web: dict | None = None) -> Risposta:
-    """fornitore: 'anthropic' | 'openai' | 'xai' | 'locale'. web: {'siti': [...], 'max_ricerche': n} (solo Anthropic per ora)."""
+    """fornitore: 'anthropic' | 'openai' | 'xai' | 'locale'. web: {'siti': [...], 'max_ricerche': n} (solo Anthropic per ora). Ogni chiamata entra nella scatola nera."""
+    import time as _t
+    from . import scatola_nera
+    t0 = _t.monotonic()
+    try:
+        r = _chiama_modello(fornitore, modello, istruzioni, messaggio, max_token, web)
+    except Exception as e:
+        scatola_nera.passo("errore", f"{fornitore} · {modello}", {"istruzioni": istruzioni, "messaggio": messaggio}, f"{type(e).__name__}: {e}", ms=int((_t.monotonic() - t0) * 1000))
+        raise
+    scatola_nera.passo("modello", f"{fornitore} · {modello}", {"istruzioni": istruzioni, "messaggio": messaggio}, r.testo,
+                       token_input=r.token_input, token_output=r.token_output, ms=int((_t.monotonic() - t0) * 1000))
+    return r
+
+
+def _chiama_modello(fornitore: str, modello: str, istruzioni: str, messaggio: str, max_token: int, web: dict | None) -> Risposta:
     if fornitore == "anthropic":
         return _chiama_anthropic(modello, istruzioni, messaggio, max_token, web)
     if fornitore == "openai":

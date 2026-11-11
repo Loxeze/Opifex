@@ -102,7 +102,8 @@ function vistaMemoriaVett() {
       riempi(stato, h("div", { class: "carta" },
         h("b", {}, d.indicizzati + " brani su " + d.pezzi + " ricercabili per significato (" + pc + "%)"),
         h("div", { class: "sotto" }, d.chiave ? "Da indicizzare: " + d.da_indicizzare + " · esclusi per riservatezza: " + d.esclusi_per_riservatezza + " · fasce consentite: " + (d.fasce_consentite.join(", ") || "nessuna") : "Manca la chiave OpenAI (Impostazioni): senza, resta la sola ricerca per parole."),
-        d.fasce_consentite.length ? "" : h("div", { class: "sotto" }, "Per indicizzare i documenti dichiara le garanzie di OpenAI in Sicurezza e garanzie.")));
+        d.fasce_consentite.length ? "" : h("div", { class: "sotto" }, "Per indicizzare i documenti dichiara le garanzie di OpenAI in Sicurezza e garanzie."),
+        sceltaVettori(d, carica)));
       riempi(temiBox, d.temi && d.temi.length ? [h("h3", {}, "Argomenti con più fonti (" + d.relazioni + " collegamenti)"), d.temi.map(t => h("div", { class: "carta", style: "margin-bottom:6px" }, h("b", {}, t.quanti + " documenti sullo stesso tema"), h("div", { class: "sotto" }, t.documenti.join(" · "))))] : h("p", { class: "sotto" }, "Collegamenti tra documenti: " + d.relazioni + ". Gli agenti ricevono l'indicazione quando esistono più fonti sullo stesso tema."));
       caricaBlocco();
       riempi(elenco, d.importazioni.length ? d.importazioni.map(i => h("div", { class: "carta", style: "margin-bottom:6px" },
@@ -333,4 +334,19 @@ function vistaMonitorSocial() {
     h("h3", {}, "Profili"), lista, h("h3", {}, "Rapporti"), h("div", { class: "azioni" }, rapp), rapporti, testoRapporto,
     h("h3", {}, "Collegamenti e frequenza"), stCol, h("p", { class: "aiuto" }, "YouTube: crea una chiave «YouTube Data API v3» (gratuita) nella console Google Cloud. Instagram: serve un account Instagram professionale collegato a una pagina Facebook e un'app Meta; il token e l'ID dell'account si ricavano da lì. Le chiavi si conservano cifrate e non vengono mai mostrate."),
     ytK, mTok, mId, h("label", {}, "Raccogli ogni (ore)", ore), h("label", {}, "Rapporto automatico ogni (giorni, 0 = mai)", gg), h("div", { class: "azioni" }, salva));
+}
+
+
+// Chi calcola le «impronte» dei testi per la ricerca per significato: OpenAI oppure i computer di Lorenzo (Ollama), dove nulla esce
+function sceltaVettori(d, ricarica) {
+  const forn = h("select", {}, h("option", { value: "openai" }, "OpenAI (il testo esce, solo le fasce consentite)"), h("option", { value: "locale" }, "I miei computer con Ollama (nulla esce, anche i riservati)"));
+  forn.value = d.fornitore || "openai";
+  const mod = h("input", { type: "text", maxlength: 120, value: d.modello_locale || "qwen3-embedding:0.6b", style: "max-width:260px" });
+  const msg = h("div");
+  const salva = h("button", { class: "s", type: "button", onclick: async () => {
+    try { await api("PUT", "/gestione/memoria-vettoriale/fornitore", { fornitore: forn.value, modello_locale: mod.value }); msg.replaceChildren(avviso("Salvato: le impronte si rifanno al prossimo giro (o con «Indicizza ora»).", "ok")); ricarica(); }
+    catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva");
+  return h("div", { style: "margin-top:10px" }, h("label", {}, "Chi calcola le impronte dei testi", forn),
+    h("label", {}, "Modello di embedding sui computer (da scaricare con «ollama pull»)", mod), h("div", { class: "azioni" }, salva),
+    h("p", { class: "sotto" }, "Cambiando, le impronte già calcolate vengono rifatte: non si confrontano impronte di modelli diversi. Se i computer sono spenti, la ricerca usa solo le parole."), msg);
 }

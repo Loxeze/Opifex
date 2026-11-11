@@ -11,6 +11,7 @@ from io import BytesIO
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import BaseModel, Field
 
 from . import fornitori
 from .db import connessione
@@ -34,7 +35,41 @@ class ErroreMemoria(Exception):
 
 
 # ---------- vettori ----------
-def _embed(testi: list[str]) -> list[list[float]]:
+MODELLO_LOCALE = "qwen3-embedding:0.6b"
+
+
+def configurazione(conn=None) -> dict:
+    """Chi calcola i vettori: 'openai' (testo verso OpenAI, solo le fasce consentite) o 'locale' (Ollama sui computer di Lorenzo: nulla esce, tutte le fasce)."""
+    def leggi(c):
+        r = {x["chiave"]: x["valore"] for x in c.execute("SELECT chiave, valore FROM impostazioni_sistema WHERE chiave IN ('memoria_vettori_fornitore', 'memoria_vettori_modello_locale')").fetchall()}
+        f = r.get("memoria_vettori_fornitore") or "openai"
+        m = r.get("memoria_vettori_modello_locale") or MODELLO_LOCALE
+        return {"fornitore": f if f in ("openai", "locale") else "openai", "modello_locale": m, "etichetta": ("locale:" + m) if f == "locale" else MODELLO}
+    if conn is not None:
+        return leggi(conn)
+    with connessione() as c:
+        return leggi(c)
+
+
+def _embed_locale(testi: list[str], modello: str) -> list[list[float]]:
+    """Ollama (/api/embed) sul primo computer acceso che ha il modello di embedding."""
+    for m in fornitori.macchine_locali():
+        nomi = fornitori.modelli_macchina(m["url"])
+        if nomi is None or (modello not in nomi and modello + ":latest" not in nomi):
+            continue
+        try:
+            r = httpx.post(m["url"] + "/api/embed", json={"model": modello, "input": [t[:8000] for t in testi]}, timeout=httpx.Timeout(300, connect=5))
+        except httpx.HTTPError:
+            continue
+        if r.status_code == 200 and isinstance(r.json().get("embeddings"), list) and len(r.json()["embeddings"]) == len(testi):
+            return r.json()["embeddings"]
+    raise ErroreMemoria(f"Nessun computer acceso ha il modello di embedding «{modello}» (sul portatile o sul fisso: ollama pull {modello})")
+
+
+def _embed(testi: list[str], conf: dict | None = None) -> list[list[float]]:
+    conf = conf or configurazione()
+    if conf["fornitore"] == "locale":
+        return _embed_locale(testi, conf["modello_locale"])
     chiave = fornitori.chiave("openai")
     if not chiave:
         raise ErroreMemoria("Chiave OpenAI non configurata")
@@ -62,6 +97,8 @@ def _bytes(v: list[float]) -> bytes:
 
 
 def fasce_consentite(conn) -> list[str]:
+    if configurazione(conn)["fornitore"] == "locale":
+        return ["pubblico", "interno", "riservato"]   # i vettori si calcolano sui computer di Lorenzo: nessun testo esce
     f = conn.execute("SELECT fascia_dati_max, non_conservazione_attiva, dpa_firmato FROM fornitori_ai WHERE nome = 'openai'").fetchone()
     if f is None:
         return []
@@ -74,13 +111,19 @@ def stato(conn) -> dict:
     fasce = fasce_consentite(conn)
     da_fare = conn.execute("SELECT count(*) AS n FROM pezzi_documenti p JOIN documenti d ON d.id = p.documento_id LEFT JOIN pezzi_vettori v ON v.pezzo_id = p.id WHERE v.pezzo_id IS NULL AND d.fascia_dati = ANY(%s)", (fasce,)).fetchone()["n"]
     esclusi = conn.execute("SELECT count(*) AS n FROM pezzi_documenti p JOIN documenti d ON d.id = p.documento_id LEFT JOIN pezzi_vettori v ON v.pezzo_id = p.id WHERE v.pezzo_id IS NULL AND NOT d.fascia_dati = ANY(%s)", (fasce,)).fetchone()["n"]
-    return {"pezzi": tot, "indicizzati": ind, "da_indicizzare": da_fare, "esclusi_per_riservatezza": esclusi, "fasce_consentite": fasce, "chiave": bool(fornitori.chiave("openai")), "modello": MODELLO}
+    return {"pezzi": tot, "indicizzati": ind, "da_indicizzare": da_fare, "esclusi_per_riservatezza": esclusi, "fasce_consentite": fasce, "chiave": bool(fornitori.chiave("openai")) or configurazione(conn)["fornitore"] == "locale", "modello": configurazione(conn)["etichetta"],
+            **{"fornitore": configurazione(conn)["fornitore"], "modello_locale": configurazione(conn)["modello_locale"]}}
 
 
 def indicizza(conn, massimo: int = MAX_PER_GIRO) -> int:
     """Calcola i vettori dei pezzi che ne sono privi (solo documenti la cui fascia puo' uscire). Restituisce quanti ne ha fatti."""
     if conn.execute("SELECT count(*) AS n FROM pezzi_vettori").fetchone()["n"] >= MAX_VETTORI:
         return 0
+    conf = configurazione(conn)
+    if conn.execute("SELECT 1 FROM pezzi_vettori WHERE modello <> %s LIMIT 1", (conf["etichetta"],)).fetchone():
+        conn.execute("DELETE FROM pezzi_vettori WHERE modello <> %s", (conf["etichetta"],))   # cambiato chi calcola i vettori: quelli vecchi non sono confrontabili
+        conn.execute("DELETE FROM documenti_relazioni")
+        conn.commit()
     fasce = fasce_consentite(conn)
     if not fasce:
         return 0
@@ -89,9 +132,9 @@ def indicizza(conn, massimo: int = MAX_PER_GIRO) -> int:
     fatti = 0
     for i in range(0, len(righe), LOTTO):
         gruppo = righe[i:i + LOTTO]
-        vett = _embed([r["testo"] for r in gruppo])
+        vett = _embed([r["testo"] for r in gruppo], conf)
         for r, v in zip(gruppo, vett):
-            conn.execute("INSERT INTO pezzi_vettori (pezzo_id, documento_id, vettore, modello) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING", (r["id"], r["documento_id"], _bytes(v), MODELLO))
+            conn.execute("INSERT INTO pezzi_vettori (pezzo_id, documento_id, vettore, modello) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING", (r["id"], r["documento_id"], _bytes(v), conf["etichetta"]))
             fatti += 1
         conn.commit()
     return fatti
@@ -100,11 +143,11 @@ def indicizza(conn, massimo: int = MAX_PER_GIRO) -> int:
 def _matrice_py(conn):
     import struct
     firma = conn.execute("SELECT count(*) AS n, COALESCE(max(pezzo_id), 0) AS m FROM pezzi_vettori").fetchone()
-    f = (firma["n"], firma["m"])
+    f = (firma["n"], firma["m"], configurazione(conn)["etichetta"])
     with _blocco:
         if _cache["firma"] == f and _cache["M"] is not None and _cache.get("py"):
             return _cache
-        righe = conn.execute("SELECT pezzo_id, documento_id, vettore FROM pezzi_vettori ORDER BY pezzo_id").fetchall()
+        righe = conn.execute("SELECT pezzo_id, documento_id, vettore FROM pezzi_vettori WHERE modello = %s ORDER BY pezzo_id", (configurazione(conn)["etichetta"],)).fetchall()
         M = [struct.unpack("<%de" % (len(bytes(r["vettore"])) // 2), bytes(r["vettore"])) for r in righe]
         _cache.update(firma=f, pezzi=[r["pezzo_id"] for r in righe], docs=[r["documento_id"] for r in righe], M=M, py=True)
         return _cache
@@ -116,11 +159,11 @@ def _matrice(conn):
     except ImportError:
         return _matrice_py(conn)
     firma = conn.execute("SELECT count(*) AS n, COALESCE(max(pezzo_id), 0) AS m FROM pezzi_vettori").fetchone()
-    f = (firma["n"], firma["m"])
+    f = (firma["n"], firma["m"], configurazione(conn)["etichetta"])
     with _blocco:
         if _cache["firma"] == f and _cache["M"] is not None and not _cache.get("py"):
             return _cache
-        righe = conn.execute("SELECT pezzo_id, documento_id, vettore FROM pezzi_vettori ORDER BY pezzo_id").fetchall()
+        righe = conn.execute("SELECT pezzo_id, documento_id, vettore FROM pezzi_vettori WHERE modello = %s ORDER BY pezzo_id", (configurazione(conn)["etichetta"],)).fetchall()
         _cache["py"] = False
         if not righe:
             _cache.update(firma=f, pezzi=np.zeros(0, dtype=np.int64), docs=np.zeros(0, dtype=np.int64), M=np.zeros((0, DIM), dtype=np.float32))
@@ -145,7 +188,7 @@ def cerca(conn, agente_id: int, messaggio: str, limite: int = 6) -> list[dict]:
     visibili = np.array([d["id"] for d in memoria.documenti_visibili(conn, agente_id)], dtype=np.int64)
     if len(visibili) == 0:
         return []
-    q = np.asarray(_embed([messaggio[:2000]])[0], dtype=np.float32)
+    q = np.asarray(_embed([messaggio[:2000]], configurazione(conn))[0], dtype=np.float32)
     q /= (np.linalg.norm(q) or 1.0)
     maschera = np.isin(c["docs"], visibili)
     if not maschera.any():
@@ -171,7 +214,7 @@ def _cerca_py(conn, agente_id: int, messaggio: str, limite: int) -> list[dict]:
     visibili = {d["id"] for d in memoria.documenti_visibili(conn, agente_id)}
     if not visibili:
         return []
-    q = _embed([messaggio[:2000]])[0]
+    q = _embed([messaggio[:2000]], configurazione(conn))[0]
     n = math.sqrt(sum(x * x for x in q)) or 1.0
     q = [x / n for x in q]
     punt = []
@@ -491,3 +534,21 @@ async def carica(file: UploadFile = File(...), per_tutti: bool = Form(True), u: 
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
     _azzera_cache()
     return {"id": iid}
+
+
+
+class Fornitore(BaseModel):
+    fornitore: str = Field(pattern="^(openai|locale)$")
+    modello_locale: str = Field(default=MODELLO_LOCALE, min_length=2, max_length=120)
+
+
+@router.put("/fornitore")
+def scegli_fornitore(d: Fornitore, _: dict = Depends(solo_titolare)):
+    """Cambiando chi calcola i vettori, quelli gia' calcolati vengono rifatti al prossimo giro di indicizzazione (non sono confrontabili tra modelli diversi)."""
+    with connessione() as conn:
+        for k, v in (("memoria_vettori_fornitore", d.fornitore), ("memoria_vettori_modello_locale", d.modello_locale.strip())):
+            conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (k, v))
+        with _blocco:
+            _cache.update(firma=None, M=None)
+        _azzera_cache()
+        return stato(conn)

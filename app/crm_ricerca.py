@@ -20,6 +20,7 @@ MAX_PER_ESECUZIONE = 40
 MAX_IN_ATTESA = 300
 SINCRONO = False
 RICERCA_ID: contextvars.ContextVar = contextvars.ContextVar("crm_ricerca_id", default=None)
+RADAR: contextvars.ContextVar = contextvars.ContextVar("crm_ricerca_radar", default=False)   # ricerca del Radar: segnali da notizie, recapiti non obbligatori
 POSTA_GENERICA = re.compile(r"^(info|contatti?|segreteria|amministrazione|ufficio|office|mail|posta|pec|protocollo)@", re.I)
 
 STRUMENTI = [{
@@ -30,7 +31,8 @@ STRUMENTI = [{
         "nome": {"type": "string"}, "ruolo": {"type": "string"}, "ente": {"type": "string"}, "email": {"type": "string"}, "telefono": {"type": "string"},
         "tipo": {"type": "string", "description": "categoria: museo, comune, universita, azienda, fondazione, associazione..."},
         "regione": {"type": "string"}, "provincia": {"type": "string", "description": "sigla, es. GE"}, "settore": {"type": "string"},
-        "fonte_url": {"type": "string"}, "motivo": {"type": "string"}},
+        "fonte_url": {"type": "string"}, "motivo": {"type": "string"},
+        "segnale": {"type": "string", "description": "solo in modalita' radar: che cosa dice la notizia o l'articolo, in una frase, con la data"}},
         "required": ["ente", "fonte_url", "motivo"]}}]
 AVVISO = ("\n\nRICERCA CONTATTI. Il tuo unico scopo e' trovare contatti MOLTO SPECIFICI: persone o uffici che rispondono esattamente ai criteri ricevuti (ruolo preciso, tipo di ente, zona, settore). "
           "Meglio 8 contatti centrati che 40 generici: se un risultato risponde solo in parte, NON proporlo. METODO: 1) riformula i criteri in 3-5 ricerche diverse (ruolo + tipo di ente + zona; pagine 'chi siamo', 'organigramma', 'contatti', "
@@ -92,7 +94,15 @@ def proponi(conn, agente_id: int, d: dict, stato: dict) -> str:
         return "ERRORE: il motivo deve spiegare in almeno 30 caratteri perche' risponde ai criteri."
     if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
         return "ERRORE: email non valida."
-    if not (email or tel or (nome and ruolo)):
+    segnale = (d.get("segnale") or "").strip()[:500]
+    if RADAR.get():
+        if len(segnale) < 20:
+            return "ERRORE: in modalita' radar serve il segnale: che cosa dice la notizia, con la data (almeno 20 caratteri)."
+        if conn.execute("SELECT 1 FROM crm_proposte WHERE fonte_url = %s AND stato <> 'scartata' LIMIT 1", (fonte[:500],)).fetchone():
+            stato["scartati"] += 1
+            _conta(conn, stato, "scartate")
+            return "SCARTATO: questa notizia e' gia' stata segnalata. Passa alla successiva."
+    elif not (email or tel or (nome and ruolo)):
         return "ERRORE: serve un recapito (email o telefono) oppure nome e ruolo."
     if conn.execute("SELECT count(*) AS n FROM crm_proposte WHERE stato = 'proposta'").fetchone()["n"] >= MAX_IN_ATTESA:
         return "ERRORE: ci sono troppe proposte in attesa di approvazione: fermati e segnalalo nel riepilogo."
@@ -103,11 +113,11 @@ def proponi(conn, agente_id: int, d: dict, stato: dict) -> str:
         _conta(conn, stato, "scartate")
         return "SCARTATO: contatto gia' presente nel CRM o tra le proposte. Passa al successivo."
     c = crm._c
-    conn.execute("""INSERT INTO crm_proposte (ricerca_id, agente_id, nome_cifrato, ente_cifrato, email_cifrata, telefono_cifrato, email_hash, ruolo, tipo, regione, provincia, settore, fonte_url, motivo)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+    conn.execute("""INSERT INTO crm_proposte (ricerca_id, agente_id, nome_cifrato, ente_cifrato, email_cifrata, telefono_cifrato, email_hash, ruolo, tipo, regione, provincia, settore, fonte_url, motivo, segnale)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                  (RICERCA_ID.get(), agente_id, c(nome), c(ente), c(email), c(tel), eh, ruolo[:120] or None, (d.get("tipo") or "").strip().lower()[:60] or None,
                   (d.get("regione") or "").strip()[:60].title() or None, (d.get("provincia") or "").strip()[:60].upper() or None, (d.get("settore") or "").strip()[:80] or None,
-                  fonte[:500], motivo[:600]))
+                  fonte[:500], motivo[:600], segnale or None))
     stato["n"] += 1
     _conta(conn, stato, "proposte")
     avv = " (indirizzo generico: segnalalo nel riepilogo)" if email and POSTA_GENERICA.match(email) else ""
@@ -148,25 +158,32 @@ def _esegui(rid: int):
         with connessione() as conn:
             r = conn.execute("SELECT * FROM crm_ricerche WHERE id = %s", (rid,)).fetchone()
         RICERCA_ID.set(rid)
+        RADAR.set(bool(r.get("tema_id")))
         ris = esegui_agente(r["agente_id"], _prompt(r), "interno", None, max_token=2500)
         with connessione() as conn:
             conn.execute("UPDATE crm_ricerche SET stato='conclusa', esito=%s, conclusa_il=NOW() WHERE id=%s", ((ris.get("risposta") or "")[:3000], rid))
             n = conn.execute("SELECT proposte FROM crm_ricerche WHERE id=%s", (rid,)).fetchone()["proposte"]
-            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"Ricerca contatti conclusa: {n} proposte da approvare nel CRM.",))
+            if r.get("tema_id"):
+                t = conn.execute("SELECT nome FROM radar_temi WHERE id=%s", (r["tema_id"],)).fetchone()
+                if n:   # il Radar avvisa solo quando trova qualcosa
+                    conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"Radar «{t['nome'] if t else 'tema'}»: {n} segnalazioni nuove da valutare nel CRM (con l'articolo da cui nascono).",))
+            else:
+                conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"Ricerca contatti conclusa: {n} proposte da approvare nel CRM.",))
     except Exception as e:  # noqa: BLE001
         with connessione() as conn:
             conn.execute("UPDATE crm_ricerche SET stato='errore', esito=%s, conclusa_il=NOW() WHERE id=%s", (str(e)[:300], rid))
     finally:
         RICERCA_ID.set(None)
+        RADAR.set(False)
 
 
-def avvia(conn, criteri: str, quantita: int) -> int:
+def avvia(conn, criteri: str, quantita: int, tema_id: int | None = None) -> int:
     ag = conn.execute("SELECT id FROM agenti WHERE nome = %s AND attivo", (NOME_AGENTE,)).fetchone()
     if ag is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Il Ricercatore contatti non e' attivo")
     if conn.execute("SELECT 1 FROM crm_ricerche WHERE stato='in_corso' AND creata_il > NOW() - interval '1 hour'").fetchone():
         raise HTTPException(status.HTTP_409_CONFLICT, "C'e' gia' una ricerca in corso")
-    rid = conn.execute("INSERT INTO crm_ricerche (criteri, quantita, agente_id) VALUES (%s,%s,%s) RETURNING id", (criteri.strip(), quantita, ag["id"])).fetchone()["id"]
+    rid = conn.execute("INSERT INTO crm_ricerche (criteri, quantita, agente_id, tema_id) VALUES (%s,%s,%s,%s) RETURNING id", (criteri.strip(), quantita, ag["id"], tema_id)).fetchone()["id"]
     conn.commit()
     if SINCRONO:
         _esegui(rid)
@@ -197,12 +214,14 @@ def _dec(v):
 @router.get("")
 def vista(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        prop = conn.execute("""SELECT id, ricerca_id, nome_cifrato, ente_cifrato, email_cifrata, telefono_cifrato, ruolo, tipo, regione, provincia, settore, fonte_url, motivo, creata_il
-                               FROM crm_proposte WHERE stato = 'proposta' ORDER BY id LIMIT 300""").fetchall()
+        prop = conn.execute("""SELECT p.id, p.ricerca_id, p.nome_cifrato, p.ente_cifrato, p.email_cifrata, p.telefono_cifrato, p.ruolo, p.tipo, p.regione, p.provincia, p.settore, p.fonte_url, p.motivo,
+                                      p.segnale, p.creata_il, t.nome AS tema
+                               FROM crm_proposte p LEFT JOIN crm_ricerche r ON r.id = p.ricerca_id LEFT JOIN radar_temi t ON t.id = r.tema_id
+                               WHERE p.stato = 'proposta' ORDER BY p.id LIMIT 300""").fetchall()
         return {"attivo": conn.execute("SELECT 1 FROM agenti WHERE nome=%s AND attivo", (NOME_AGENTE,)).fetchone() is not None,
                 "proposte": [{"id": p["id"], "ricerca_id": p["ricerca_id"], "nome": _dec(p["nome_cifrato"]), "ente": _dec(p["ente_cifrato"]), "email": _dec(p["email_cifrata"]),
                               "telefono": _dec(p["telefono_cifrato"]), "ruolo": p["ruolo"], "tipo": p["tipo"], "regione": p["regione"], "provincia": p["provincia"],
-                              "settore": p["settore"], "fonte_url": p["fonte_url"], "motivo": p["motivo"]} for p in prop],
+                              "settore": p["settore"], "fonte_url": p["fonte_url"], "motivo": p["motivo"], "segnale": p["segnale"], "tema": p["tema"]} for p in prop],
                 "ricerche": conn.execute("SELECT id, criteri, quantita, stato, proposte, scartate, esito, creata_il, conclusa_il FROM crm_ricerche ORDER BY id DESC LIMIT 6").fetchall(),
                 "liste": conn.execute("SELECT id, nome FROM crm_liste ORDER BY id DESC LIMIT 50").fetchall()}
 
@@ -233,7 +252,7 @@ def decidi(d: Decisione, _: dict = Depends(solo_titolare)):
                 doppi += 1
                 conn.execute("UPDATE crm_proposte SET stato='scartata', decisa_il=NOW() WHERE id=%s", (r["id"],))
                 continue
-            nota = f"Fonte: {r['fonte_url']}" + (f" · Ruolo: {r['ruolo']}" if r["ruolo"] else "") + f" · Motivo: {r['motivo']}"
+            nota = f"Fonte: {r['fonte_url']}" + (f" · Ruolo: {r['ruolo']}" if r["ruolo"] else "") + (f" · Segnale: {r['segnale']}" if r.get("segnale") else "") + f" · Motivo: {r['motivo']}"
             conn.execute("""INSERT INTO crm_contatti (lista_id, tipo, regione, provincia, settore, relazione, nome_cifrato, ente_cifrato, email_cifrata, telefono_cifrato, note_cifrate, email_hash)
                             VALUES (%s,%s,%s,%s,%s,'nessuna',%s,%s,%s,%s,%s,%s)""",
                          (lista, r["tipo"] or "altro", r["regione"], r["provincia"], r["settore"], r["nome_cifrato"], r["ente_cifrato"], r["email_cifrata"], r["telefono_cifrato"],

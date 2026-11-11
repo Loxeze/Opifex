@@ -439,3 +439,9 @@ i.task{background:var(--avv)}i.ritardo{background:var(--no)}i.milestone{backgrou
 .macchina label.mini{flex:0 0 92px;font-size:.78rem;margin:0}.macchina label.mini input{width:100%}
 .portatili{display:flex;flex-direction:column;gap:14px}
 .portatili .portatile + .portatile{border-top:1px solid var(--bordo, #8883);padding-top:12px}
+.sn-velo{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:900;display:flex;align-items:flex-start;justify-content:center;padding:4vh max(16px, env(safe-area-inset-right, 0px)) 4vh max(16px, env(safe-area-inset-left, 0px));overflow:auto}
+.sn-finestra{background:var(--carta2, #2a211b);color:var(--testo, #eee);border-radius:14px;padding:18px;width:min(980px,100%);box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.sn-traccia{display:flex;flex-direction:column;gap:6px;margin-top:10px}.sn-figlia{margin-left:18px;padding-left:12px;border-left:2px solid var(--bordo, #8884)}
+.sn-passo summary{cursor:pointer;padding:4px 0}.sn-passo.sn-errore summary{color:#E06B5F}
+.sn-pre{white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto;font-size:12px;background:rgba(0,0,0,.18);padding:8px;border-radius:8px;margin:4px 0}
+.tabella-scorre{overflow-x:auto}

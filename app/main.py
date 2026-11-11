@@ -82,6 +82,8 @@ from .rotte_crm_schede import router as router_crm_schede
 from .rotte_crm_modello import router as router_crm_modello
 from .rotte_crm_imprese import router as router_crm_imprese
 from .crm_ricerca import router as router_crm_ricerca
+from .radar import router as router_radar
+from .scatola_nera import router as router_scatola_nera
 from .n8n import router as router_n8n
 from .preparazione import router as router_preparazione
 from .novita import router as router_novita
@@ -197,6 +199,7 @@ async def _manutenzione():
         _passo("eventi", lambda c: eventi.pulisci(c))
         _passo("riepilogo giornaliero dell'uso", lambda c: __import__("app.uso_misure", fromlist=["x"]).aggrega(c))
         _passo("promemoria CRM", crm_schede.promemoria)
+        _passo("Radar (notizie, clienti, collaboratori)", lambda c: __import__("app.radar", fromlist=["x"]).giro(c))
         _passo("proposte sentinelle", lambda c: proposte_sentinelle.scansiona(c) if proposte_sentinelle.da_fare(c) else None)
     await asyncio.sleep(90)
     while True:
@@ -382,6 +385,8 @@ app.include_router(router_crm_schede)
 app.include_router(router_crm_modello)
 app.include_router(router_crm_imprese)
 app.include_router(router_crm_ricerca)
+app.include_router(router_radar)
+app.include_router(router_scatola_nera)
 app.include_router(router_n8n)
 app.include_router(router_pwa)
 app.include_router(router_dossier)

@@ -2,7 +2,7 @@
 // Contatti (CRM): liste, importazione CSV, riepilogo aggregato e ricerca. I dati personali sono cifrati sul server; gli agenti vedono solo conteggi.
 
 function vistaCrm() {
-  const TAB = [["cruscotto", "Cruscotto"], ["schede", "Contatti"], ["ricontattare", "Da ricontattare"], ["pipeline", "Opportunità"], ["ricerca", "Ricerca contatti"], ["campi", "Campi e categorie"], ["liste", "Liste"]];
+  const TAB = [["cruscotto", "Cruscotto"], ["schede", "Contatti"], ["ricontattare", "Da ricontattare"], ["pipeline", "Opportunità"], ["radar", "Radar"], ["ricerca", "Ricerca contatti"], ["campi", "Campi e categorie"], ["liste", "Liste"]];
   if (!stato.crmTab) stato.crmTab = "cruscotto";
   const corpo = h("div");
   const tabs = h("div", { class: "azioni", style: "margin-bottom:12px;align-items:center" }, TAB.map(([id, nome]) => h("button", { class: stato.crmTab === id ? "p" : "s", onclick: () => { stato.crmTab = id; disegna(); } }, nome)));
@@ -19,6 +19,7 @@ function vistaCrm() {
   else if (stato.crmTab === "ricontattare") corpo.append(...[].concat(crmSchede("da_ricontattare")));
   else if (stato.crmTab === "pipeline") corpo.append(...[].concat(crmBacheca()));
   else if (stato.crmTab === "ricerca") corpo.append(...[].concat(crmRicerca()));
+  else if (stato.crmTab === "radar") corpo.append(...[].concat(crmRadar(), crmRicerca(true)));
   else if (stato.crmTab === "campi") corpo.append(...[].concat(campiPersonalizzati()));
   else corpo.append(...[].concat(crmListe()));
   return [h("h2", {}, "CRM"), tabs, importa, corpo];
@@ -87,7 +88,7 @@ function ricercaCrm() {
 
 
 // Ricerca contatti: il Ricercatore cerca online contatti molto specifici; qui si approvano prima che entrino nel CRM.
-function crmRicerca() {
+function crmRicerca(soloProposte) {
   const box = h("div"), msg = h("div");
   const criteri = h("textarea", { rows: 4, placeholder: "Es.: direttori e conservatori di musei civici in Toscana e Liguria, con email nominativa di lavoro (non info@). Escludi musei privati.", style: "width:100%" });
   const quanti = h("input", { type: "number", min: 1, max: 40, value: 15, style: "width:70px" });
@@ -111,6 +112,7 @@ function crmRicerca() {
         h("input", { type: "checkbox", checked: sel.has(p.id), onchange: ev => { ev.target.checked ? sel.add(p.id) : sel.delete(p.id); } }), " ",
         h("strong", {}, p.nome || p.ente), p.nome ? " · " + p.ente : "", p.ruolo ? " · " + p.ruolo : "",
         h("div", { class: "sotto" }, [p.email, p.telefono, [p.provincia, p.regione].filter(Boolean).join(" ")].filter(Boolean).join(" · ")),
+        p.tema ? h("div", { class: "sotto" }, "📡 Radar «" + p.tema + "»" + (p.segnale ? ": " + p.segnale : "")) : null,
         h("div", { class: "sotto" }, "Perché: " + p.motivo), h("a", { href: p.fonte_url, target: "_blank", rel: "noopener noreferrer", class: "sotto" }, "Fonte: " + p.fonte_url)));
       const tutte = h("button", { class: "s", type: "button" }, "Seleziona tutte");
       tutte.addEventListener("click", () => { d.proposte.forEach(p => sel.add(p.id)); carica(); });
@@ -123,6 +125,56 @@ function crmRicerca() {
   };
   carica();
   ticker(box, carica, 15000);
+  if (soloProposte) return [msg, box];
   return [h("p", { class: "aiuto" }, "Il Ricercatore contatti (reparto CRM, modello economico) cerca online contatti molto specifici. Nulla entra nel CRM da solo: ogni proposta ha la sua fonte e la approvi tu. Solo dati professionali pubblici; nomi e recapiti sono cifrati."),
     h("label", {}, "Che contatti cerchi? (ruolo preciso, tipo di ente, zona, cosa escludere)", criteri), h("div", { class: "azioni" }, h("label", {}, "Quanti al massimo ", quanti), va), msg, box];
+}
+
+
+// Radar: temi da tenere d'occhio su notizie, articoli e blog; le segnalazioni arrivano nella lista da approvare qui sotto
+function crmRadar() {
+  const box = h("div"), msg = h("div");
+  const TIPI = [["cliente", "Clienti"], ["collaboratore", "Collaboratori"], ["partner", "Partner"], ["opportunita", "Opportunità e bandi"]];
+  const OGNI = [[1, "ogni giorno"], [2, "ogni 2 giorni"], [7, "ogni settimana"]];
+  const modulo = (t, fatto) => {
+    const nome = h("input", { type: "text", maxlength: 80, value: t.nome || "", placeholder: "Es.: Comuni che investono nel turismo culturale" });
+    const tipo = h("select", {}, TIPI.map(([v, n]) => h("option", { value: v }, n))); tipo.value = t.tipo || "cliente";
+    const descr = h("textarea", { rows: 3, style: "width:100%", placeholder: "Che cosa cerchi e perché ti interessa. Es.: comuni e GAL di Liguria, Toscana e Piemonte che annunciano progetti di valorizzazione di borghi, castelli o musei, o che hanno ottenuto fondi PNRR/FESR per il patrimonio: potrebbero aver bisogno di contenuti digitali, app o video (Renovatio, Logos)." }, t.descrizione || "");
+    const ogni = h("select", {}, OGNI.map(([v, n]) => h("option", { value: v }, n))); ogni.value = String(t.giorni || 1);
+    const quanti = h("input", { type: "number", min: 1, max: 40, value: t.quantita || 10, style: "width:70px" });
+    const salva = h("button", { class: "p", type: "button" }, t.id ? "Salva" : "Aggiungi il tema");
+    salva.addEventListener("click", async () => {
+      const corpo_ = { nome: nome.value, tipo: tipo.value, descrizione: descr.value, giorni: Number(ogni.value), quantita: Number(quanti.value) || 10, attivo: t.attivo !== false };
+      try { await api(t.id ? "PUT" : "POST", "/gestione/radar" + (t.id ? "/" + t.id : ""), corpo_); msg.replaceChildren(avviso("Salvato.", "ok")); fatto(); }
+      catch (e) { msg.replaceChildren(avviso(e.message, "no")); }
+    });
+    return h("div", { class: "carta" }, h("label", {}, "Nome del tema", nome), h("label", {}, "Che cosa cerca", tipo), h("label", {}, "Descrizione (più è precisa, migliori i risultati)", descr),
+      h("div", { class: "azioni" }, h("label", {}, "Frequenza ", ogni), h("label", {}, "Segnalazioni al massimo ", quanti), salva));
+  };
+  const carica = async () => {
+    try {
+      const d = await api("GET", "/gestione/radar");
+      const nuovo = h("div");
+      riempi(box, [d.attivo ? null : avviso("Il Ricercatore contatti non è attivo: il Radar si appoggia a lui.", "avv"),
+        d.temi.length ? d.temi.map(t => {
+          const dett = h("div");
+          return h("div", { class: "carta", style: "margin-bottom:8px" },
+            h("div", { class: "nome" }, (t.attivo ? "📡 " : "⏸ ") + t.nome),
+            h("div", { class: "sotto" }, (TIPI.find(x => x[0] === t.tipo) || [0, t.tipo])[1] + " · " + (OGNI.find(x => x[0] === t.giorni) || [0, "ogni " + t.giorni + " giorni"])[1]
+              + " · " + t.segnalazioni + " segnalazioni, " + t.approvate + " entrate nel CRM" + (t.ultima_il ? " · ultimo giro " + new Date(t.ultima_il).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : " · mai girato")),
+            h("p", { class: "sotto" }, t.descrizione),
+            h("div", { class: "azioni" },
+              h("button", { class: "s", type: "button", onclick: async () => { try { await api("POST", "/gestione/radar/" + t.id + "/ora"); msg.replaceChildren(avviso("Giro avviato: le segnalazioni compaiono qui sotto in qualche minuto.", "ok")); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Fai un giro adesso"),
+              h("button", { class: "s", type: "button", onclick: async () => { try { await api("PUT", "/gestione/radar/" + t.id, { ...t, attivo: !t.attivo }); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, t.attivo ? "Metti in pausa" : "Riattiva"),
+              h("button", { class: "s", type: "button", onclick: () => dett.replaceChildren(modulo(t, carica)) }, "Modifica"),
+              h("button", { class: "s", type: "button", onclick: async () => { try { await api("DELETE", "/gestione/radar/" + t.id); carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Elimina")),
+            dett);
+        }) : h("p", { class: "sotto" }, "Nessun tema ancora: aggiungine uno qui sotto."),
+        h("div", { class: "azioni" }, h("button", { class: "p", type: "button", onclick: () => nuovo.replaceChildren(modulo({}, () => { nuovo.replaceChildren(); carica(); })) }, "+ Nuovo tema")), nuovo]);
+    } catch (e) { mostraErrore(box, e, carica); }
+  };
+  carica();
+  return [h("h3", {}, "Radar"),
+    h("p", { class: "aiuto" }, "Il Radar legge notizie, articoli di giornale, blog e comunicati e ti segnala potenziali clienti, collaboratori, partner e opportunità. Ogni tema ha la sua frequenza. Le segnalazioni arrivano qui sotto con l'articolo da cui nascono e il motivo: nulla entra nel CRM senza il tuo sì e nessuno viene contattato."),
+    msg, box, h("h3", {}, "Segnalazioni e proposte da valutare")];
 }

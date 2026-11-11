@@ -52,7 +52,7 @@ tmp = Path(tempfile.mkdtemp()); backup.CARTELLA = tmp / "bk"; backup.FILE_ENV = 
 ginnasio.SINCRONO = True
 az = sql("INSERT INTO aziende (nome, colore) VALUES ('Renovatio', '#3fd3c0') RETURNING id")[0][0]
 import hashlib, zipfile, io, re as _re
-def fake_embed(testi):
+def fake_embed(testi, *_a):
     # vettori di prova: concetti -> dimensioni (sinonimi condividono la dimensione)
     gruppi = [("auto", "macchina", "veicolo"), ("mare", "spiaggia", "oceano"), ("bando", "finanziamento", "contributo"), ("sito", "web", "pagina")]
     out = []
@@ -63,6 +63,7 @@ def fake_embed(testi):
         v[100 + sum(map(ord, tl)) % 50] = 0.01
         out.append(v)
     return out
+vero_embed = mv._embed
 mv._embed = fake_embed
 mv.SINCRONO = True
 fasce_sql = lambda: sql("UPDATE fornitori_ai SET non_conservazione_attiva=TRUE, dpa_firmato=TRUE, fascia_dati_max='riservato' WHERE nome='openai'")
@@ -105,7 +106,7 @@ with TestClient(app) as c:
         ok("pezzi_pertinenti usa il significato anche senza parole comuni", any(r["nome"] == "Parco veicoli" for r in ib), str([r["nome"] for r in ib]))
         ok("nessun pezzo ripetuto", len({(r["documento_id"], r["testo"][:80]) for r in ib}) == len(ib))
         # fallback: se l'embedding fallisce resta la ricerca per parole
-        def rotto(t): raise mv.ErroreMemoria("giu'")
+        def rotto(t, *_a): raise mv.ErroreMemoria("giu'")
         mv._embed = rotto
         ib = documenti.pezzi_pertinenti(cn, marco, "manutenzione macchina aziendale", 4)
         ok("se i vettori falliscono resta la ricerca per parole", any(r["nome"] == "Parco veicoli" for r in ib))
@@ -146,4 +147,40 @@ with TestClient(app) as c:
     ok("Carla non puo' importare", c.post("/gestione/memoria-vettoriale/importa", headers=HC, files={"file": ("a.json", b'[]')}).status_code == 403)
     # senza chiave: nessun errore per gli agenti
     ok("memoria indicizzata cancellata col documento", (sql("DELETE FROM documenti WHERE id=%s", (d_mare,)), sql("SELECT count(*) FROM pezzi_vettori WHERE documento_id=%s", (d_mare,))[0][0] == 0)[1])
+    # ---------- impronte calcolate sui computer di Lorenzo (Ollama) ----------
+    import threading, json as _j
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from app import fornitori as _fo
+    chiamate_emb = []
+    class HE(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def _j(self, o):
+            b_ = _j.dumps(o).encode(); self.send_response(200); self.send_header("content-type", "application/json"); self.send_header("content-length", str(len(b_))); self.end_headers(); self.wfile.write(b_)
+        def do_GET(self): self._j({"models": [{"name": "qwen3-embedding:0.6b"}]})
+        def do_POST(self):
+            corpo = _j.loads(self.rfile.read(int(self.headers.get("content-length", 0))) or b"{}"); chiamate_emb.append(corpo)
+            self._j({"embeddings": fake_embed(corpo["input"])})
+    srv = ThreadingHTTPServer(("127.0.0.1", 11571), HE); threading.Thread(target=srv.serve_forever, daemon=True).start()
+    sql("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('locale_url','http://127.0.0.1:11571') ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore")
+    _fo._TAGS.clear()
+    mv._embed = vero_embed
+    sql("UPDATE fornitori_ai SET fascia_dati_max='pubblico' WHERE nome='openai'")   # verso OpenAI nulla di interno o riservato
+    r = c.put("/gestione/memoria-vettoriale/fornitore", headers=H, json={"fornitore": "locale", "modello_locale": "qwen3-embedding:0.6b"})
+    ok("scelta: impronte sui computer locali, tutte le fasce ammesse", r.status_code == 200 and r.json()["fornitore"] == "locale" and r.json()["fasce_consentite"] == ["pubblico", "interno", "riservato"], r.text[:300])
+    riserv = sql("INSERT INTO documenti (nome, fascia_dati, per_tutti, contenuto) VALUES ('Contratto segreto', 'riservato', TRUE, 'x') RETURNING id")[0][0] if False else None
+    with connessione() as cn:
+        n = mv.indicizza(cn)
+        etich = sql("SELECT DISTINCT modello FROM pezzi_vettori")
+    ok("cambiando chi calcola, le impronte vecchie si rifanno con il modello locale", n > 0 and etich == [("locale:qwen3-embedding:0.6b",)] and chiamate_emb and chiamate_emb[0]["model"] == "qwen3-embedding:0.6b", str(etich))
+    with connessione() as cn:
+        ib = documenti.pezzi_pertinenti(cn, marco, "manutenzione macchina aziendale", 4)
+    ok("ricerca per significato con le impronte locali", any(r["nome"] == "Parco veicoli" for r in ib), str([r["nome"] for r in ib]))
+    srv.shutdown(); srv.server_close(); _fo._TAGS.clear()
+    with connessione() as cn:
+        ib = documenti.pezzi_pertinenti(cn, marco, "manutenzione macchina aziendale", 4)
+    ok("computer spenti: resta la ricerca per parole, senza errori", isinstance(ib, list))
+    try:
+        with connessione() as cn: mv.indicizza(cn); e_ = None
+    except mv.ErroreMemoria as ex: e_ = ex
+    ok("computer spenti: l'indicizzazione dice che cosa manca", e_ is None or "ollama pull qwen3-embedding:0.6b" in str(e_), str(e_))
 print("TOTALE", sum(ris), "/", len(ris))

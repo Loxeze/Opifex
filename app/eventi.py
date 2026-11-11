@@ -29,6 +29,8 @@ def riassunto_strumento(nome: str, dati: dict) -> str:
 
 
 def strumento(nome: str, dati: dict, esito: str):
+    from . import scatola_nera
+    scatola_nera.passo("errore" if str(esito or "").lstrip().startswith("ERRORE") else "strumento", nome, dati, esito)
     c = CONTESTO.get()
     if not c:
         return
@@ -59,3 +61,5 @@ def attivita(conn, agente_id: int, limite: int = 30) -> dict:
 
 def pulisci(conn):
     conn.execute("DELETE FROM eventi_lavoro WHERE creato_il < NOW() - make_interval(days => %s)", (GIORNI_CONSERVAZIONE,))
+    from . import scatola_nera
+    scatola_nera.pulisci(conn)

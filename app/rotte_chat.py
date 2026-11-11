@@ -63,7 +63,7 @@ def _messaggio(r: dict) -> dict:
             "attesa_s": r.get("attesa_s"), "iniziato_il": r.get("iniziato_il"), "fase": r.get("fase"), "annullata": bool(r.get("annullata")),
             "risposta": x.get("risposta"), "file": x.get("file_creati") or [], "token": (x.get("token_input") or 0) + (x.get("token_output") or 0),
             "usati": x.get("documenti_usati") or [], "esclusi": x.get("documenti_esclusi_per_riservatezza") or [], "avvisi": x.get("avvisi") or [],
-            "allegati": x.get("allegati_letti") or [], "allegati_troncati": x.get("allegati_troncati") or []}
+            "allegati": x.get("allegati_letti") or [], "allegati_troncati": x.get("allegati_troncati") or [], "traccia": x.get("traccia")}
 
 
 @router.get("/chat/conversazioni/{agente_id}")

@@ -16,7 +16,7 @@ PROVA_ISTRUZIONI = contextvars.ContextVar('prova_istruzioni', default=None)   # 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai', 'locale')   # chi sa usare gli strumenti degli agenti
 from . import banco, creativi, best_practice, archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
 from . import progresso, n8n as n8n_mod, crm_contatti_agenti, ricerca_profonda, finestre, brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta
-from . import strumenti_social, delega_online, budget_prompt, cantiere
+from . import strumenti_social, delega_online, budget_prompt, cantiere, scatola_nera
 from . import vademecum, note_aurora, scheda_impresa
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
@@ -134,6 +134,7 @@ def _adatta_locale(conn, a: dict, agente_id: int, utente_id, fascia_dati: str, t
         if attivo and m is not None and fornitori.chiave("anthropic") and puo_uscire(fascia_dati, a["fascia_dati_max"], m["ff"], m["nc"], m["dpa"])[0]:
             conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s, 'passaggio_online_finestra', %s::jsonb, %s)",
                          (agente_id, json.dumps({"finestra": finestra, "token_essenziali": base, "modello": m["nome"]}), utente_id))
+            scatola_nera.passo("nota", "passaggio a Claude", {"finestra_locale": finestra, "token_essenziali": base}, f"Il prompt non entrava nella finestra del modello locale: questo passaggio lo svolge {m['nome']}")
             return testo, {**a, "fornitore": "anthropic", "fornitore_id": m["fornitore_id"], "modello_id": m["modello_id"], "modello_nome": m["nome"],
                            "costo_input_per_milione": m["ci"], "costo_output_per_milione": m["co"], "fascia_fornitore": m["ff"],
                            "non_conservazione_attiva": m["nc"], "dpa_firmato": m["dpa"]}, [t for g in gruppi for t in g[0]] or extra, "".join(g[1] for g in gruppi) or avviso
@@ -144,6 +145,7 @@ def _adatta_locale(conn, a: dict, agente_id: int, utente_id, fascia_dati: str, t
     nuovo = pezzi["testa"] + (("\n\n=====\n\n".join(corpo) + "\n\n=== Richiesta ===\n") if corpo else "") + pezzi["richiesta"]
     conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s, 'prompt_a_budget', %s::jsonb, %s)",
                  (agente_id, json.dumps({"finestra": finestra, "omessi": omessi, "accorciati": accorciati, "strumenti_non_caricati": fuori}), utente_id))
+    scatola_nera.passo("nota", "prompt a budget", {"finestra_locale": finestra}, {"omessi": omessi, "accorciati": accorciati, "strumenti_non_caricati": fuori})
     return anonimizza(nuovo), a, extra, avviso
 
 
@@ -156,6 +158,8 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
     tk = eventi.CONTESTO.set({"agente": agente_id, "richiesta": richiesta})
     t0 = time.monotonic()
     eventi.registra(agente_id, "inizio", " ".join(str(messaggio or "").split())[:150], richiesta_id=richiesta)
+    tid = scatola_nera.apri(agente_id, messaggio, utente_id, cantiere._origine())
+    tk_tr = scatola_nera.TRACCIA.set(tid or scatola_nera.TRACCIA.get())
     try:
         with connessione() as _c:
             _r = _c.execute("SELECT sforzo, passi_max FROM agenti WHERE id = %s", (agente_id,)).fetchone()
@@ -173,11 +177,16 @@ def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
             agente_browser.PASSI_AGENTE.reset(tk_p)
     except Exception as e:  # noqa: BLE001 - si registra e si rilancia: il comportamento non cambia
         eventi.registra(agente_id, "errore", f"{type(e).__name__}: {str(e)[:200]}", richiesta_id=richiesta, durata_ms=int((time.monotonic() - t0) * 1000))
+        scatola_nera.chiudi(tid, errore=f"{type(e).__name__}: {e}")
         raise
     else:
         eventi.registra(agente_id, "fine", "risposta scritta", richiesta_id=richiesta, token=out.get("token_input", 0) + out.get("token_output", 0), durata_ms=int((time.monotonic() - t0) * 1000))
+        scatola_nera.chiudi(tid, risposta=out.get("risposta") or "", token_input=out.get("token_input", 0), token_output=out.get("token_output", 0))
+        if tid:
+            out["traccia"] = tid
         return out
     finally:
+        scatola_nera.TRACCIA.reset(tk_tr)
         eventi.CONTESTO.reset(tk)
 
 

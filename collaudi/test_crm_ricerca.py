@@ -96,4 +96,53 @@ with TestClient(app) as c:
     ok("Esploratore in Sviluppo software, sotto il Capo sviluppo, con web e sandbox", r[0] == "Sviluppo software" and r[1] and r[2] and r[4] == "Capo sviluppo", str(r[:3]) + r[4])
     ok("licenza, attivita', prova in sandbox, mai fuori dalla sandbox", all(x in r[3] for x in ("licenza", "sandbox", "GitHub", "18 mesi")))
     ok("competenze necessarie", sql("SELECT count(*) FROM competenze_necessarie WHERE agente_id=%s", (eid,))[0][0] == 4)
+    # ---------- Radar ----------
+    from app import radar
+    sql("UPDATE crm_ricerche SET stato='conclusa'")
+    t = c.post("/gestione/radar", headers=H, json={"nome": "Comuni e borghi", "tipo": "cliente", "descrizione": "Comuni della Liguria che annunciano progetti di valorizzazione di borghi e castelli", "giorni": 1, "quantita": 5})
+    ok("radar: tema creato", t.status_code == 201, t.text); tid = t.json()["id"]
+    ok("radar: dati sbagliati rifiutati", c.post("/gestione/radar", headers=H, json={"nome": "x", "tipo": "boh", "descrizione": "corta"}).status_code == 422)
+    ok("radar: solo il titolare", c.get("/gestione/radar", headers=HC).status_code == 403)
+    n_not = sql("SELECT count(*) FROM notifiche")[0][0]
+    copione.extend([
+        chiama("crm_proponi_contatto", {"ente": "Comune di Masone", "fonte_url": "https://www.esempio-giornale.it/masone-castello", "motivo": "Annuncia il recupero del castello: servono contenuti digitali e video, ambito di Renovatio e Logos", "segnale": "Il 10/11/2026 il Comune annuncia fondi per il recupero del castello"}, "r1"),
+        chiama("crm_proponi_contatto", {"ente": "Comune di Campo Ligure", "fonte_url": "https://www.esempio-giornale.it/campo", "motivo": "Progetto di museo diffuso della filigrana appena finanziato dalla Regione", "segnale": "corto"}, "r2"),
+        chiama("crm_proponi_contatto", {"ente": "Comune di Masone", "fonte_url": "https://www.esempio-giornale.it/masone-castello", "motivo": "Stessa notizia ripresa: recupero del castello con fondi regionali", "segnale": "Il 10/11/2026 il Comune annuncia fondi per il recupero del castello"}, "r3"),
+        fine("Radar: 1 segnale.")])
+    r = c.post(f"/gestione/radar/{tid}/ora", headers=H)
+    ok("radar: giro avviato a mano", r.status_code == 202, r.text)
+    rid = r.json()["ricerca"]
+    esiti = [m["content"] for b_ in visti[-3:] for m in b_["messages"] if m["role"] == "user" and isinstance(m["content"], list) for m in m["content"] if m.get("type") == "tool_result"] if False else None
+    prop = sql("SELECT segnale, fonte_url FROM crm_proposte WHERE ricerca_id=%s", (rid,))
+    ok("radar: segnalazione senza recapiti accettata, con segnale e fonte", len(prop) == 1 and prop[0][0].startswith("Il 10/11/2026"), str(prop))
+    ok("radar: segnale troppo corto e stessa notizia due volte scartati", sql("SELECT scartate FROM crm_ricerche WHERE id=%s", (rid,))[0][0] == 1 and len(prop) == 1)
+    crit = sql("SELECT criteri, tema_id FROM crm_ricerche WHERE id=%s", (rid,))[0]
+    ok("radar: la ricerca porta il tema e le istruzioni sulle notizie recenti", crit[1] == tid and "MODALITA' RADAR" in crit[0] and "ultimi 3 giorni" in crit[0])
+    ok("radar: avvisa con il nome del tema", "Radar «Comuni e borghi»: 1" in sql("SELECT testo FROM notifiche ORDER BY id DESC LIMIT 1")[0][0] and sql("SELECT count(*) FROM notifiche")[0][0] == n_not + 1)
+    v = c.get("/gestione/crm-ricerca", headers=H).json()
+    pv = [p for p in v["proposte"] if p["ricerca_id"] == rid]
+    ok("radar: nella lista da approvare con tema e segnale", pv and pv[0]["tema"] == "Comuni e borghi" and pv[0]["ente"] == "Comune di Masone" and pv[0]["segnale"].startswith("Il 10/11"))
+    c.post("/gestione/crm-ricerca/decidi", headers=H, json={"ids": [pv[0]["id"]], "azione": "approva"})
+    note = sql("SELECT note_cifrate FROM crm_contatti ORDER BY id DESC LIMIT 1")[0][0]
+    ok("radar: approvata, entra nel CRM con il segnale nelle note", "Segnale: Il 10/11/2026" in cassaforte.decifra(note))
+    e = c.get("/gestione/radar", headers=H).json()["temi"][0]
+    ok("radar: conteggi del tema", e["segnalazioni"] == 1 and e["approvate"] == 1 and e["ultima_il"])
+    # giro automatico: solo i temi scaduti, uno per volta
+    with connessione() as cn:
+        ok("radar: appena girato, nessun tema da fare", radar.da_fare(cn) == [])
+    sql("UPDATE radar_temi SET ultima_il = NOW() - interval '2 days'")
+    copione.append(fine("Nessun segnale nuovo."))
+    n_not = sql("SELECT count(*) FROM notifiche")[0][0]; n_ric = sql("SELECT count(*) FROM crm_ricerche")[0][0]
+    with connessione() as cn: radar.giro(cn)
+    ok("radar: il giro automatico parte quando tocca", sql("SELECT count(*) FROM crm_ricerche")[0][0] == n_ric + 1)
+    ok("radar: senza segnalazioni non disturba", sql("SELECT count(*) FROM notifiche")[0][0] == n_not)
+    c.put(f"/gestione/radar/{tid}", headers=H, json={"nome": "Comuni e borghi", "tipo": "cliente", "descrizione": "Comuni della Liguria che annunciano progetti di valorizzazione di borghi e castelli", "giorni": 1, "quantita": 5, "attivo": False})
+    sql("UPDATE radar_temi SET ultima_il = NOW() - interval '2 days'")
+    with connessione() as cn:
+        ok("radar: un tema in pausa non gira", radar.da_fare(cn) == [])
+    # la ricerca contatti normale resta come prima: senza recapiti viene rifiutata
+    copione.extend([chiama("crm_proponi_contatto", {"ente": "Museo X", "fonte_url": "https://museo.example.org", "motivo": "Museo civico in Liguria, risponde ai criteri richiesti"}, "n1"), fine("fine")])
+    r2 = c.post("/gestione/crm-ricerca/ricerche", headers=H, json={"criteri": "Direttori di musei civici in Liguria con email nominativa", "quantita": 5}).json()["id"]
+    ok("ricerca normale: senza recapiti resta rifiutata", sql("SELECT count(*) FROM crm_proposte WHERE ricerca_id=%s", (r2,))[0][0] == 0)
+    ok("radar: il tema si elimina", c.delete(f"/gestione/radar/{tid}", headers=H).status_code == 200 and not c.get("/gestione/radar", headers=H).json()["temi"])
 print("TOTALE", sum(ris), "/", len(ris))
