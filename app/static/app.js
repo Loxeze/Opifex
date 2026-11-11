@@ -126,6 +126,10 @@ function avviso(testo, tipo) { return h("div", { class: "messaggio " + (tipo || 
 
 // ---------- Accesso ----------
 function mostraAccesso(errore) {
+  if (!errore && !stato.primoControllato) {   // 3.0 appena installata: nessun utente, si crea il primo accesso
+    stato.primoControllato = true;
+    api("GET", "/avvio").then(a => { stato.edizione = a.edizione; if (a.primo_accesso && typeof moduloPrimoAccesso === "function") moduloPrimoAccesso(); }).catch(() => {});
+  }
   const email = h("input", { type: "email", autocomplete: "username", required: true });
   const pw = h("input", { type: "password", autocomplete: "current-password", required: true });
   const msg = h("div");
@@ -147,7 +151,7 @@ function mostraAccesso(errore) {
 // ---------- Struttura ----------
 // Tutte le pagine raggiungibili dal titolare (servono a ricordare l'ultima pagina aperta)
 const VISTE = [["dashboard", "Plancia"], ["briefing", "Briefing"], ["task", "Task"], ["riunioni", "Riunioni"], ["chat", "Chat"], ["posta", "Posta"], ["email", "Email marketing"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["crm", "Contatti"], ["social", "Social"],
-  ["finestre", "Finestre"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["computer", "Computer locali"], ["sez", "Sezione"], ["impostazioni", "Impostazioni"]];
+  ["finestre", "Finestre"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["computer", "Computer locali"], ["avvio", "Avvio guidato"], ["sez", "Sezione"], ["impostazioni", "Impostazioni"]];
 // Il menu del titolare (2.52): poche voci, ognuna con le sue schede in alto. Ogni scheda: [etichetta, vista, sezione?].
 // Le sezioni con vista "sez" sono le stesse di prima, solo spostate fuori dalle Impostazioni.
 const MENU = [
@@ -231,9 +235,9 @@ function cornice(contenuto) {
       nav.push(bottone(id, nome, attiva(id), () => vai(id), id === "chat" ? h("span", { id: "badge-chat", class: "badge-chat", style: stato.chatNonLetti ? "" : "display:none" }, stato.chatNonLetti ? String(stato.chatNonLetti) : "") : null));
   }
   radice.replaceChildren(
-    h("header", {}, h("h1", {}, "Opifex", h("small", {}, "la bottega degli agenti")),
+    h("header", {}, h("h1", {}, stato.edizione === 3 ? "Opifex 3" : "Opifex", h("small", {}, "la bottega degli agenti")),
       h("nav", { "aria-label": "Menu principale" }, nav),
-      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, "2.52"))),
+      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.0" : "2.53"))),
     h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "organigramma" ? "largo" : "" }, stato.ruolo === "titolare" ? schedeGruppo() : null, contenuto));
 }
 
@@ -241,6 +245,8 @@ async function avvia() {
   try {
     const io = await api("GET", "/io");
     stato.ruolo = io.ruolo_globale; stato.nome = io.nome || "";
+    try { stato.edizione = (await api("GET", "/avvio")).edizione; } catch (e) { stato.edizione = 2; }
+    if (stato.edizione === 3 && !MENU[0][2].some(t => t[1] === "avvio")) MENU[0][2].push(["Avvio guidato", "avvio"]);
     await Vetro.carica();
     ripristinaVista();
     if (window.name === "opifex-organigramma" || location.hash === "#organigramma") stato.vista = "organigramma";
@@ -254,6 +260,10 @@ async function avvia() {
       api("GET", "/gestione/agenti"), api("GET", "/gestione/opzioni"), api("GET", "/gestione/connessioni"),
       api("GET", "/gestione/documenti"), api("GET", "/gestione/richieste/conteggio")]);
     Object.assign(stato, { agenti, opzioni, connessioni, documenti, richieste: cont.aperte, squadreAttesa: cont.squadre || 0 });
+    if (stato.edizione === 3 && !stato.avvioVisto) {   // 3.0: finche' l'avvio non e' completo, si riparte da li'
+      stato.avvioVisto = true;
+      try { const a = await api("GET", "/gestione/avvio"); if (a.completati < a.totale && !memLocale("avvio_rimandato")) stato.vista = "avvio"; } catch (e) { /* si apre la plancia */ }
+    }
     disegna();
   } catch (e) {
     if (token) { mostraAccesso(e.message); }
@@ -275,7 +285,7 @@ function disegna() {
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
   if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { chiudiVistaUso(stato.ultimaEtichetta); stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, posta: vistaPosta, computer: vistaComputer, sez: vistaSezione, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, avvio: vistaAvvio, posta: vistaPosta, computer: vistaComputer, sez: vistaSezione, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
   let contenuto;
   try { contenuto = vista(); }
   catch (e) {   // una schermata che si rompe non deve bloccare il menu: si mostra l'errore e si puo' andare altrove

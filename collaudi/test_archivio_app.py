@@ -26,6 +26,19 @@ fid = f["torre.jpg"]["id"]
 ok("miniatura foto: JPEG", (ix.miniatura(db, fid, None, 200) or b"")[:2] == b"\xff\xd8")
 ok("miniatura video: JPEG", (ix.miniatura(db, f["uhd.mp4"]["id"], 1, 200) or b"")[:2] == b"\xff\xd8")
 d = ix.dettaglio(db, f["uhd.mp4"]["id"]); ok("dettaglio: raggiungibile e con i metadati", d["raggiungibile"] and d["meta"].get("Risoluzione", "").startswith("3840x2160"))
+# 3.0: la memoria per gli agenti di Opifex (attraverso il ponte): solo percorsi ed estratti
+_cerca_vero = ix.cerca
+ix.cerca = lambda db_, q, n=10, **k: _cerca_vero(db_, q, n, True, **k)
+_primo = ix.sfoglia(db, 1)[0]
+rp = ix._ponte_archivio(db, {"metodo": "cerca", "testo": _primo["nome"].rsplit(".", 1)[0], "limite": 3})
+ok("ponte memoria: cerca restituisce percorso e tipo, niente file", rp and rp[0]["percorso"] == _primo["percorso"] and set(rp[0]) == {"id", "percorso", "tipo", "data", "secondo", "estratto"}, str(rp)[:200])
+rl = ix._ponte_archivio(db, {"metodo": "leggi", "id": rp[0]["id"]})
+ok("ponte memoria: leggi restituisce la scheda testuale", rl["percorso"] == _primo["percorso"] and "testo" in rl)
+try:
+    ix._ponte_archivio(db, {"metodo": "cancella"}); ok("ponte memoria: operazioni diverse rifiutate", False)
+except ValueError:
+    ok("ponte memoria: operazioni diverse rifiutate", True)
+ix.cerca = _cerca_vero
 # archivio creato prima: metadati ricostruiti
 c = ix.apri(db); c.execute("UPDATE file SET meta=NULL"); c.commit()
 ix.PROG["ferma"] = False; ix.riempi_metadati(c)

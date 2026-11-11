@@ -259,3 +259,6 @@ body.bottega .pallini i{background:#E3DED1}body.bottega .pallini i.on{background
 body.bottega .schede-gruppo button{background:transparent;border:1px solid #DAD4C6;color:#4E5A55;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
 body.bottega .schede-gruppo button:hover{background:#ECE8DE}
 body.bottega .schede-gruppo button.attivo{background:#1F4D43;color:#F5F2EB;border-color:#1F4D43}
+body.bottega .avvio-elenco button{background:transparent;border:0;border-radius:10px;color:#4E5A55;box-shadow:none}
+body.bottega .avvio-elenco button.attivo{background:#1F4D43;color:#F5F2EB}
+body.bottega .avvio-elenco button.attivo .pallino{border-color:#F5F2EB}

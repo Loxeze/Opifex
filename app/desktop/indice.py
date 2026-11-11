@@ -2571,6 +2571,25 @@ def _ponte_esegui(mod, p):
     return r
 
 
+def _ponte_archivio(db, p):
+    """Le domande degli agenti sulla memoria di Lorenzo: si risponde con percorsi, date ed estratti, mai con i file."""
+    if p.get("metodo") == "cerca":
+        q = str(p.get("testo") or "").strip()[:300]
+        if not q:
+            raise ValueError("Ricerca vuota")
+        tipo = p.get("tipo") if p.get("tipo") in ("documento", "immagine", "video", "audio") else None
+        n = max(1, min(int(p.get("limite") or 8), 20))
+        return [{"id": x["id"], "percorso": x["percorso"], "tipo": x["tipo"], "data": x["data"], "secondo": x.get("secondo"),
+                 "estratto": (x.get("estratto") or "")[:400]} for x in cerca(db, q, n, tipo=tipo)]
+    if p.get("metodo") == "leggi":
+        d = dettaglio(db, int(p.get("id")))
+        testo = "\n".join(str(t["testo"] or "") for t in d.get("testi") or [])
+        da = max(0, int(p.get("da") or 0))
+        pezzo = testo[da:da + 6000]
+        return {"id": d["id"], "percorso": d["percorso"], "tipo": d["tipo"], "testo": pezzo, "prossimo": da + 6000 if len(testo) > da + 6000 else None}
+    raise ValueError("Operazione non ammessa")
+
+
 def ponte_ciclo(db):
     """Chiede a Opifex i lavori da fare su questo computer (browser delle Finestre) e consegna i risultati."""
     while True:
@@ -2581,10 +2600,20 @@ def ponte_ciclo(db):
                 continue
             mod = _ponte_modulo(db)
             PONTE["stato"] = "pronto" if mod else PONTE["stato"]
-            lavoro = _opifex("GET", "/ponte/prossimo?attesa=20&finestre=" + ("true" if mod else "false"), timeout=40)
+            lavoro = _opifex("GET", "/ponte/prossimo?attesa=20&archivio=true&finestre=" + ("true" if mod else "false"), timeout=40)
             if not lavoro or lavoro.get("nessuno"):
                 continue
             esito = {"ok": True, "dati": None, "errore": ""}
+            if lavoro.get("tipo") == "archivio":   # la memoria: una ricerca nell'indice di questo computer, solo risultati
+                try:
+                    esito["dati"] = _ponte_archivio(db, lavoro.get("parametri") or {})
+                except Exception as e:  # noqa: BLE001
+                    esito.update(ok=False, errore=(str(e) if isinstance(e, ValueError) else "Ricerca non riuscita (" + type(e).__name__ + ")")[:400])
+                try:
+                    _opifex("POST", f"/ponte/{lavoro['id']}/risultato", esito, timeout=30)
+                except ValueError:
+                    pass
+                continue
             try:
                 if lavoro["tipo"] != "finestre" or mod is None:
                     raise ValueError("Questo computer non puo' eseguire il lavoro")

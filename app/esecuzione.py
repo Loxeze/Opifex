@@ -14,6 +14,7 @@ from .fornitori import ErroreFornitore, Risposta, chiama_modello
 import contextvars
 PROVA_ISTRUZIONI = contextvars.ContextVar('prova_istruzioni', default=None)   # (agente_id, testo): prova di istruzioni non ancora applicate
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai', 'locale')   # chi sa usare gli strumenti degli agenti
+from . import memoria_pc
 from . import banco, creativi, best_practice, archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
 from . import progresso, n8n as n8n_mod, crm_contatti_agenti, ricerca_profonda, finestre, brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta
 from . import strumenti_social, delega_online, budget_prompt, cantiere, scatola_nera
@@ -398,6 +399,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             n8n_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["n8n_attivo"] and n8n_mod.collegato(conn))
             archivio_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["archivio_attivo"])
             finestre_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["finestre_attivo"])
+            memoria_pc_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["archivio_attivo"] and a["fascia_dati_max"] in ("interno", "riservato") and memoria_pc.collegata())
             ricerca_tool = bool(a["fornitore"] == "anthropic" and a["accesso_web"])
             canva_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["canva_attivo"] and canva.collegato(conn))
             iniz_tool = bool(ok_int and colleghi_ok and a["livello"] in ("manager", "referente")
@@ -560,6 +562,12 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     gar = archivio_nas.gestore(connessione, agente_id)
                     for s_ in archivio_nas.STRUMENTI:
                         gestori[s_["name"]] = gar
+                if memoria_pc_tool:
+                    extra.extend(memoria_pc.STRUMENTI)
+                    avviso_extra += memoria_pc.AVVISO
+                    gmp = memoria_pc.gestore()
+                    for s_ in memoria_pc.STRUMENTI:
+                        gestori[s_["name"]] = gmp
                 if ricerca_tool:
                     extra.extend(ricerca_profonda.STRUMENTI)
                     avviso_extra += ricerca_profonda.AVVISO

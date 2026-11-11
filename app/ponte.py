@@ -83,11 +83,11 @@ def stato():
 
 
 @router.get("/prossimo")
-def prossimo(attesa: int = 20, finestre: bool = False):
+def prossimo(attesa: int = 20, finestre: bool = False, archivio: bool = False):
     """Long polling: l'app sul PC aspetta qui un lavoro."""
     attesa = max(1, min(attesa, 25))
     with connessione() as c:
-        c.execute("UPDATE ponte_pc SET visto = NOW(), capacita = %s::jsonb WHERE id = 1", (json.dumps({"finestre": bool(finestre)}),))
+        c.execute("UPDATE ponte_pc SET visto = NOW(), capacita = %s::jsonb WHERE id = 1", (json.dumps({"finestre": bool(finestre), "archivio": bool(archivio)}),))
         c.commit()
     fine = time.time() + attesa
     while True:

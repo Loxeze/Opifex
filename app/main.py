@@ -18,6 +18,7 @@ from .rotte_briefing import router as router_briefing
 from .rotte_accessi import router as router_accessi
 from .rotte_finestre import router as router_finestre
 from .ponte import router as router_ponte
+from .rotte_avvio import router as router_avvio, router_pubblico as router_avvio_pubblico
 from .rotte_progetti import router as router_progetti
 from .rotte_scheda import router as router_scheda
 from .rotte_ginnasio import router as router_ginnasio
@@ -175,7 +176,8 @@ async def _manutenzione():
         _passo("backup", lambda c: backup.esegui(c) if backup.da_fare(c) else None)
         _passo("backup dei siti (Maestro di chiavi)", lambda c: custode.esegui_notturno(c) if custode.da_fare(c) else None)
         _passo("ordine di Drive", _ordine_drive)
-        _passo("revisore qualita' e controllori", lambda c: qualita.applica(c))
+        if not __import__("app.edizione", fromlist=["x"]).tre():   # nella 3.0 i controllori nascono solo se li chiedi
+            _passo("revisore qualita' e controllori", lambda c: qualita.applica(c))
         _passo("competenze di base degli agenti", lambda c: competenze_base.applica(c) if competenze_base.da_fare(c) else None)
         _passo("allarmi", allarmi.controlla)
         _passo("elenco agenti (Cerimoniere)", lambda c: cerimoniere.aggiorna_elenco(c) if cerimoniere.da_fare(c) else None)
@@ -249,7 +251,21 @@ async def ciclo_vita(app: FastAPI):
                 pm.crea_mancanti(conn)   # un project manager per ogni progetto esistente
     except Exception:
         pass
+    from . import edizione as _ed
+    if _ed.tre():   # 3.0: database nuovo, solo Aurora e Posta; gli agenti di serie non si ricreano
+        try:
+            with connessione() as conn:
+                if conn.execute("SELECT count(*) AS n FROM utenti").fetchone()["n"] > 0:
+                    _ed.prepara(conn)
+                from . import chat_coda as _cc3
+                _cc3.riavvio(conn)
+                from . import prezzi as _pz3
+                _pz3.applica_listino(conn)
+        except Exception:
+            pass
     try:
+        if _ed.tre():
+            raise RuntimeError("3.0: niente agenti di serie")
         from . import reparti_pronti
         with connessione() as conn:
             reparti_pronti.aggiungi_nuovi_ruoli(conn)
@@ -399,6 +415,8 @@ app.include_router(router_posta_decisioni)
 app.include_router(router_miglioramento)
 app.include_router(router_dipendenze)
 app.include_router(router_diagnostica)
+app.include_router(router_avvio)
+app.include_router(router_avvio_pubblico)
 app.include_router(router_impresa)
 app.include_router(router_tavoli)
 app.include_router(router_call)

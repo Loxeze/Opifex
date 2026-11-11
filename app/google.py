@@ -194,7 +194,7 @@ def rinomina_cartella(tok: str, cartella_id: str, nome: str):
 
 
 def radice_valida(conn, tok: str) -> str:
-    """Id della cartella «Opifex». Se quella salvata non esiste per l'account collegato (es. era di un altro account),
+    """Id della cartella «Opifex» (nella 3.0: «Opifex/Opifex 3»). Se quella salvata non esiste per l'account collegato (es. era di un altro account),
     ne trova una chiamata Opifex nel Drive dell'account oppure la crea, e la salva."""
     radice = _leggi(conn, "drive_radice_id")
     h = {"Authorization": "Bearer " + tok}
@@ -206,6 +206,9 @@ def radice_valida(conn, tok: str) -> str:
         except ErroreGoogle:
             pass
     nuova = cartella(tok, "Opifex", "root")
+    from . import edizione
+    if edizione.tre():   # la 3.0 ha la sua cartella distinta dentro «Opifex»: parte da zero, senza toccare quella della 2
+        nuova = cartella(tok, "Opifex 3", nuova)
     _scrivi(conn, "drive_radice_id", nuova)
     conn.execute("UPDATE progetti SET drive_stato='da_sincronizzare', drive_cartella_id=NULL, drive_agent_id=NULL, drive_repository_id=NULL")
     conn.execute("UPDATE progetti_agenti SET drive_cartella_id=NULL")

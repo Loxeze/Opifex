@@ -450,3 +450,14 @@ i.task{background:var(--avv)}i.ritardo{background:var(--no)}i.milestone{backgrou
 .schede-gruppo button{padding:7px 14px;border-radius:999px;font-size:14px;min-height:36px}
 .schede-gruppo button.attivo{font-weight:700}
 @media (max-width:800px){.schede-gruppo{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}.schede-gruppo button{white-space:nowrap;flex:none}}
+/* 3.0 — avvio guidato */
+.avvio-griglia{display:grid;grid-template-columns:minmax(200px,260px) minmax(0,1fr);gap:20px;align-items:start}
+.avvio-elenco{display:flex;flex-direction:column;gap:4px}
+.avvio-elenco button{display:flex;gap:10px;align-items:center;text-align:left;justify-content:flex-start}
+.avvio-elenco .pallino{width:10px;height:10px;border-radius:50%;border:2px solid #9A8F80;flex:none;box-sizing:border-box}
+.avvio-elenco .pallino.ok{background:#2E7D4F;border-color:#2E7D4F}.avvio-elenco .pallino.salta{border-style:dashed}
+.avvio-passo h3{margin-top:4px}
+.avvio-passo ul,.avvio-passo ol{padding-left:20px;line-height:1.7}
+.avvio-piede{margin-top:16px;border-top:1px solid rgba(127,127,127,.2);padding-top:12px}
+.copiabile{user-select:all;padding:2px 6px;border-radius:6px;background:rgba(127,127,127,.12)}
+@media (max-width:800px){.avvio-griglia{grid-template-columns:1fr}.avvio-elenco{flex-direction:row;overflow-x:auto}.avvio-elenco button{white-space:nowrap;flex:none}}

@@ -17,6 +17,11 @@ class Impostazioni(BaseSettings):
     chiave_cassaforte: str = ""
     # Solo per i collaudi: consente siti su localhost
     consenti_localhost_prova: bool = False
+    # Opifex 3.0: "3" = installazione nuova che parte vuota (Aurora e Posta); importa_da = database della 2 da cui copiare; codice per creare il primo accesso
+    opifex_edizione: str = "2"
+    opifex_importa_da: str = ""
+    opifex_codice_avvio: str = ""
+    opifex_indirizzo: str = ""
 
     @property
     def origini(self) -> list[str]:
