@@ -177,18 +177,21 @@ def risorse_locale(_: dict = Depends(solo_titolare)):
     import httpx
     with connessione() as conn:
         vram_gb = float(_imp(conn, "locale_vram_gb", "8") or 8)
+        og = conn.execute("""SELECT count(*) FILTER (WHERE azione = 'passaggio_online_finestra') AS online, count(*) FILTER (WHERE azione = 'prompt_a_budget') AS ridotti
+                             FROM registro_azioni WHERE azione IN ('passaggio_online_finestra', 'prompt_a_budget') AND creata_il >= date_trunc('day', now())""").fetchone()
+        oggi = {"passaggi_online": int(og["online"]), "prompt_ridotti": int(og["ridotti"])}
     try:
         r = httpx.get(fornitori.url_locale() + "/api/ps", timeout=httpx.Timeout(4, connect=3))
         r.raise_for_status()
         mod = r.json().get("models") or []
     except (httpx.HTTPError, ValueError):
-        return {"raggiungibile": False, "modelli": [], "vram_totale_gb": vram_gb, "lavoro": fornitori.lavoro_locale()}
+        return {"raggiungibile": False, "modelli": [], "vram_totale_gb": vram_gb, "lavoro": fornitori.lavoro_locale(), "oggi": oggi, "oggi": oggi}
     out = []
     for m in mod:
         tot, gpu = int(m.get("size") or 0), int(m.get("size_vram") or 0)
         out.append({"nome": m.get("name"), "dimensione_gb": round(tot / 1e9, 1), "gpu_gb": round(gpu / 1e9, 1),
                     "percentuale_gpu": round(100 * gpu / tot) if tot else 0, "contesto": m.get("context_length"), "scade": m.get("expires_at")})
-    return {"raggiungibile": True, "modelli": out, "vram_totale_gb": vram_gb, "lavoro": fornitori.lavoro_locale(),
+    return {"raggiungibile": True, "modelli": out, "vram_totale_gb": vram_gb, "lavoro": fornitori.lavoro_locale(), "oggi": oggi,
             "gpu_usata_gb": round(sum(x["gpu_gb"] for x in out), 1), "ram_usata_gb": round(sum(x["dimensione_gb"] - x["gpu_gb"] for x in out), 1)}
 
 

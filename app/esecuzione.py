@@ -108,34 +108,43 @@ def _ripiego_locale(conn, a: dict, errore: Exception, agente_id: int, utente_id,
                  "costo_input_per_milione": m["costo_input_per_milione"], "costo_output_per_milione": m["costo_output_per_milione"]}
 
 
-def _adatta_locale(conn, a: dict, agente_id: int, utente_id, fascia_dati: str, testo: str, pezzi: dict, car_strumenti: int):
-    """Modello locale: il prompt deve stare nella finestra di contesto. Se non ci sta, si tengono i blocchi piu' importanti e si dice all'agente cosa manca;
-    se non ci sta nemmeno l'essenziale (istruzioni, strumenti, richiesta) e il dato puo' uscire, questo passaggio lo fa il modello online. Restituisce (testo, agente)."""
+def _adatta_locale(conn, a: dict, agente_id: int, utente_id, fascia_dati: str, testo: str, pezzi: dict, gruppi: list, extra: list, avviso: str):
+    """Modello locale: tutto deve stare nella finestra di contesto. In ordine: 1) se entra tutto, nulla cambia; 2) se non entrano gli strumenti, si offrono
+    solo quelli che servono a questa richiesta; 3) il contesto (memoria, documenti, conversazione...) entra per importanza e l'agente sa cosa manca;
+    4) se non entra nemmeno l'essenziale e il dato puo' uscire, questo passaggio lo fa il modello online. Restituisce (testo, agente, strumenti, avvisi)."""
+    S = budget_prompt.stima_token
     finestra = fornitori.finestra_locale(a["modello_nome"])
-    fisso = (budget_prompt.stima_token(a["istruzioni"]) + int(car_strumenti / budget_prompt.CAR_PER_TOKEN) + budget_prompt.stima_token(pezzi["testa"])
-             + budget_prompt.stima_token(pezzi["richiesta"]) + min(int(a["max_token_risposta"] or 1500), 2000) + 150)
-    disponibili = int((finestra - fisso) * budget_prompt.CAR_PER_TOKEN)
+    car_strumenti = len(json.dumps(extra, ensure_ascii=False)) + len(avviso) if extra or avviso else 0
+    base = S(a["istruzioni"]) + S(pezzi["testa"]) + S(pezzi["richiesta"]) + min(int(a["max_token_risposta"] or 1500), 1500) + 150
     totale = sum(len(t) for _, t in pezzi["blocchi"])
-    if disponibili >= totale + 40 * len(pezzi["blocchi"]):
-        return testo, a
-    if disponibili < 0:
+    if int((finestra - base) * budget_prompt.CAR_PER_TOKEN) - car_strumenti >= totale + 40 * len(pezzi["blocchi"]):
+        return testo, a, extra, avviso
+    fuori = []
+    # agli strumenti va al massimo il 60% dello spazio libero se c'e' contesto da far entrare, altrimenti tutto
+    libero = int((finestra - base) * budget_prompt.CAR_PER_TOKEN)
+    tetto = libero if not totale else int(libero * 0.6)
+    if gruppi and car_strumenti > tetto and libero > 0:
+        extra, avviso, fuori = budget_prompt.scegli_strumenti(gruppi, pezzi["richiesta"], tetto)
+        car_strumenti = len(json.dumps(extra, ensure_ascii=False)) + len(avviso)
+    disponibili = libero - car_strumenti
+    if libero <= 0 or disponibili < 0:
         from . import delega_online
         m = delega_online._modello(conn)
         attivo = (conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'locale_online_se_non_entra'").fetchone() or {}).get("valore", "true") != "false"
         if attivo and m is not None and fornitori.chiave("anthropic") and puo_uscire(fascia_dati, a["fascia_dati_max"], m["ff"], m["nc"], m["dpa"])[0]:
             conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s, 'passaggio_online_finestra', %s::jsonb, %s)",
-                         (agente_id, json.dumps({"finestra": finestra, "token_essenziali": fisso, "modello": m["nome"]}), utente_id))
+                         (agente_id, json.dumps({"finestra": finestra, "token_essenziali": base, "modello": m["nome"]}), utente_id))
             return testo, {**a, "fornitore": "anthropic", "fornitore_id": m["fornitore_id"], "modello_id": m["modello_id"], "modello_nome": m["nome"],
                            "costo_input_per_milione": m["ci"], "costo_output_per_milione": m["co"], "fascia_fornitore": m["ff"],
-                           "non_conservazione_attiva": m["nc"], "dpa_firmato": m["dpa"]}
+                           "non_conservazione_attiva": m["nc"], "dpa_firmato": m["dpa"]}, [t for g in gruppi for t in g[0]] or extra, "".join(g[1] for g in gruppi) or avviso
         disponibili = 0
     scelti, omessi, accorciati = budget_prompt.componi(pezzi["blocchi"], max(0, disponibili - 400))
     nota = budget_prompt.nota(omessi, accorciati)
     corpo = scelti + ([nota] if nota else [])
     nuovo = pezzi["testa"] + (("\n\n=====\n\n".join(corpo) + "\n\n=== Richiesta ===\n") if corpo else "") + pezzi["richiesta"]
     conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s, 'prompt_a_budget', %s::jsonb, %s)",
-                 (agente_id, json.dumps({"finestra": finestra, "omessi": omessi, "accorciati": accorciati}), utente_id))
-    return anonimizza(nuovo), a
+                 (agente_id, json.dumps({"finestra": finestra, "omessi": omessi, "accorciati": accorciati, "strumenti_non_caricati": fuori}), utente_id))
+    return anonimizza(nuovo), a, extra, avviso
 
 
 def esegui_agente(agente_id: int, messaggio: str, fascia_dati: str = "interno",
@@ -410,7 +419,8 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             if ((a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get()) or creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val):
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 uscita_extra, uscita_gestori, uscita_avviso = [], {}, []
-                extra, gestori, avviso_extra = [], {}, ""
+                extra, gestori = [], {}
+                avviso_extra = budget_prompt.Avvisi(extra)   # si comporta come un testo, ma ricorda a quali strumenti appartiene ogni avviso
                 if colleghi_ok:
                     stato_dialogo = {"domande": 0, "conv": {}}
                     max_domande = int(dialoghi.impostazione(conn, "dialoghi_max_domande", "12"))
@@ -681,6 +691,8 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     gestori["memoria_proponi"] = _mem
 
                 n_strumenti = len(extra)
+                gruppi_strumenti = avviso_extra.gruppi()
+                avviso_extra = str(avviso_extra)
                 car_strumenti = len(json.dumps(extra, ensure_ascii=False)) + len(avviso_extra)
 
                 def gestore(nome, dati):
@@ -702,7 +714,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     nav = None
                 fornitori.CACHE_LETTA.set(0)
                 if a["fornitore"] == "locale":
-                    testo_uscente, a = _adatta_locale(conn, a, agente_id, utente_id, fascia_dati, testo_uscente, pezzi, len(json.dumps(extra, ensure_ascii=False)) + len(avviso_extra))
+                    testo_uscente, a, extra, avviso_extra = _adatta_locale(conn, a, agente_id, utente_id, fascia_dati, testo_uscente, pezzi, gruppi_strumenti, extra, avviso_extra)
                 conn.commit()  # niente transazione aperta mentre il modello lavora
                 try:
                     if a["fornitore"] == "anthropic":
@@ -723,7 +735,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 fornitori.CACHE_LETTA.set(0)
                 progresso.fase("scrive la risposta")
                 if a["fornitore"] == "locale":
-                    testo_uscente, a = _adatta_locale(conn, a, agente_id, utente_id, fascia_dati, testo_uscente, pezzi, 0)
+                    testo_uscente, a, _, _ = _adatta_locale(conn, a, agente_id, utente_id, fascia_dati, testo_uscente, pezzi, [], [], "")
                 conn.commit()   # la risposta del modello puo' durare minuti: la connessione non resta aperta a meta' lavoro, tenendo in coda il resto del database
                 try:
                     ris = chiama_modello(a["fornitore"], a["modello_nome"], a["istruzioni"], testo_uscente,

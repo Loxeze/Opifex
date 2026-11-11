@@ -99,6 +99,22 @@ with TestClient(app) as c:
     sql("UPDATE fornitori_ai SET fascia_dati_max='riservato' WHERE nome='anthropic'")
     agente_browser.esegui_con_strumenti = reale_es; LOC["ctx"] = 131072; fornitori._FINESTRE.clear()
 
+    # strumenti a budget: con una finestra media si resta in locale, con i soli strumenti che servono
+    LOC["ctx"] = 8192; fornitori._FINESTRE.clear(); LOC["prompt"].clear(); n_on = sql("SELECT count(*) FROM registro_azioni WHERE azione='passaggio_online_finestra'")[0][0]
+    o = esecuzione.esegui_agente(ag, "Chiedi a un collega a che punto e' il documento del bando e leggilo.", "interno", None)
+    d = sql("SELECT dettagli FROM registro_azioni WHERE agente_id=%s AND azione='prompt_a_budget' ORDER BY id DESC LIMIT 1", (ag,))
+    pr = LOC["prompt"][-1] if LOC["prompt"] else {"strumenti": -1, "sistema": "", "utente": ""}
+    ok("finestra media: resta sul modello locale, senza passare online", len(LOC["prompt"]) == 1 and sql("SELECT count(*) FROM registro_azioni WHERE azione='passaggio_online_finestra'")[0][0] == n_on, str(len(LOC["prompt"])))
+    ok("finestra media: meno strumenti, quelli di base restano, gli esclusi sono registrati e detti all'agente", bool(d) and len(d[0][0]["strumenti_non_caricati"]) >= 3 and 0 < pr["strumenti"] < 18
+       and "chiedi_a_agente" not in d[0][0]["strumenti_non_caricati"] and "STRUMENTI NON CARICATI ORA" in pr["sistema"], str(d)[:300] + " n=" + str(pr["strumenti"]))
+    ok("finestra media: il tutto sta nella finestra (stima)", (len(pr["sistema"]) + len(pr["utente"])) / 3.3 + 1500 <= 8192 + 400, str(int((len(pr["sistema"]) + len(pr["utente"])) / 3.3)))
+    from app import budget_prompt as bp
+    g = [([{"name": "chiedi_a_agente", "description": "x" * 300}], "A" * 200), ([{"name": "crm_cerca", "description": "cerca contatti e clienti nel CRM"}], "C" * 200),
+         ([{"name": "social_pubblica", "description": "pubblica post sui social"}], "S" * 200), ([], "RUOLO" * 20)]
+    st, av, fuori = bp.scegli_strumenti(g, "Trova nel CRM i contatti dei clienti di Genova", 1100)
+    ok("scelta degli strumenti: di base + pertinenti alla richiesta, il resto fuori", [t["name"] for t in st] == ["chiedi_a_agente", "crm_cerca"] and fuori == ["social_pubblica"] and "social_pubblica" in av, str(([t["name"] for t in st], fuori)))
+    LOC["ctx"] = 131072; fornitori._FINESTRE.clear()
+
     # --- cantiere
     sql("UPDATE impostazioni_sistema SET valore='sempre' WHERE chiave='cantiere_modo'")
     ok("complessita': saluto no, compito articolato si'", not cantiere.sembra_complesso("ciao, come va?") and cantiere.sembra_complesso(COMPITO))

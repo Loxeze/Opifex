@@ -438,6 +438,7 @@ function pannelloPortatile() {
         tachimetro(l.in_corso ? "Velocità (media recente)" : "Velocità dell'ultima risposta", l.in_corso ? vel : (ultima ? ultima.token_s : 0), 60, "token/s", "#E8924A"));
       nota.textContent = !r.raggiungibile ? "" : r.modelli.length ? r.modelli.map(m => m.nome + ": " + m.dimensione_gb.toLocaleString("it-IT") + " GB, " + m.percentuale_gpu + "% sulla scheda grafica" + (m.contesto ? ", finestra " + m.contesto.toLocaleString("it-IT") + " token" : "")).join(" · ")
         : "Nessun modello in memoria: si carica alla prima richiesta (può volerci un paio di minuti).";
+      if (r.oggi && (r.oggi.passaggi_online || r.oggi.prompt_ridotti)) nota.textContent += " Oggi: " + r.oggi.prompt_ridotti + " richieste adattate alla finestra del modello, " + r.oggi.passaggi_online + " svolte da Claude perché non ci stavano.";
     } catch (e) { spia.className = "spia spenta"; statoT.textContent = "Stato del portatile non disponibile"; cosa.textContent = " · " + e.message; }
     setTimeout(agg, 3000);
   };
