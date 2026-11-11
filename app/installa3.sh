@@ -1,6 +1,6 @@
 #!/bin/bash
 # Installa Opifex 3.0 ACCANTO alla 2, sullo stesso server, senza toccarla. Il codice si prende dalla 2 aggiornata (stessa versione).
-# Uso:  sudo bash /opt/agenti/app/installa3.sh            (indirizzo predefinito: aurora.opifex.space)
+# Uso:  sudo bash /opt/agenti/app/installa3.sh   (oppure scaricato da GitHub: sudo bash i3.sh)            (indirizzo predefinito: aurora.opifex.space)
 #       sudo bash /opt/agenti/app/installa3.sh altro.nome.it
 # Si puo' rilanciare: rifa' solo cio' che manca.
 set -euo pipefail
@@ -18,8 +18,15 @@ export PGOPTIONS="--client-min-messages=warning"
 
 echo "== 1/7 Cartella della 3.0 ($DIR)"
 mkdir -p "$DIR"
-for f in app sql; do rm -rf "${DIR:?}/$f"; cp -a "$DUE/$f" "$DIR/$f"; done
-for f in requirements.txt VERSIONE crea_titolare.py crea_briefing.py; do [ -e "$DUE/$f" ] && cp -f "$DUE/$f" "$DIR/$f"; done
+if [ -f "$DUE/app/edizione.py" ]; then   # la 2 e' gia' aggiornata: stesso codice
+  SRC="$DUE"
+else                                      # altrimenti il codice si prende da GitHub (ramo principale)
+  SRC=$(mktemp -d)
+  curl -fsSL https://codeload.github.com/Loxeze/opifex/tar.gz/refs/heads/main | tar xz -C "$SRC" --strip-components=1
+  [ -f "$SRC/app/edizione.py" ] || { echo "Il codice scaricato non contiene la 3.0"; exit 1; }
+fi
+for f in app sql; do rm -rf "${DIR:?}/$f"; cp -a "$SRC/$f" "$DIR/$f"; done
+for f in requirements.txt VERSIONE crea_titolare.py crea_briefing.py; do [ -e "$SRC/$f" ] && cp -f "$SRC/$f" "$DIR/$f"; done
 chown -R agenti:agenti "$DIR"
 echo "   versione $(cat "$DIR/VERSIONE")"
 
