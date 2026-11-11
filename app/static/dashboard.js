@@ -14,7 +14,13 @@ function vistaImpostazioni() {
   const nomeSez = (id) => (SEZIONI_IMPOSTAZIONI.find(x => x[0] === id) || [])[1] || id;
   const noti = new Set(GRUPPI_IMP.flatMap(g => g[1]));
   const gruppi = GRUPPI_IMP.concat([["Altro", SEZIONI_IMPOSTAZIONI.map(x => x[0]).filter(id => !noti.has(id))]]).map(([t, ids]) => [t, ids.filter(id => mappa[id])]).filter(g => g[1].length);
-  const cerca = h("input", { type: "search", class: "cerca-imp", placeholder: "Cerca nelle impostazioni…", "aria-label": "Cerca nelle impostazioni" });
+  // Il browser scambiava questo campo per il «nome utente» delle chiavi API della pagina e ci scriveva da solo l'email salvata, filtrando via tutte le voci.
+  // Resta in sola lettura finche' non lo tocchi tu, e cio' che vi compare senza che tu ci stia scrivendo viene scartato.
+  const cerca = h("input", { type: "search", class: "cerca-imp", name: "cerca-impostazioni", placeholder: "Cerca nelle impostazioni…", "aria-label": "Cerca nelle impostazioni",
+    autocomplete: "off", readonly: "", "data-lpignore": "true", "data-1p-ignore": "true", "data-bwignore": "true", "data-form-type": "other" });
+  const sblocca = () => cerca.removeAttribute("readonly");
+  cerca.addEventListener("focus", sblocca); cerca.addEventListener("pointerdown", sblocca);
+  cerca.addEventListener("blur", () => cerca.setAttribute("readonly", ""));
   const nav = h("nav", { class: "menu-imp", "aria-label": "Sezioni delle impostazioni" });
   const disegnaNav = () => {
     const q = cerca.value.trim().toLowerCase();
@@ -26,9 +32,10 @@ function vistaImpostazioni() {
       det.open = !!q || ids.includes(stato.sezione);
       return det;
     }));
-    if (!nav.children.length) nav.append(h("p", { class: "sotto" }, "Nessuna voce trovata."));
+    if (!nav.children.length) nav.append(h("p", { class: "sotto" }, "Nessuna voce trovata."), h("button", { class: "s", onclick: () => { cerca.value = ""; disegnaNav(); } }, "Mostra tutte le voci"));
   };
-  cerca.addEventListener("input", disegnaNav);
+  cerca.addEventListener("input", () => { if (document.activeElement !== cerca) cerca.value = ""; disegnaNav(); });
+  cerca.addEventListener("change", () => { if (document.activeElement !== cerca && cerca.value) { cerca.value = ""; disegnaNav(); } });
   disegnaNav();
   const scelta = h("select", { class: "imp-select", "aria-label": "Sezione delle impostazioni", onchange: (e) => vai("impostazioni", e.target.value) },
     gruppi.map(([t, ids]) => h("optgroup", { label: t }, ids.map(id => { const o = h("option", { value: id }, nomeSez(id)); if (id === stato.sezione) o.selected = true; return o; }))));
