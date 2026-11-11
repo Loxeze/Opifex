@@ -211,6 +211,36 @@ def url_locale() -> str:
     return v if v.startswith(("http://", "https://")) else "http://127.0.0.1:11434"
 
 
+_FINESTRE: dict = {}   # modello -> (token, istante)
+
+
+def finestra_locale(modello: str) -> int:
+    """Finestra di contesto del modello locale: quella vera se Ollama lo ha in memoria (api/ps), altrimenti l'ultima vista o l'impostazione 'locale_contesto' (8192)."""
+    import time as _t
+    v = _FINESTRE.get(modello)
+    if v and _t.monotonic() - v[1] < 120:
+        return v[0]
+    ctx = 0
+    try:
+        r = httpx.get(url_locale() + "/api/ps", timeout=httpx.Timeout(3, connect=2))
+        ctx = next((int(m.get("context_length") or 0) for m in (r.json().get("models") or []) if m.get("name") == modello), 0)
+    except (httpx.HTTPError, ValueError):
+        ctx = 0
+    if not ctx:
+        if v:
+            ctx = v[0]
+        else:
+            try:
+                from .db import connessione
+                with connessione() as conn:
+                    r = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave = 'locale_contesto'").fetchone()
+                ctx = int((r["valore"] if r else "") or 8192)
+            except Exception:  # noqa: BLE001
+                ctx = 8192
+    _FINESTRE[modello] = (ctx, _t.monotonic())
+    return ctx
+
+
 def controlla_troncamento(modello: str, token_prompt: int) -> bool:
     """Ollama taglia in silenzio l'inizio del prompt se supera la finestra di contesto: memoria, istruzioni e dossier spariscono e l'agente «perde i riferimenti».
     Se il prompt riempie tutta la finestra lo segnalo (una notifica l'ora, e nel registro azioni)."""

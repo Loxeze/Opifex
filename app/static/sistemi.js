@@ -357,10 +357,46 @@ function bloccoModelloLocale(ricarica) {
           catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Registra i modelli del portatile")),
       q.registrati.length ? h("p", { class: "sotto" }, "Modelli locali registrati: " + q.registrati.join(" · ")) : null,
       bloccoTachimetri(),
+      bloccoCantieri(),
       bloccoProvaAffidabilita(q.registrati));
   };
   carica();
   return corpo;
+}
+
+// Lavori a schede (cantieri): il modello online pianifica e collauda, il locale esegue
+function bloccoCantieri() {
+  const corpo = h("div"), esito = h("div");
+  const MODI = [["auto", "Automatico: solo per i compiti complessi affidati in chat o come incarico"], ["sempre", "Sempre, per ogni richiesta a un agente locale"], ["spento", "Spento: l'agente locale lavora sempre da solo"]];
+  const STATI = { riuscito: "collaudo superato", con_riserve: "con riserve", fallito: "non riuscito", in_corso: "in corso" };
+  const carica = async () => {
+    try {
+      const r = await api("GET", "/gestione/locale/cantieri"), cambio = (stato.opzioni && stato.opzioni.cambio_eur) || 0.92;
+      const sel = h("select", { "data-uso": "cantiere-modo", onchange: async () => { try { await api("PUT", "/gestione/locale/cantieri", { modo: sel.value }); esito.replaceChildren(avviso("Salvato.", "ok")); } catch (e) { esito.replaceChildren(avviso(e.message, "no")); } } },
+        MODI.map(([v, t]) => h("option", { value: v, selected: r.modo === v ? "" : null }, t)));
+      const dett = h("div");
+      corpo.replaceChildren(
+        h("label", {}, "Quando usarlo", sel), esito,
+        h("p", { class: "sotto" }, "Ultimi 30 giorni: " + r.mese.n + " lavori, " + r.mese.riusciti + " con collaudo superato, " + r.mese.riserve + " con riserve, " + r.mese.falliti + " non riusciti. Costo del modello online: € " + (r.mese.costo * cambio).toFixed(2).replace(".", ",") + "."),
+        r.ultimi.length ? h("table", {}, h("thead", {}, h("tr", {}, ["N.", "Quando", "Agente", "Richiesta", "Schede", "Rifatte", "Esito", "Costo online"].map(t => h("th", {}, t)))),
+          h("tbody", {}, r.ultimi.map(x => h("tr", { style: "cursor:pointer", title: "Apri il dettaglio", onclick: async () => {
+            try { const d = await api("GET", "/gestione/locale/cantieri/" + x.id);
+              dett.replaceChildren(h("div", { class: "nome" }, "Lavoro n. " + d.id + " · " + (d.agente || "")), h("p", {}, d.richiesta),
+                ...d.piano.map(s => { const e = (d.esiti || {})[s.id] || {}; return h("details", {}, h("summary", {}, "Scheda " + s.id + ": " + s.titolo + (e.ok === false || e.rifatta ? " · rifatta" : "")),
+                  h("p", { class: "sotto" }, "Compito: " + s.compito), s.criteri.length ? h("p", { class: "sotto" }, "Criteri: " + s.criteri.join("; ")) : null,
+                  e.problemi ? h("p", { class: "sotto" }, "Collaudo: " + e.problemi) : null, h("pre", { style: "white-space:pre-wrap" }, e.testo || "(nessun risultato)")); }),
+                d.da_verificare ? h("p", {}, h("b", {}, "Da verificare: "), d.da_verificare) : null);
+            } catch (e) { dett.replaceChildren(avviso(e.message, "no")); } } },
+            h("td", {}, String(x.id)), h("td", {}, new Date(x.creato_il).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })), h("td", {}, x.agente || "—"),
+            h("td", {}, x.richiesta), h("td", {}, String(x.schede)), h("td", {}, String(x.rifatte)), h("td", {}, STATI[x.stato] || x.stato),
+            h("td", {}, "€ " + (x.costo_online * cambio).toFixed(3).replace(".", ",")))))) : h("p", { class: "sotto" }, "Ancora nessun lavoro a schede."),
+        dett);
+    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+  };
+  carica();
+  return h("div", {}, h("div", { class: "nome" }, "Lavoro a schede"),
+    h("p", { class: "aiuto" }, "Per i compiti complessi un modello Claude fa da capocantiere: divide il lavoro in schede piccole, l'agente le svolge una alla volta sul portatile, poi Claude collauda ogni scheda (quelle respinte si rifanno) e scrive la risposta. Il grosso del lavoro resta in locale; ogni lavoro è registrato qui sotto, con ciò che resta da verificare."),
+    corpo);
 }
 
 // Tachimetri: quanto del portatile sta usando il modello (da Ollama), aggiornati ogni 3 secondi finche' la scheda e' aperta

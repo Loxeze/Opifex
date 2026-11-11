@@ -190,3 +190,37 @@ def risorse_locale(_: dict = Depends(solo_titolare)):
                     "percentuale_gpu": round(100 * gpu / tot) if tot else 0, "contesto": m.get("context_length"), "scade": m.get("expires_at")})
     return {"raggiungibile": True, "modelli": out, "vram_totale_gb": vram_gb,
             "gpu_usata_gb": round(sum(x["gpu_gb"] for x in out), 1), "ram_usata_gb": round(sum(x["dimensione_gb"] - x["gpu_gb"] for x in out), 1)}
+
+
+class ModoCantiere(BaseModel):
+    modo: str = Field(pattern="^(auto|sempre|spento)$")
+
+
+@router.get("/locale/cantieri")
+def elenco_cantieri(_: dict = Depends(solo_titolare)):
+    """Lavori a schede: come sono andati gli ultimi, e quanto e' costato il modello online che li ha diretti."""
+    with connessione() as conn:
+        righe = conn.execute("""SELECT c.id, c.creato_il, a.nome AS agente, c.origine, left(c.richiesta, 160) AS richiesta, jsonb_array_length(c.piano) AS schede, c.rifatte, c.stato,
+                                       c.da_verificare, c.token_online, c.token_locali, c.costo_online::float AS costo_online, c.secondi
+                                FROM cantieri c LEFT JOIN agenti a ON a.id = c.agente_id ORDER BY c.id DESC LIMIT 30""").fetchall()
+        tot = conn.execute("""SELECT count(*) AS n, count(*) FILTER (WHERE stato = 'riuscito') AS riusciti, count(*) FILTER (WHERE stato = 'con_riserve') AS riserve,
+                                     count(*) FILTER (WHERE stato = 'fallito') AS falliti, COALESCE(sum(costo_online),0)::float AS costo
+                              FROM cantieri WHERE creato_il > now() - interval '30 days'""").fetchone()
+        return {"modo": _imp(conn, "cantiere_modo", "auto"), "ultimi": [dict(r) for r in righe], "mese": dict(tot)}
+
+
+@router.put("/locale/cantieri")
+def salva_modo_cantiere(d: ModoCantiere, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        _salva(conn, "cantiere_modo", d.modo)
+    return {"modo": d.modo}
+
+
+@router.get("/locale/cantieri/{cid}")
+def dettaglio_cantiere(cid: int, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        r = conn.execute("SELECT c.*, a.nome AS agente FROM cantieri c LEFT JOIN agenti a ON a.id = c.agente_id WHERE c.id = %s", (cid,)).fetchone()
+        if r is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Lavoro a schede inesistente")
+        d = dict(r); d["costo_online"] = float(d["costo_online"] or 0)
+        return d
