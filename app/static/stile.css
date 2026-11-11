@@ -431,3 +431,5 @@ i.task{background:var(--avv)}i.ritardo{background:var(--no)}i.milestone{backgrou
 .tach-val { text-align: center; font-size: 1.25rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .tach-val small { font-size: .8rem; font-weight: 400; opacity: .7; }
 .bt-portatile { margin-bottom: 16px; }
+.fin-colonne{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}.fin-colonna{flex:1 1 100%;min-width:0}
+.fin-colonne.due .fin-colonna{flex:1 1 520px}

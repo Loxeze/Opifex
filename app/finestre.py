@@ -287,6 +287,19 @@ class _Gestore:
                 raise ErroreFinestre("Azione sconosciuta")
         self._esegui(f)
 
+    def selezione(self, sid: int) -> str:
+        """Il testo selezionato nella pagina (per copiarlo negli appunti del computer di chi guarda). Mai il contenuto di un campo password."""
+        def f():
+            pg = self._scheda(sid)["page"]
+            try:
+                t = pg.evaluate("""() => { const a = document.activeElement;
+                    if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) { if (a.type === 'password') return ''; return (a.value || '').substring(a.selectionStart || 0, a.selectionEnd || 0); }
+                    return String(window.getSelection() || ''); }""")
+            except Exception:
+                t = ""
+            return str(t or "")[:20000]
+        return self._esegui(f)
+
     def condividi(self, sid: int, si: bool):
         def f():
             self._scheda(sid)["condivisa"] = bool(si)

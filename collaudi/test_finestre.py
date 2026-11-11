@@ -58,6 +58,21 @@ ok("click e scrittura", c.post(f"/finestre/{sid}/azione", headers=hd, json={"tip
    and c.post(f"/finestre/{sid}/azione", headers=hd, json={"tipo": "testo", "testo": "ciao"}).status_code == 200)
 ok("tasto non ammesso rifiutato", c.post(f"/finestre/{sid}/azione", headers=hd, json={"tipo": "tasto", "testo": "F12"}).status_code == 422)
 ok("azione sconosciuta rifiutata", c.post(f"/finestre/{sid}/azione", headers=hd, json={"tipo": "esegui"}).status_code == 422)
+# appunti: incolla dal computer di chi guarda, copia la selezione della pagina (mai le password)
+from app import finestre as _fin
+def nella_pagina(js): return _fin._locale._esegui(lambda: _fin._locale._scheda(sid)["page"].evaluate(js))
+nella_pagina("() => { const i = document.createElement('input'); i.id = 'appunti'; document.body.prepend(i); i.focus(); }")
+lungo = "utente@esempio.it " + "x" * 2500
+for i in range(0, len(lungo), 2000): c.post(f"/finestre/{sid}/azione", headers=hd, json={"tipo": "testo", "testo": lungo[i:i + 2000]})
+ok("incolla: il testo arriva nel campo selezionato, anche lungo (a pezzi)", nella_pagina("() => document.getElementById('appunti').value") == lungo)
+nella_pagina("() => document.getElementById('appunti').setSelectionRange(0, 17)")
+ok("copia: restituisce il testo selezionato nel campo", c.get(f"/finestre/{sid}/selezione", headers=hd).json() == {"testo": "utente@esempio.it"})
+nella_pagina("() => { const i = document.createElement('input'); i.type = 'password'; i.id = 'segreta'; i.value = 'PasswordSegreta1'; document.body.prepend(i); i.focus(); i.select(); }")
+ok("copia: un campo password non si copia mai", c.get(f"/finestre/{sid}/selezione", headers=hd).json() == {"testo": ""})
+nella_pagina("() => { document.activeElement.blur(); const r = document.createRange(); r.selectNodeContents(document.querySelector('h1') || document.body); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }")
+ok("copia: testo selezionato nella pagina", len(c.get(f"/finestre/{sid}/selezione", headers=hd).json()["testo"]) > 3)
+ok("copia: riservata al titolare", c.get(f"/finestre/{sid}/selezione", headers=hc).status_code == 403)
+nella_pagina("() => { document.getElementById('appunti').remove(); document.getElementById('segreta').remove(); getSelection().removeAllRanges(); }")
 sql("INSERT INTO agenti (nome,ruolo,livello,istruzioni,finestre_attivo) VALUES ('Ricercatore','Ricerche','manager','x',TRUE)")
 AG = sql("SELECT id FROM agenti WHERE nome='Ricercatore'")[0][0]
 g = finestre.gestore(connessione, AG)

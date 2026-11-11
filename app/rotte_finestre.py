@@ -85,6 +85,14 @@ def schermo(sid: int):
         _errore(e)
 
 
+@router.get("/{sid}/selezione")
+def selezione(sid: int):
+    try:
+        return {"testo": G.selezione(sid)}
+    except ErroreFinestre as e:
+        _errore(e)
+
+
 @router.post("/{sid}/vai")
 def vai(sid: int, d: Apri):
     try:
