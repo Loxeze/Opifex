@@ -22,7 +22,7 @@ if [ -f "$DUE/app/edizione.py" ]; then   # la 2 e' gia' aggiornata: stesso codic
   SRC="$DUE"
 else                                      # altrimenti il codice si prende da GitHub (ramo principale)
   SRC=$(mktemp -d)
-  curl -fsSL https://codeload.github.com/Loxeze/opifex/tar.gz/refs/heads/main | tar xz -C "$SRC" --strip-components=1
+  curl -fsSL https://codeload.github.com/Loxeze/Opifex/tar.gz/refs/heads/main | tar xz -C "$SRC" --strip-components=1
   [ -f "$SRC/app/edizione.py" ] || { echo "Il codice scaricato non contiene la 3.0"; exit 1; }
 fi
 for f in app sql; do rm -rf "${DIR:?}/$f"; cp -a "$SRC/$f" "$DIR/$f"; done
