@@ -20,44 +20,78 @@ def _salva(conn, k: str, v: str) -> None:
 
 
 def prova() -> dict:
-    """Interroga Ollama: raggiungibile? quali modelli ha scaricati?"""
-    base = fornitori.url_locale()
-    try:
-        r = httpx.get(base + "/api/tags", timeout=httpx.Timeout(8, connect=4))
-    except httpx.HTTPError as e:
-        return {"raggiungibile": False, "errore": f"non risponde ({type(e).__name__})", "modelli": [], "url": base}
-    if r.status_code != 200:
-        return {"raggiungibile": False, "errore": f"risposta {r.status_code}", "modelli": [], "url": base}
-    try:
-        nomi = sorted(m["name"] for m in r.json().get("models", []) if isinstance(m, dict) and m.get("name"))
-    except (ValueError, TypeError):
-        return {"raggiungibile": False, "errore": "risposta non valida: e' Ollama?", "modelli": [], "url": base}
-    return {"raggiungibile": True, "errore": "", "modelli": nomi, "url": base}
+    """Interroga Ollama su ogni computer: raggiungibile? quali modelli ha scaricati?"""
+    macchine = []
+    for m in fornitori.macchine_locali():
+        v = {"nome": m["nome"], "url": m["url"], "modello": m["modello"], "raggiungibile": False, "errore": "", "modelli": []}
+        try:
+            r = httpx.get(m["url"] + "/api/tags", timeout=httpx.Timeout(8, connect=4))
+            if r.status_code != 200:
+                v["errore"] = f"risposta {r.status_code}"
+            else:
+                v["modelli"] = sorted(x["name"] for x in r.json().get("models", []) if isinstance(x, dict) and x.get("name"))
+                v["raggiungibile"] = True
+        except httpx.HTTPError as e:
+            v["errore"] = f"non risponde ({type(e).__name__})"
+        except (ValueError, TypeError):
+            v["errore"] = "risposta non valida: e' Ollama?"
+        fornitori._TAGS.pop(m["url"], None)   # dopo una prova esplicita si rilegge lo stato vero
+        macchine.append(v)
+    accese = [v for v in macchine if v["raggiungibile"]]
+    return {"raggiungibile": bool(accese), "errore": "" if accese else "; ".join(v["nome"] + ": " + v["errore"] for v in macchine),
+            "modelli": sorted({n for v in accese for n in v["modelli"]}), "url": macchine[0]["url"] if macchine else "", "macchine": macchine}
 
 
 @router.get("/locale")
 def stato_locale(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
         registrati = [r["nome"] for r in conn.execute("SELECT m.nome FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE f.nome = 'locale' ORDER BY m.nome").fetchall()]
-        candidati = [r["nome"] for r in conn.execute("SELECT m.nome FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE f.nome <> 'locale' AND f.nome IN ('anthropic','openai','xai') ORDER BY f.nome, m.nome").fetchall()]
-        return {"url": _imp(conn, "locale_url", ""), "ripiego": _imp(conn, "locale_ripiego", ""), "registrati": registrati, "candidati_ripiego": candidati}
+        candidati = [r["nome"] for r in conn.execute("SELECT m.nome FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE f.nome <> 'locale' AND f.nome IN ('anthropic','openai','xai') ORDER BY m.nome").fetchall()]
+        ha_elenco = bool(_imp(conn, "locale_macchine", ""))
+        return {"url": _imp(conn, "locale_url", ""), "ripiego": _imp(conn, "locale_ripiego", ""), "registrati": registrati, "candidati_ripiego": candidati,
+                "macchine": fornitori.macchine_locali() if (ha_elenco or _imp(conn, "locale_url", "")) else []}
+
+
+class Macchina(BaseModel):
+    nome: str = Field(min_length=1, max_length=40)
+    url: str = Field(min_length=1, max_length=200)
+    modello: str = Field(default="", max_length=120)      # modello principale di questo computer (usato da «locale-auto» e come sostituto)
+    vram_gb: float = Field(default=8, ge=1, le=512)
+    ram_gb: float = Field(default=32, ge=1, le=4096)
 
 
 class ImpostazioniLocale(BaseModel):
     url: str = Field(default="", max_length=200)
     ripiego: str = Field(default="", max_length=120)
+    macchine: list[Macchina] | None = Field(default=None, max_length=6)   # in ordine di preferenza: il primo acceso vince
 
 
 @router.put("/locale")
 def salva_locale(d: ImpostazioniLocale, _: dict = Depends(solo_titolare)):
+    import json as _j
     url = d.url.strip().rstrip("/")
     if url and not url.startswith(("http://", "https://")):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "L'indirizzo deve iniziare con http:// (per esempio http://100.101.102.103:11434)")
+    macchine = None
+    if d.macchine is not None:
+        macchine = []
+        for m in d.macchine:
+            u = m.url.strip().rstrip("/")
+            if not u.startswith(("http://", "https://")):
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{m.nome}: l'indirizzo deve iniziare con http:// (per esempio http://100.101.102.103:11434)")
+            if u in [x["url"] for x in macchine]:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{m.nome}: questo indirizzo e' gia' in elenco")
+            macchine.append({"nome": m.nome.strip(), "url": u, "modello": m.modello.strip(), "vram_gb": m.vram_gb, "ram_gb": m.ram_gb})
     with connessione() as conn:
         if d.ripiego and not conn.execute("""SELECT 1 FROM modelli_ai m JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE m.nome = %s AND f.nome <> 'locale'""", (d.ripiego,)).fetchone():
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Il modello di ripiego deve essere un modello Claude o GPT gia' registrato")
-        _salva(conn, "locale_url", url)
+        if macchine is not None:
+            _salva(conn, "locale_macchine", _j.dumps(macchine) if macchine else "")
+            _salva(conn, "locale_url", macchine[0]["url"] if macchine else "")
+        else:
+            _salva(conn, "locale_url", url)
         _salva(conn, "locale_ripiego", d.ripiego)
+    fornitori._TAGS.clear(); fornitori._FINESTRE.clear()
     return {"stato": "ok"}
 
 
@@ -71,7 +105,7 @@ def importa_modelli_locali(_: dict = Depends(solo_titolare)):
     """Registra come modelli di Opifex quelli scaricati su Ollama (a costo zero), cosi' si possono assegnare agli agenti."""
     p = prova()
     if not p["raggiungibile"]:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Il portatile non risponde: " + p["errore"])
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Nessun computer risponde: " + p["errore"])
     nuovi = 0
     with connessione() as conn:
         f = conn.execute("SELECT id FROM fornitori_ai WHERE nome = 'locale'").fetchone()
@@ -173,26 +207,32 @@ def ripristina_modelli(u: dict = Depends(solo_titolare)):
 
 @router.get("/locale/risorse")
 def risorse_locale(_: dict = Depends(solo_titolare)):
-    """Cosa sta facendo Ollama sul portatile adesso (da /api/ps): modelli in memoria, quanta scheda grafica occupano, quanto restano caricati."""
-    import httpx
+    """Che cosa stanno facendo adesso i computer con Ollama (da /api/ps): modelli in memoria, scheda grafica e RAM occupate, richieste in corso, velocita'."""
     with connessione() as conn:
-        vram_gb = float(_imp(conn, "locale_vram_gb", "8") or 8)
         og = conn.execute("""SELECT count(*) FILTER (WHERE azione = 'passaggio_online_finestra') AS online, count(*) FILTER (WHERE azione = 'prompt_a_budget') AS ridotti
                              FROM registro_azioni WHERE azione IN ('passaggio_online_finestra', 'prompt_a_budget') AND creata_il >= date_trunc('day', now())""").fetchone()
         oggi = {"passaggi_online": int(og["online"]), "prompt_ridotti": int(og["ridotti"])}
-    try:
-        r = httpx.get(fornitori.url_locale() + "/api/ps", timeout=httpx.Timeout(4, connect=3))
-        r.raise_for_status()
-        mod = r.json().get("models") or []
-    except (httpx.HTTPError, ValueError):
-        return {"raggiungibile": False, "modelli": [], "vram_totale_gb": vram_gb, "lavoro": fornitori.lavoro_locale(), "oggi": oggi, "oggi": oggi}
-    out = []
-    for m in mod:
-        tot, gpu = int(m.get("size") or 0), int(m.get("size_vram") or 0)
-        out.append({"nome": m.get("name"), "dimensione_gb": round(tot / 1e9, 1), "gpu_gb": round(gpu / 1e9, 1),
-                    "percentuale_gpu": round(100 * gpu / tot) if tot else 0, "contesto": m.get("context_length"), "scade": m.get("expires_at")})
-    return {"raggiungibile": True, "modelli": out, "vram_totale_gb": vram_gb, "lavoro": fornitori.lavoro_locale(), "oggi": oggi,
-            "gpu_usata_gb": round(sum(x["gpu_gb"] for x in out), 1), "ram_usata_gb": round(sum(x["dimensione_gb"] - x["gpu_gb"] for x in out), 1)}
+    macchine = []
+    for m in fornitori.macchine_locali():
+        v = {"nome": m["nome"], "modello_principale": m["modello"], "raggiungibile": False, "modelli": [], "vram_totale_gb": m["vram_gb"], "ram_totale_gb": m["ram_gb"],
+             "gpu_usata_gb": 0, "ram_usata_gb": 0, "lavoro": fornitori.lavoro_locale(m["url"])}
+        try:
+            r = httpx.get(m["url"] + "/api/ps", timeout=httpx.Timeout(4, connect=2))
+            r.raise_for_status()
+            for x in (r.json().get("models") or []):
+                tot, gpu = int(x.get("size") or 0), int(x.get("size_vram") or 0)
+                v["modelli"].append({"nome": x.get("name"), "dimensione_gb": round(tot / 1e9, 1), "gpu_gb": round(gpu / 1e9, 1),
+                                     "percentuale_gpu": round(100 * gpu / tot) if tot else 0, "contesto": x.get("context_length"), "scade": x.get("expires_at")})
+            v["raggiungibile"] = True
+            v["gpu_usata_gb"] = round(sum(x["gpu_gb"] for x in v["modelli"]), 1)
+            v["ram_usata_gb"] = round(sum(x["dimensione_gb"] - x["gpu_gb"] for x in v["modelli"]), 1)
+        except (httpx.HTTPError, ValueError):
+            pass
+        macchine.append(v)
+    primo = macchine[0] if macchine else {"raggiungibile": False, "modelli": [], "vram_totale_gb": 8, "gpu_usata_gb": 0, "ram_usata_gb": 0}
+    # i campi in cima restano quelli del primo computer, per chi leggeva la risposta di prima
+    return {"macchine": macchine, "oggi": oggi, "raggiungibile": any(x["raggiungibile"] for x in macchine), "modelli": primo["modelli"], "vram_totale_gb": primo["vram_totale_gb"],
+            "gpu_usata_gb": primo["gpu_usata_gb"], "ram_usata_gb": primo["ram_usata_gb"], "lavoro": fornitori.lavoro_locale()}
 
 
 class ModoCantiere(BaseModel):

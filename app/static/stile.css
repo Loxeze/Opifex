@@ -433,3 +433,9 @@ i.task{background:var(--avv)}i.ritardo{background:var(--no)}i.milestone{backgrou
 .bt-portatile { margin-bottom: 16px; }
 .fin-colonne{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}.fin-colonna{flex:1 1 100%;min-width:0}
 .fin-colonne.due .fin-colonna{flex:1 1 520px}
+.macchine{display:flex;flex-direction:column;gap:8px;margin:8px 0}
+.macchina{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.macchina > input[type=text]{flex:1 1 160px;min-width:0}.macchina > select{flex:1 1 180px;min-width:0;width:auto}
+.macchina label.mini{flex:0 0 92px;font-size:.78rem;margin:0}.macchina label.mini input{width:100%}
+.portatili{display:flex;flex-direction:column;gap:14px}
+.portatili .portatile + .portatile{border-top:1px solid var(--bordo, #8883);padding-top:12px}

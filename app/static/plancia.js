@@ -161,7 +161,7 @@ function vistaDashboard() {
   const titolo = h("h1", { class: "bt-titolo" }, saluto + (stato.nome ? " " + stato.nome.split(" ")[0] : "") + ". ");
   const sottotitolo = h("span", { class: "bt-corsivo" }, "Carico la plancia…"); titolo.append(sottotitolo);
   const kpi = h("section", { class: "bt-griglia bt-kpis" }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(() => h("article", { class: "bt-card bt-kpi" }, h("div", { class: "bt-sotto" }, "…"))));
-  const locale = h("section", { class: "bt-card bt-portatile", hidden: true }, h("div", { class: "bt-testa" }, h("div", { class: "bt-cap" }, "Modello locale · il portatile adesso"),
+  const locale = h("section", { class: "bt-card bt-portatile", hidden: true }, h("div", { class: "bt-testa" }, h("div", { class: "bt-cap" }, "Modello locale · i tuoi computer adesso"),
     h("button", { class: "s", onclick: () => vai("impostazioni", "sicurezza") }, "Apri")));
   if (stato.ruolo === "titolare") { locale.hidden = false; locale.append(pannelloPortatile()); }
   const riga1 = h("section", { class: "bt-griglia" });

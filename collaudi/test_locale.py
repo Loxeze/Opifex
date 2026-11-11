@@ -52,10 +52,10 @@ with TestClient(app) as c:
     r = c.put("/gestione/locale", headers=Hd, json={"url": URL + "/", "ripiego": ""}); ok("salvataggio indirizzo", r.status_code == 200 and fornitori.url_locale() == URL)
     p = c.post("/gestione/locale/prova", headers=Hd).json(); ok("prova: raggiungibile, elenca i modelli", p["raggiungibile"] and "qwen3:8b" in p["modelli"], str(p))
     r = c.post("/gestione/locale/modelli/importa", headers=Hd).json()
-    ok("importa i modelli (non gli embedding), a costo zero", r["nuovi"] == 2 and sql("SELECT count(*) FROM modelli_ai m JOIN fornitori_ai f ON f.id=m.fornitore_id WHERE f.nome='locale' AND m.costo_input_per_milione=0")[0][0] == 2, str(r))
+    ok("importa i modelli (non gli embedding), a costo zero", r["nuovi"] == 2 and sql("SELECT count(*) FROM modelli_ai m JOIN fornitori_ai f ON f.id=m.fornitore_id WHERE f.nome='locale' AND m.costo_input_per_milione=0 AND m.nome <> 'locale-auto'")[0][0] == 2, str(r))
     ok("importazione ripetuta: nessun doppione", c.post("/gestione/locale/modelli/importa", headers=Hd).json()["nuovi"] == 0)
     ok("solo il titolare", c.get("/gestione/locale").status_code in (401, 403))
-    s = c.get("/gestione/locale", headers=Hd).json(); ok("stato: modelli registrati e candidati al ripiego", len(s["registrati"]) == 2 and "claude-sonnet-5-5" in s["candidati_ripiego"] and not any(x in s["candidati_ripiego"] for x in s["registrati"]))
+    s = c.get("/gestione/locale", headers=Hd).json(); ok("stato: modelli registrati e candidati al ripiego", len([x for x in s["registrati"] if x != "locale-auto"]) == 2 and "claude-sonnet-5-5" in s["candidati_ripiego"] and not any(x in s["candidati_ripiego"] for x in s["registrati"]))
 
     # chiamata diretta
     q = fornitori.chiama_modello("locale", "qwen3:8b", "sei un assistente", "ciao", 100)

@@ -211,21 +211,98 @@ def url_locale() -> str:
     return v if v.startswith(("http://", "https://")) else "http://127.0.0.1:11434"
 
 
-_FINESTRE: dict = {}   # modello -> (token, istante)
+# ---------- piu' computer locali (portatile, fisso...): ognuno con il suo Ollama; Opifex sceglie quello acceso e adatto ----------
+AUTO = "locale-auto"     # modello «automatico»: il modello principale del primo computer acceso, nell'ordine di preferenza
+_TAGS: dict = {}         # url -> (insieme dei modelli scaricati oppure None se non risponde, istante)
+_ULTIMA: dict = {}       # modello chiesto -> (url, modello usato davvero): chi ha servito l'ultima richiesta
+_LAVORO: dict = {}       # url -> {"in_corso", "modello", "da", "misure"}
+_BLOCCO_LOCALE = __import__("threading").Lock()
+
+
+def macchine_locali() -> list[dict]:
+    """Computer con Ollama, in ordine di preferenza (impostazione 'locale_macchine'). Senza elenco vale il solo indirizzo 'locale_url' (il portatile)."""
+    import json as _j
+    grezzo, vram = "", "8"
+    try:
+        from .db import connessione
+        with connessione() as conn:
+            r = {x["chiave"]: x["valore"] for x in conn.execute("SELECT chiave, valore FROM impostazioni_sistema WHERE chiave IN ('locale_macchine', 'locale_vram_gb')").fetchall()}
+        grezzo, vram = r.get("locale_macchine") or "", r.get("locale_vram_gb") or "8"
+    except Exception:  # noqa: BLE001
+        pass
+    out = []
+    try:
+        for m in (_j.loads(grezzo) if grezzo else []):
+            u = str(m.get("url") or "").strip().rstrip("/")
+            if u.startswith(("http://", "https://")):
+                out.append({"nome": str(m.get("nome") or "Computer")[:40], "url": u, "modello": str(m.get("modello") or "")[:120],
+                            "vram_gb": float(m.get("vram_gb") or 8), "ram_gb": float(m.get("ram_gb") or 32)})
+    except (ValueError, TypeError, AttributeError):
+        out = []
+    return out or [{"nome": "Portatile", "url": url_locale(), "modello": "", "vram_gb": float(vram or 8), "ram_gb": 32.0}]
+
+
+def modelli_macchina(url: str, forza: bool = False):
+    """Modelli scaricati su quel computer, oppure None se non risponde. In memoria per 45 secondi (15 se non risponde): non si interroga a ogni richiesta."""
+    import time as _t
+    v = _TAGS.get(url)
+    if v and not forza and _t.monotonic() - v[1] < (45 if v[0] is not None else 15):
+        return v[0]
+    try:
+        r = httpx.get(url + "/api/tags", timeout=httpx.Timeout(4, connect=2))
+        nomi = {m["name"] for m in r.json().get("models", []) if isinstance(m, dict) and m.get("name")} if r.status_code == 200 else None
+    except (httpx.HTTPError, ValueError, TypeError):
+        nomi = None
+    _TAGS[url] = (nomi, _t.monotonic())
+    return nomi
+
+
+def _in_corso(url: str) -> int:
+    return int((_LAVORO.get(url) or {}).get("in_corso") or 0)
+
+
+def scegli_macchina(modello: str, escludi: tuple = ()) -> tuple[dict, str]:
+    """Quale computer serve questa richiesta, e con quale modello. Un modello preciso va al computer acceso che lo ha (il meno occupato, se sono piu' d'uno);
+    «locale-auto», o un modello che nessun computer acceso ha, va al modello principale del primo computer acceso nell'ordine di preferenza."""
+    accese = [(m, t) for m in macchine_locali() if m["url"] not in escludi and (t := modelli_macchina(m["url"])) is not None]
+    if not accese:
+        raise ErroreLocale("Nessun computer con il modello locale risponde (portatile o fisso): sono accesi e collegati, con Ollama e Tailscale attivi e la VPN spenta?")
+    if modello != AUTO:
+        con = [m for m, t in accese if modello in t]
+        if con:
+            return min(con, key=lambda x: _in_corso(x["url"])), modello
+    for m, t in accese:
+        if m["modello"] and m["modello"] in t:
+            return m, m["modello"]
+    if modello != AUTO and len(macchine_locali()) == 1:
+        return accese[0][0], modello          # un solo computer: si prova comunque, Ollama dira' se il modello manca
+    raise ErroreLocale(f"Il modello locale «{modello}» non e' disponibile su nessun computer acceso, e per quelli accesi non e' indicato un modello principale")
+
+
+_FINESTRE: dict = {}   # (url, modello) -> (token, istante)
+
+
+def _contesto_caricato(url: str, modello: str) -> int:
+    try:
+        r = httpx.get(url + "/api/ps", timeout=httpx.Timeout(3, connect=2))
+        return next((int(m.get("context_length") or 0) for m in (r.json().get("models") or []) if m.get("name") == modello), 0)
+    except (httpx.HTTPError, ValueError):
+        return 0
 
 
 def finestra_locale(modello: str) -> int:
-    """Finestra di contesto del modello locale: quella vera se Ollama lo ha in memoria (api/ps), altrimenti l'ultima vista o l'impostazione 'locale_contesto' (8192)."""
+    """Finestra di contesto del modello locale sul computer che lo servirebbe adesso: quella vera se Ollama lo ha in memoria, altrimenti l'ultima vista
+    o l'impostazione 'locale_contesto' (8192)."""
     import time as _t
-    v = _FINESTRE.get(modello)
+    try:
+        m, eff = scegli_macchina(modello)
+        chiave = (m["url"], eff)
+    except ErroreFornitore:
+        m, eff, chiave = None, modello, ("", modello)
+    v = _FINESTRE.get(chiave)
     if v and _t.monotonic() - v[1] < 120:
         return v[0]
-    ctx = 0
-    try:
-        r = httpx.get(url_locale() + "/api/ps", timeout=httpx.Timeout(3, connect=2))
-        ctx = next((int(m.get("context_length") or 0) for m in (r.json().get("models") or []) if m.get("name") == modello), 0)
-    except (httpx.HTTPError, ValueError):
-        ctx = 0
+    ctx = _contesto_caricato(m["url"], eff) if m else 0
     if not ctx:
         if v:
             ctx = v[0]
@@ -237,7 +314,7 @@ def finestra_locale(modello: str) -> int:
                 ctx = int((r["valore"] if r else "") or 8192)
             except Exception:  # noqa: BLE001
                 ctx = 8192
-    _FINESTRE[modello] = (ctx, _t.monotonic())
+    _FINESTRE[chiave] = (ctx, _t.monotonic())
     return ctx
 
 
@@ -246,63 +323,76 @@ def controlla_troncamento(modello: str, token_prompt: int) -> bool:
     Se il prompt riempie tutta la finestra lo segnalo (una notifica l'ora, e nel registro azioni)."""
     if token_prompt < 3000:
         return False
-    try:
-        r = httpx.get(url_locale() + "/api/ps", timeout=httpx.Timeout(3, connect=2))
-        contesto = next((int(m.get("context_length") or 0) for m in (r.json().get("models") or []) if m.get("name") == modello), 0)
-    except (httpx.HTTPError, ValueError):
-        return False
+    url, eff = _ULTIMA.get(modello) or (url_locale(), modello)
+    contesto = _contesto_caricato(url, eff)
     if not contesto or token_prompt < contesto - 48:
         return False
     try:
         from .db import connessione
         with connessione() as conn:
             gia = conn.execute("SELECT 1 FROM registro_azioni WHERE azione = 'locale_prompt_troncato' AND creata_il > NOW() - INTERVAL '1 hour' LIMIT 1").fetchone()
-            conn.execute("INSERT INTO registro_azioni (azione, dettagli) VALUES ('locale_prompt_troncato', %s::jsonb)", (__import__("json").dumps({"modello": modello, "contesto": contesto, "token_prompt": token_prompt}),))
+            conn.execute("INSERT INTO registro_azioni (azione, dettagli) VALUES ('locale_prompt_troncato', %s::jsonb)", (__import__("json").dumps({"modello": eff, "contesto": contesto, "token_prompt": token_prompt}),))
             if not gia:
                 conn.execute("INSERT INTO notifiche (testo, urgente, critica) VALUES (%s, TRUE, FALSE)",
-                             (f"Il modello locale {modello} ha ricevuto piu' testo di quanto la sua finestra di contesto ({contesto} token) contenga: l'inizio (istruzioni, memoria, dossier) viene tagliato e gli agenti perdono i riferimenti. "
-                              "Aumenta OLLAMA_CONTEXT_LENGTH sul portatile (per esempio 16384) e riavvia Ollama, oppure assegna agli agenti con molta memoria un modello online.",))
+                             (f"Il modello locale {eff} ha ricevuto piu' testo di quanto la sua finestra di contesto ({contesto} token) contenga: l'inizio (istruzioni, memoria, dossier) viene tagliato e gli agenti perdono i riferimenti. "
+                              "Aumenta OLLAMA_CONTEXT_LENGTH su quel computer (per esempio 16384) e riavvia Ollama, oppure assegna agli agenti con molta memoria un modello online.",))
     except Exception:  # noqa: BLE001 - un avviso mancato non deve fermare l'agente
         pass
     return True
 
 
-_LAVORO_LOCALE = {"in_corso": 0, "modello": "", "da": 0.0, "misure": []}   # cosa sta facendo il portatile adesso e a che velocita' (per la plancia)
-_BLOCCO_LOCALE = __import__("threading").Lock()
-
-
 def posta_locale(corpo: dict):
-    """Chiamata a Ollama con il conteggio delle richieste in corso e la misura della velocita' (token generati al secondo, tempo di lettura del prompt compreso)."""
+    """Chiamata a Ollama sul computer scelto, con il conteggio delle richieste in corso e la misura della velocita' (token generati al secondo, lettura del prompt compresa).
+    Se quel computer cade proprio adesso, la richiesta passa una volta a un altro computer acceso."""
     import time as _t
-    with _BLOCCO_LOCALE:
-        _LAVORO_LOCALE["in_corso"] += 1
-        _LAVORO_LOCALE["modello"] = corpo.get("model") or ""
-        if _LAVORO_LOCALE["in_corso"] == 1:
-            _LAVORO_LOCALE["da"] = _t.time()
-    t0 = _t.monotonic()
-    try:
-        r = httpx.post(url_locale() + "/v1/chat/completions", json=corpo, timeout=httpx.Timeout(900, connect=5))
-    finally:
+    chiesto, esclusi, ultimo = corpo.get("model") or "", (), None
+    for _ in range(2):
+        try:
+            m, eff = scegli_macchina(chiesto, esclusi)
+        except ErroreLocale:
+            if ultimo is not None:
+                raise ultimo from None
+            raise
+        url = m["url"]
         with _BLOCCO_LOCALE:
-            _LAVORO_LOCALE["in_corso"] = max(0, _LAVORO_LOCALE["in_corso"] - 1)
-    try:
-        if r.status_code == 200:
-            tok, dt = int((r.json().get("usage") or {}).get("completion_tokens") or 0), _t.monotonic() - t0
-            if tok >= 5 and dt > 0.2:
-                with _BLOCCO_LOCALE:
-                    _LAVORO_LOCALE["misure"] = (_LAVORO_LOCALE["misure"] + [{"token_s": round(tok / dt, 1), "token": tok, "secondi": round(dt, 1), "modello": corpo.get("model") or "", "quando": _t.time()}])[-20:]
-    except (ValueError, AttributeError, TypeError):
-        pass
-    return r
+            st = _LAVORO.setdefault(url, {"in_corso": 0, "modello": "", "da": 0.0, "misure": []})
+            st["in_corso"] += 1
+            st["modello"] = eff
+            if st["in_corso"] == 1:
+                st["da"] = _t.time()
+        t0 = _t.monotonic()
+        try:
+            r = httpx.post(url + "/v1/chat/completions", json={**corpo, "model": eff}, timeout=httpx.Timeout(900, connect=5))
+        except httpx.ConnectError as e:      # non raggiungibile: lo si segna spento e si prova l'altro
+            _TAGS[url] = (None, _t.monotonic())
+            esclusi, ultimo = esclusi + (url,), e
+            continue
+        finally:
+            with _BLOCCO_LOCALE:
+                st["in_corso"] = max(0, st["in_corso"] - 1)
+        _ULTIMA[chiesto] = (url, eff)
+        try:
+            if r.status_code == 200:
+                tok, dt = int((r.json().get("usage") or {}).get("completion_tokens") or 0), _t.monotonic() - t0
+                if tok >= 5 and dt > 0.2:
+                    with _BLOCCO_LOCALE:
+                        st["misure"] = (st["misure"] + [{"token_s": round(tok / dt, 1), "token": tok, "secondi": round(dt, 1), "modello": eff, "quando": _t.time()}])[-20:]
+        except (ValueError, AttributeError, TypeError):
+            pass
+        return r
+    raise ultimo
 
 
-def lavoro_locale() -> dict:
+def lavoro_locale(url: str | None = None) -> dict:
+    """Che cosa sta facendo un computer (o, senza indirizzo, tutti insieme): richieste in corso, ultima velocita', media recente."""
     import time as _t
     with _BLOCCO_LOCALE:
-        m = list(_LAVORO_LOCALE["misure"])
+        stati = [_LAVORO[url]] if url and url in _LAVORO else ([] if url else list(_LAVORO.values()))
+        m = sorted((x for st in stati for x in st["misure"]), key=lambda x: x["quando"])
+        attivi = [st for st in stati if st["in_corso"]]
         recenti = [x for x in m if _t.time() - x["quando"] < 1800]
-        return {"in_corso": _LAVORO_LOCALE["in_corso"], "modello_in_corso": _LAVORO_LOCALE["modello"] if _LAVORO_LOCALE["in_corso"] else "",
-                "da_secondi": int(_t.time() - _LAVORO_LOCALE["da"]) if _LAVORO_LOCALE["in_corso"] else 0,
+        return {"in_corso": sum(st["in_corso"] for st in stati), "modello_in_corso": attivi[0]["modello"] if attivi else "",
+                "da_secondi": int(_t.time() - min(st["da"] for st in attivi)) if attivi else 0,
                 "ultima": ({**m[-1], "secondi_fa": int(_t.time() - m[-1]["quando"])} if m else None),
                 "media_token_s": round(sum(x["token_s"] for x in recenti) / len(recenti), 1) if recenti else None}
 

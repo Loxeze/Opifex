@@ -334,27 +334,47 @@ function bloccoModelloLocale(ricarica) {
   const carica = async () => {
     let q;
     try { q = await api("GET", "/gestione/locale"); } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); return; }
-    const url = h("input", { type: "text", maxlength: 200, value: q.url, placeholder: "http://100.x.y.z:11434 (indirizzo Tailscale del portatile)", autocomplete: "off" });
-    const rip = h("select", {}, h("option", { value: "" }, "Nessuno: se il portatile non risponde, l'agente aspetta"), q.candidati_ripiego.map(n => h("option", { value: n }, n)));
+    // Computer con Ollama, in ordine di preferenza: il primo acceso che ha il modello richiesto fa il lavoro
+    const righe = h("div", { class: "macchine" });
+    const riga = (m) => {
+      const r = { nome: h("input", { type: "text", maxlength: 40, value: m.nome || "", placeholder: "Nome (es. Fisso)", "aria-label": "Nome del computer" }),
+        url: h("input", { type: "text", maxlength: 200, value: m.url || "", placeholder: "http://100.x.y.z:11434", autocomplete: "off", "aria-label": "Indirizzo di Ollama" }),
+        modello: h("select", { "aria-label": "Modello principale" }, h("option", { value: "" }, "— modello principale —"), q.registrati.filter(n => n !== "locale-auto").map(n => h("option", { value: n }, n))),
+        vram: h("input", { type: "number", min: 1, max: 512, step: 1, value: m.vram_gb || 8, title: "Memoria della scheda grafica, in GB", "aria-label": "GB della scheda grafica" }),
+        ram: h("input", { type: "number", min: 1, max: 4096, step: 1, value: m.ram_gb || 32, title: "RAM, in GB", "aria-label": "GB di RAM" }) };
+      r.modello.value = m.modello || "";
+      r.el = h("div", { class: "macchina" }, r.nome, r.url, r.modello, h("label", { class: "mini" }, "Scheda GB", r.vram), h("label", { class: "mini" }, "RAM GB", r.ram),
+        h("button", { type: "button", class: "s", title: "Su: più preferito", onclick: () => { const p = r.el.previousElementSibling; if (p) { righe.insertBefore(r.el, p); elenco.splice(elenco.indexOf(r) - 1, 0, elenco.splice(elenco.indexOf(r), 1)[0]); } } }, "↑"),
+        h("button", { type: "button", class: "s", title: "Togli questo computer", onclick: () => { r.el.remove(); elenco.splice(elenco.indexOf(r), 1); } }, "✕"));
+      return r;
+    };
+    const elenco = (q.macchine.length ? q.macchine : [{ nome: "Portatile", url: q.url }]).map(riga);
+    elenco.forEach(r => righe.append(r.el));
+    const leggi = () => elenco.filter(r => r.url.value.trim()).map(r => ({ nome: r.nome.value.trim() || "Computer", url: r.url.value.trim(), modello: r.modello.value, vram_gb: Number(r.vram.value) || 8, ram_gb: Number(r.ram.value) || 32 }));
+    const salva = () => api("PUT", "/gestione/locale", { ripiego: rip.value, macchine: leggi() });
+    const rip = h("select", {}, h("option", { value: "" }, "Nessuno: se nessun computer risponde, l'agente aspetta"), q.candidati_ripiego.map(n => h("option", { value: n }, n)));
     rip.value = q.ripiego;
     const msg = h("div"), stato_ = h("div", { class: "sotto" });
     corpo.replaceChildren(
-      h("div", { class: "nome" }, "Modello locale (sul tuo portatile)"),
-      h("p", { class: "aiuto" }, "I dati restano sui tuoi dispositivi: il portatile è collegato al server da un tunnel privato e cifrato (Tailscale). Il modello gira con Ollama. " +
-        "Se il portatile è spento o non risponde, Opifex può ripiegare sul modello qui sotto, ma solo per i dati che possono uscire verso quel fornitore: i dati riservati non escono mai dal portatile."),
-      h("label", {}, "Indirizzo di Ollama", url),
-      h("label", {}, "Ripiego se il portatile non risponde", rip),
+      h("div", { class: "nome" }, "Modello locale (sui tuoi computer)"),
+      h("p", { class: "aiuto" }, "I dati restano sui tuoi dispositivi: ogni computer è collegato al server da un tunnel privato e cifrato (Tailscale) e il modello gira con Ollama. " +
+        "Se nessun computer risponde, Opifex può ripiegare sul modello online qui sotto, ma solo per i dati che possono uscire verso quel fornitore: i dati riservati non escono mai dai tuoi computer."),
+      h("div", { class: "nome", style: "font-size:1rem" }, "Computer con Ollama, dal più preferito"),
+      h("p", { class: "aiuto" }, "Un agente con un modello preciso lavora sul computer acceso che ha quel modello (se sono due, sul meno occupato). Un agente con il modello «locale-auto» usa il modello principale del primo computer acceso di questo elenco: metti in cima il più potente. Quando lo spegni, il lavoro passa da solo al successivo."),
+      righe,
+      h("div", { class: "azioni" }, h("button", { type: "button", class: "s", "data-uso": "locale-aggiungi", onclick: () => { const r = riga({ nome: "", url: "" }); elenco.push(r); righe.append(r.el); r.nome.focus(); } }, "➕ Aggiungi un computer")),
+      h("label", {}, "Ripiego online se nessun computer risponde", rip),
       msg, stato_,
       h("div", { class: "azioni" },
-        h("button", { class: "p", "data-uso": "locale-salva", onclick: async () => { try { await api("PUT", "/gestione/locale", { url: url.value, ripiego: rip.value }); msg.replaceChildren(avviso("Salvato.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva"),
+        h("button", { class: "p", "data-uso": "locale-salva", onclick: async () => { try { await salva(); msg.replaceChildren(avviso("Salvato.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva"),
         h("button", { class: "s", "data-uso": "locale-prova", onclick: async () => {
           stato_.textContent = "Provo il collegamento…";
-          try { await api("PUT", "/gestione/locale", { url: url.value, ripiego: rip.value }); const r = await api("POST", "/gestione/locale/prova");
-            stato_.replaceChildren(r.raggiungibile ? avviso("Il portatile risponde. Modelli scaricati: " + (r.modelli.join(", ") || "nessuno ancora"), "ok") : avviso("Non risponde: " + r.errore, "no")); }
+          try { await salva(); const r = await api("POST", "/gestione/locale/prova");
+            stato_.replaceChildren(...r.macchine.map(m => m.raggiungibile ? avviso(m.nome + " risponde. Modelli scaricati: " + (m.modelli.join(", ") || "nessuno ancora"), "ok") : avviso(m.nome + " non risponde: " + m.errore, "no"))); }
           catch (e) { stato_.replaceChildren(avviso(e.message, "no")); } } }, "Prova il collegamento"),
         h("button", { class: "s", "data-uso": "locale-importa", onclick: async () => {
           try { const r = await api("POST", "/gestione/locale/modelli/importa"); msg.replaceChildren(avviso(r.nuovi + " modelli nuovi registrati (su " + r.totale + " trovati): ora puoi assegnarli agli agenti.", "ok")); await ricarica(); }
-          catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Registra i modelli del portatile")),
+          catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Registra i modelli dei computer")),
       q.registrati.length ? h("p", { class: "sotto" }, "Modelli locali registrati: " + q.registrati.join(" · ")) : null,
       bloccoTachimetri(),
       bloccoCantieri(),
@@ -416,38 +436,42 @@ function tachimetro(titolo, valore, massimo, unita, colore) {
 }
 
 function pannelloPortatile() {
-  const spia = h("span", { class: "spia" }), statoT = h("b", {}, "Controllo il collegamento…"), cosa = h("span", { class: "sotto" });
-  const corpo = h("div", { class: "tach-riga" }), nota = h("p", { class: "sotto" });
-  const el = h("div", { class: "portatile" }, h("div", { class: "portatile-testa" }, spia, statoT, cosa), corpo, nota);
+  const el = h("div", { class: "portatili" }, h("p", { class: "sotto" }, "Controllo il collegamento…")), nota = h("p", { class: "sotto" });
+  const fuori = h("div", {}, el, nota);
   let visto = false;
   const durata = (s) => s < 60 ? s + " s" : Math.floor(s / 60) + " min";
+  const riquadro = (m, piu) => {
+    const l = m.lavoro || {}, ultima = l.ultima;
+    return h("div", { class: "portatile" },
+      h("div", { class: "portatile-testa" }, h("span", { class: "spia " + (!m.raggiungibile ? "spenta" : l.in_corso ? "lavora" : "accesa") }),
+        h("b", {}, m.nome + (!m.raggiungibile ? ": non collegato" : l.in_corso ? ": al lavoro" : ": collegato, in attesa")),
+        h("span", { class: "sotto" }, !m.raggiungibile ? (piu ? " · spento o non raggiungibile" : " · acceso, con Ollama e Tailscale attivi e la VPN spenta?")
+          : l.in_corso ? " · " + l.in_corso + (l.in_corso === 1 ? " richiesta" : " richieste") + " su " + l.modello_in_corso + ", da " + durata(l.da_secondi)
+          : (ultima ? " · ultima risposta " + durata(ultima.secondi_fa) + " fa" : " · nessuna richiesta da quando Opifex è stato avviato"))),
+      m.raggiungibile || !piu ? h("div", { class: "tach-riga" },
+        tachimetro("Scheda grafica usata dal modello", m.raggiungibile ? (m.gpu_usata_gb || 0) : 0, m.vram_totale_gb, "GB", "#3FB68B"),
+        tachimetro("RAM usata dal modello", m.raggiungibile ? (m.ram_usata_gb || 0) : 0, m.ram_totale_gb || 32, "GB", "#5B8DEF"),
+        tachimetro(l.in_corso ? "Velocità (media recente)" : "Velocità dell'ultima risposta", l.in_corso ? (l.media_token_s || 0) : (ultima ? ultima.token_s : 0), 60, "token/s", "#E8924A")) : null,
+      m.raggiungibile ? h("p", { class: "sotto" }, m.modelli.length ? m.modelli.map(x => x.nome + ": " + x.dimensione_gb.toLocaleString("it-IT") + " GB, " + x.percentuale_gpu + "% sulla scheda grafica" + (x.contesto ? ", finestra " + x.contesto.toLocaleString("it-IT") + " token" : "")).join(" · ")
+        : "Nessun modello in memoria: si carica alla prima richiesta (può volerci un paio di minuti).") : null);
+  };
   const agg = async () => {
-    if (visto && !el.isConnected) return;          // la pagina e' cambiata: smetto di interrogare il portatile
-    if (el.isConnected) visto = true;
+    if (visto && !fuori.isConnected) return;          // la pagina e' cambiata: smetto di interrogare i computer
+    if (fuori.isConnected) visto = true;
     if (document.hidden) { setTimeout(agg, 3000); return; }
     try {
-      const r = await api("GET", "/gestione/locale/risorse"), l = r.lavoro || {};
-      const vel = l.in_corso ? (l.media_token_s || 0) : 0, ultima = l.ultima;
-      spia.className = "spia " + (!r.raggiungibile ? "spenta" : l.in_corso ? "lavora" : "accesa");
-      statoT.textContent = !r.raggiungibile ? "Portatile non collegato" : l.in_corso ? "Portatile al lavoro" : "Portatile collegato, in attesa";
-      cosa.textContent = !r.raggiungibile ? " · acceso, con Ollama e Tailscale attivi?" : l.in_corso ? " · " + l.in_corso + (l.in_corso === 1 ? " richiesta" : " richieste") + " in corso su " + l.modello_in_corso + ", da " + durata(l.da_secondi)
-        : (ultima ? " · ultima risposta " + durata(ultima.secondi_fa) + " fa" : " · nessuna richiesta da quando Opifex e' stato avviato");
-      corpo.replaceChildren(
-        tachimetro("Scheda grafica usata dal modello", r.raggiungibile ? (r.gpu_usata_gb || 0) : 0, r.vram_totale_gb, "GB", "#3FB68B"),
-        tachimetro("RAM usata dal modello", r.raggiungibile ? (r.ram_usata_gb || 0) : 0, 32, "GB", "#5B8DEF"),
-        tachimetro(l.in_corso ? "Velocità (media recente)" : "Velocità dell'ultima risposta", l.in_corso ? vel : (ultima ? ultima.token_s : 0), 60, "token/s", "#E8924A"));
-      nota.textContent = !r.raggiungibile ? "" : r.modelli.length ? r.modelli.map(m => m.nome + ": " + m.dimensione_gb.toLocaleString("it-IT") + " GB, " + m.percentuale_gpu + "% sulla scheda grafica" + (m.contesto ? ", finestra " + m.contesto.toLocaleString("it-IT") + " token" : "")).join(" · ")
-        : "Nessun modello in memoria: si carica alla prima richiesta (può volerci un paio di minuti).";
-      if (r.oggi && (r.oggi.passaggi_online || r.oggi.prompt_ridotti)) nota.textContent += " Oggi: " + r.oggi.prompt_ridotti + " richieste adattate alla finestra del modello, " + r.oggi.passaggi_online + " svolte da Claude perché non ci stavano.";
-    } catch (e) { spia.className = "spia spenta"; statoT.textContent = "Stato del portatile non disponibile"; cosa.textContent = " · " + e.message; }
+      const r = await api("GET", "/gestione/locale/risorse");
+      el.replaceChildren(...r.macchine.map(m => riquadro(m, r.macchine.length > 1)));
+      nota.textContent = (r.oggi && (r.oggi.passaggi_online || r.oggi.prompt_ridotti)) ? "Oggi: " + r.oggi.prompt_ridotti + " richieste adattate alla finestra del modello, " + r.oggi.passaggi_online + " svolte da Claude perché non ci stavano." : "";
+    } catch (e) { el.replaceChildren(h("p", { class: "sotto" }, "Stato dei computer non disponibile: " + e.message)); }
     setTimeout(agg, 3000);
   };
   setTimeout(agg, 60);
-  return el;
+  return fuori;
 }
 
 function bloccoTachimetri() {
-  return h("div", {}, h("div", { class: "nome" }, "Il portatile al lavoro"), pannelloPortatile());
+  return h("div", {}, h("div", { class: "nome" }, "I computer al lavoro"), pannelloPortatile());
 }
 
 // Prova di affidabilita': stessi compiti per ogni modello locale, con un punteggio
