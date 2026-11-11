@@ -304,3 +304,7 @@ body.bottega.bronzo .bt-riduci{display:inline-flex;align-items:center;justify-co
 @media (prefers-reduced-transparency:reduce){
   body.bottega.bronzo .carta,body.bottega.bronzo .bt-card,body.bottega.bronzo #radice>header{-webkit-backdrop-filter:none;backdrop-filter:none;background:#2A1E16}
 }
+body.bottega.bronzo .schede-gruppo{border-bottom-color:rgba(255,255,255,.12)}
+body.bottega.bronzo .schede-gruppo button{background:transparent;border:1px solid rgba(255,255,255,.18);color:#D9CFC4}
+body.bottega.bronzo .schede-gruppo button:hover{background:rgba(255,255,255,.10)}
+body.bottega.bronzo .schede-gruppo button.attivo{background:#E8924A;color:#1A110A;border-color:#E8924A}

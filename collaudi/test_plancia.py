@@ -71,7 +71,9 @@ with TestClient(app) as c:
     ok("pagina: carica plancia.js e bottega.css (dopo gli altri stili)", "plancia.js" in idx and idx.index("bottega.css") > idx.index("ergonomia.css"))
     ok("file serviti", c.get("/app/plancia.js").status_code == 200 and c.get("/app/bottega.css").status_code == 200)
     app_js = c.get("/app/app.js").text; pl = c.get("/app/plancia.js").text
-    ok("menu laterale: Plancia, Social tra le voci, gruppi Lavoro e Laboratorio", '["dashboard", "Plancia"]' in app_js and '["social", "Social"]' in app_js and "GRUPPO_MENU" in app_js)
+    ok("menu laterale (2.52): voci raggruppate con le schede", all(f'["{g}", "{n}"' in app_js for g, n in [("oggi", "Oggi"), ("posta", "Posta"), ("lavoro", "Lavoro"), ("conoscenza", "Conoscenza"), ("officina", "Officina"), ("squadra", "Squadra"), ("controllo", "Controllo")]) and "schedeGruppo()" in app_js and "SEZIONI_FUORI" in app_js)
+    dj = c.get("/app/dashboard.js").text
+    ok("nuove pagine: Posta, Computer locali, sezioni fuori dalle Impostazioni", all(x in dj for x in ("function vistaPosta", "function vistaComputer", "function vistaSezione", "function mappaImpostazioni")))
     ok("organigramma 3D in finestra a parte, con ripiego nella stessa pagina", 'window.open(location.pathname + "#organigramma", "opifex-organigramma"' in pl and 'vai("organigramma")' in pl and "organigramma: vistaOrganigrammaPagina" in app_js)
     ok("la plancia non ha piu' la chat tra agenti ne' la scena 3D incorporata", "chat-org" not in pl and "dialoghi/feed" not in pl and "vistaOrganigramma()" in pl and "scena-pagina" in pl)
     ok("grafici senza emoji e senza HTML dai dati", "innerHTML" not in pl and "insertAdjacentHTML" not in pl)

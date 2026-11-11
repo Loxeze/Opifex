@@ -7,13 +7,38 @@ function pannello(titolo, corpo, azione) {
   return h("section", { class: "pan" }, h("div", { class: "pan-testa" }, h("h3", {}, titolo), azione || null), corpo);
 }
 
-function vistaImpostazioni() {
-  const mappa = { profilo: vistaAccount, struttura: vistaStruttura, collegamenti: () => [vistaCollegamenti(), h("hr"), vistaEmail()].flat(Infinity), iniziative: vistaIniziative, connessioni: vistaConnessioni, canali: vistaCanali, percorsi: vistaPercorsi, social: vistaSocialCanali,
+function mappaImpostazioni() {
+  return { profilo: vistaAccount, struttura: vistaStruttura, collegamenti: vistaCollegamenti, iniziative: vistaIniziative, connessioni: vistaConnessioni, canali: vistaCanali, percorsi: vistaPercorsi, social: vistaSocialCanali,
     utenti: vistaUtenti, aggiornamenti: vistaAggiornamenti, sicurezza: vistaSicurezza, registro: vistaRegistro, sistema: vistaSistema, memoria: vistaMemoria, noteaurora: vistaNoteAurora, diagnostica: vistaDiagnostica, esempio: vistaEsempio, memoriavett: vistaMemoriaVett, giro: vistaGiro, contenuti: vistaContenuti, monitorsocial: vistaMonitorSocial, archivio: vistaArchivio, miglioramenti: vistaMiglioramenti, imprese: vistaImprese, tavoli: vistaTavoli, spesareparti: vistaSpesaReparti, dipendenze: vistaDipendenze, sentinelle: vistaSentinelle, misure: vistaMisure, siti: vistaSiti, dossier: vistaDossier, biblioteca: vistaBiblioteca, studi: vistaStudi, cerimoniere: vistaCerimoniere, quando: vistaQuando, smistamento: vistaSmistamento, reparti: vistaReparti, sandbox: vistaSandbox, scatolanera: vistaScatolaNera, voce: vistaVoce, app: vistaApp, salute: vistaSalute };
+}
+
+// Una sezione spostata fuori dalle Impostazioni (Conoscenza, Squadra, Controllo…): la stessa pagina, senza il menu delle impostazioni
+function vistaSezione() {
+  const mappa = mappaImpostazioni();
+  if (!mappa[stato.sezione]) stato.sezione = "memoria";
+  return h("div", { class: "contenuto-sez" }, [mappa[stato.sezione]()].flat(Infinity));
+}
+
+// Posta: le email preparate dagli agenti da approvare, e dove si collegano le caselle
+function vistaPosta() {
+  return [h("h2", {}, "Posta"),
+    h("p", { class: "sotto" }, "Le email che gli agenti hanno preparato e aspettano il tuo via libera. Le caselle Gmail si collegano nella scheda «Caselle e Google»; quali agenti possono inviare e come si sceglie nella scheda di ciascun agente."),
+    codaEmailUscita(),
+    h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => vai("sez", "collegamenti") }, "Collega o controlla le caselle"), h("button", { class: "s", type: "button", onclick: () => vai("email") }, "Email marketing (Brevo)"))];
+}
+
+// Controllo › Computer locali: i computer con Ollama, i tachimetri, la prova di affidabilita', l'assegnazione e i cantieri
+function vistaComputer() {
+  return [h("h2", {}, "Computer locali"), pannelloPortatile(), bloccoModelloLocale(ricarica)];
+}
+
+function vistaImpostazioni() {
+  const mappa = mappaImpostazioni();
   if (!mappa[stato.sezione]) stato.sezione = "profilo";
   const nomeSez = (id) => (SEZIONI_IMPOSTAZIONI.find(x => x[0] === id) || [])[1] || id;
   const noti = new Set(GRUPPI_IMP.flatMap(g => g[1]));
-  const gruppi = GRUPPI_IMP.concat([["Altro", SEZIONI_IMPOSTAZIONI.map(x => x[0]).filter(id => !noti.has(id))]]).map(([t, ids]) => [t, ids.filter(id => mappa[id])]).filter(g => g[1].length);
+  if (SEZIONI_FUORI.has(stato.sezione)) stato.sezione = "profilo";
+  const gruppi = GRUPPI_IMP.concat([["Altro", SEZIONI_IMPOSTAZIONI.map(x => x[0]).filter(id => !noti.has(id) && !SEZIONI_FUORI.has(id))]]).map(([t, ids]) => [t, ids.filter(id => mappa[id])]).filter(g => g[1].length);
   // Il browser scambiava questo campo per il «nome utente» delle chiavi API della pagina e ci scriveva da solo l'email salvata, filtrando via tutte le voci.
   // Resta in sola lettura finche' non lo tocchi tu, e cio' che vi compare senza che tu ci stia scrivendo viene scartato.
   const cerca = h("input", { type: "search", class: "cerca-imp", name: "cerca-impostazioni", placeholder: "Cerca nelle impostazioni…", "aria-label": "Cerca nelle impostazioni",
@@ -32,6 +57,11 @@ function vistaImpostazioni() {
       det.open = !!q || ids.includes(stato.sezione);
       return det;
     }));
+    if (q) {   // cio' che hai cercato potrebbe essersi spostato nel menu: lo si mostra con la sua nuova casa
+      const fuori = MENU.flatMap(g => g[2].map(t => [g[1], t])).filter(([gn, t]) => t[1] !== "impostazioni" && (t[0] + " " + gn + " " + (t[2] ? nomeSez(t[2]) : "")).toLowerCase().includes(q));
+      if (fuori.length) nav.append(h("details", { class: "gruppo-imp", open: true }, h("summary", {}, "Nel menu"),
+        fuori.map(([gn, t]) => h("button", { onclick: () => vai(t[1], t[2]) }, gn + " › " + t[0]))));
+    }
     if (!nav.children.length) nav.append(h("p", { class: "sotto" }, "Nessuna voce trovata."), h("button", { class: "s", onclick: () => { cerca.value = ""; disegnaNav(); } }, "Mostra tutte le voci"));
   };
   cerca.addEventListener("input", () => { if (document.activeElement !== cerca) cerca.value = ""; disegnaNav(); });

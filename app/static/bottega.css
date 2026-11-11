@@ -256,3 +256,6 @@ body.bottega .pallini i{background:#E3DED1}body.bottega .pallini i.on{background
 .bt-lav-dove span{display:inline-flex;align-items:center;gap:5px}
 .bt-lav-dove i{width:8px;height:8px;border-radius:50%;display:inline-block}
 .bt-lav-fa{font-size:13px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
+body.bottega .schede-gruppo button{background:transparent;border:1px solid #DAD4C6;color:#4E5A55;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
+body.bottega .schede-gruppo button:hover{background:#ECE8DE}
+body.bottega .schede-gruppo button.attivo{background:#1F4D43;color:#F5F2EB;border-color:#1F4D43}

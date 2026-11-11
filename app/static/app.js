@@ -145,10 +145,45 @@ function mostraAccesso(errore) {
 }
 
 // ---------- Struttura ----------
-const VISTE = [["dashboard", "Plancia"], ["chat", "Chat"], ["task", "Task"], ["riunioni", "Riunioni"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["crm", "CRM"], ["social", "Social"], ["finestre", "Finestre"], ["briefing", "Briefing"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["impostazioni", "Impostazioni"]];
-// il menu laterale: dopo queste voci comincia un nuovo gruppo con la sua intestazione
-const GRUPPO_MENU = { progetti: "Lavoro", agenti: "Laboratorio" };
-const ICONE = { finestre: "M3 5h18v14H3zM3 9h18M7 7h.01", dashboard: "M4 11l8-7 8 7v9H4z", chat: "M4 5h16v11H9l-5 4z", task: "M5 12l4 4 10-10", riunioni: "M12 3a3 3 0 013 3v5a3 3 0 01-6 0V6a3 3 0 013-3zM5 11a7 7 0 0014 0M12 18v3",
+// Tutte le pagine raggiungibili dal titolare (servono a ricordare l'ultima pagina aperta)
+const VISTE = [["dashboard", "Plancia"], ["briefing", "Briefing"], ["task", "Task"], ["riunioni", "Riunioni"], ["chat", "Chat"], ["posta", "Posta"], ["email", "Email marketing"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["crm", "Contatti"], ["social", "Social"],
+  ["finestre", "Finestre"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["computer", "Computer locali"], ["sez", "Sezione"], ["impostazioni", "Impostazioni"]];
+// Il menu del titolare (2.52): poche voci, ognuna con le sue schede in alto. Ogni scheda: [etichetta, vista, sezione?].
+// Le sezioni con vista "sez" sono le stesse di prima, solo spostate fuori dalle Impostazioni.
+const MENU = [
+  ["oggi", "Oggi", [["Plancia", "dashboard"], ["Briefing", "briefing"], ["Task", "task"], ["Riunioni", "riunioni"]]],
+  ["chat", "Aurora e chat", [["Chat", "chat"]]],
+  ["posta", "Posta", [["Da approvare", "posta"], ["Caselle e Google", "sez", "collegamenti"]]],
+  ["lavoro", "Lavoro", [["Progetti", "progetti"], ["Documenti", "documenti"], ["Tavoli di lavoro", "sez", "tavoli"], ["Schede d'impresa", "sez", "imprese"]]],
+  ["contatti", "Contatti", [["Contatti e Radar", "crm"]]],
+  ["comunicazione", "Comunicazione", [["Social", "social"], ["Profili monitorati", "sez", "monitorsocial"], ["Email marketing", "email"], ["Contenuti e stili", "sez", "contenuti"]]],
+  ["conoscenza", "Conoscenza", [["Memoria di lavoro", "sez", "memoria"], ["Memoria condivisa", "sez", "memoriavett"], ["Note di Aurora", "sez", "noteaurora"], ["Biblioteca", "sez", "biblioteca"], ["Studi", "sez", "studi"], ["Dossier e fiducia", "sez", "dossier"], ["Archivio NAS", "sez", "archivio"]]],
+  ["officina", "Officina", [["Finestre", "finestre"], ["Sandbox del codice", "sez", "sandbox"], ["Impara da un esempio", "sez", "esempio"]]],
+  ["squadra", "Squadra", [["Agenti", "agenti"], ["Ginnasio", "ginnasio"], ["Reparti pronti", "sez", "reparti"], ["Miglioramento", "sez", "miglioramenti"], ["Salute", "sez", "salute"], ["Sentinelle", "sez", "sentinelle"], ["Cerimoniere", "sez", "cerimoniere"], ["Quando lavora", "sez", "quando"], ["Smistamento", "sez", "smistamento"]]],
+  ["controllo", "Controllo", [["Computer locali", "computer"], ["Scatola nera", "sez", "scatolanera"], ["Registro decisioni", "sez", "registro"], ["Consumi", "sez", "misure"], ["Spesa per reparto", "sez", "spesareparti"], ["Backup e costi", "sez", "sistema"]]],
+  ["impostazioni", "Impostazioni", [["Impostazioni", "impostazioni"]]],
+];
+// le sezioni spostate fuori dalle Impostazioni: un vecchio link vai("impostazioni", x) porta alla loro nuova casa
+const SEZIONI_FUORI = new Set(MENU.flatMap(g => g[2]).filter(t => t[1] === "sez").map(t => t[2]));
+// a quale voce del menu appartiene la pagina aperta (anche le pagine di dettaglio)
+function gruppoAttivo() {
+  const v = stato.vista, s = stato.sezione;
+  const extra = { richieste: "oggi", organigramma: "oggi", progetto: "lavoro", contatto: "contatti", percorsi: "impostazioni", iniziative: "impostazioni", account: "impostazioni" };
+  if (extra[v]) return MENU.find(g => g[0] === extra[v]);
+  return MENU.find(g => g[2].some(t => t[1] === v && (v !== "sez" || t[2] === s))) || null;
+}
+function schedeGruppo() {
+  const g = gruppoAttivo();
+  if (!g || g[2].length < 2) return null;
+  const barra = h("nav", { class: "schede-gruppo", "aria-label": g[1] });
+  requestAnimationFrame(() => { const a = barra.querySelector(".attivo"); if (a && barra.scrollWidth > barra.clientWidth) barra.scrollLeft = a.offsetLeft - 16; });
+  riempi(barra, g[2].map(([et, v, s]) => {
+    const on = stato.vista === v && (v !== "sez" || stato.sezione === s);
+    return h("button", { type: "button", class: on ? "attivo" : "", "aria-current": on ? "page" : null, "data-uso": "scheda-" + (s || v), onclick: () => vai(v, s) }, et);
+  }));
+  return barra;
+}
+const ICONE = { oggi: "M12 3v2M12 19v2M5 12H3M21 12h-2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M6.3 17.7l1.4-1.4M16.3 7.7l1.4-1.4M12 8a4 4 0 110 8 4 4 0 010-8z", posta: "M3 6h18v12H3zM3 7l9 6 9-6", lavoro: "M3 7h6l2 2h10v10H3z", contatti: "M9 4.5a3.5 3.5 0 110 7 3.5 3.5 0 010-7zM3 20c0-3.5 3-6 6-6s6 2.5 6 6M16 5a3.5 3.5 0 010 7", comunicazione: "M4 20V10M10 20V4M16 20v-7M22 20H2", conoscenza: "M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2zM4 21V5M8 7h7", officina: "M14 6l4 4-9 9H5v-4zM12 8l4 4", squadra: "M8 5a3 3 0 110 6 3 3 0 010-6zM16 6a2.5 2.5 0 110 5 2.5 2.5 0 010-5zM2 20c0-3.3 2.7-6 6-6s6 2.7 6 6M14 14.5c.6-.3 1.3-.5 2-.5 3 0 6 2 6 5", controllo: "M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z", finestre: "M3 5h18v14H3zM3 9h18M7 7h.01", dashboard: "M4 11l8-7 8 7v9H4z", chat: "M4 5h16v11H9l-5 4z", task: "M5 12l4 4 10-10", riunioni: "M12 3a3 3 0 013 3v5a3 3 0 01-6 0V6a3 3 0 013-3zM5 11a7 7 0 0014 0M12 18v3",
   progetti: "M3 7h6l2 2h10v10H3z", documenti: "M7 3h8l4 4v14H7z", crm: "M9 4.5a3.5 3.5 0 110 7 3.5 3.5 0 010-7zM3 20c0-3.5 3-6 6-6s6 2.5 6 6M16 5a3.5 3.5 0 010 7", social: "M4 20V10M10 20V4M16 20v-7M22 20H2",
   briefing: "M5 4h14v16H5zM9 8h6M9 12h6M9 16h3", agenti: "M12 4a4 4 0 110 8 4 4 0 010-8zM4 21c0-4.4 3.6-7 8-7s8 2.6 8 7", ginnasio: "M3 9l9-5 9 5-9 5zM7 11.5V16c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.5",
   impostazioni: "M12 9a3 3 0 110 6 3 3 0 010-6zM12 3v3M12 18v3M3 12h3M18 12h3", iniziative: "M5 12l4 4 10-10", percorsi: "M3 7h6l2 2h10v10H3z", account: "M12 4a4 4 0 110 8 4 4 0 010-8zM4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" };
@@ -158,36 +193,48 @@ function icona(id) {
   const p = document.createElementNS("http://www.w3.org/2000/svg", "path"); p.setAttribute("d", ICONE[id] || ICONE.dashboard); s.append(p);
   return s;
 }
-const GRUPPI_IMP = [["Io e account", ["profilo", "voce", "app"]], ["Organizzazione", ["struttura", "utenti", "reparti", "tavoli", "cerimoniere", "quando", "smistamento"]],
-  ["Collegamenti", ["collegamenti", "connessioni", "siti", "canali", "social", "monitorsocial", "archivio", "percorsi"]], ["Conoscenza e formazione", ["biblioteca", "studi", "memoria", "imprese", "noteaurora", "miglioramenti", "dossier"]],
-  ["Controllo e sicurezza", ["sicurezza", "registro", "scatolanera", "sentinelle", "salute", "sandbox"]], ["Sistema", ["aggiornamenti", "misure", "spesareparti", "dipendenze", "diagnostica", "esempio", "memoriavett", "giro", "contenuti", "sistema"]]];
+// Le Impostazioni restano solo configurazione: cio' che si usa ogni giorno sta nel menu (vedi MENU).
+const GRUPPI_IMP = [["Account", ["profilo", "voce", "app", "utenti"]], ["Le mie attività", ["struttura", "percorsi", "iniziative"]],
+  ["Collegamenti", ["collegamenti", "connessioni", "siti", "canali", "social"]], ["Intelligenza artificiale", ["sicurezza", "giro"]],
+  ["Sistema", ["aggiornamenti", "diagnostica", "dipendenze"]]];
 const VISTE_COLLABORATORE = [["task", "Task"], ["progetti", "Progetti"], ["iniziative", "Iniziative"], ["percorsi", "Percorsi"], ["chat", "Chat"], ["account", "Il mio account"]];
-const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Collegamenti (Google, posta)"], ["connessioni", "Connessioni a siti e app"], ["siti", "Siti e hosting (chiavi)"],
-  ["canali", "Canali (Telegram)"], ["social", "Social"], ["monitorsocial", "Profili social monitorati"], ["archivio", "Archivio NAS"], ["percorsi", "Percorsi"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Sicurezza e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["imprese", "Schede d'impresa"], ["tavoli", "Tavoli di lavoro"], ["noteaurora", "Note di Aurora"], ["miglioramenti", "Miglioramento degli agenti"], ["spesareparti", "Spesa per reparto"], ["dipendenze", "Controllo delle librerie"], ["diagnostica", "Diagnostica (log scaricabile)"], ["esempio", "Impara da un esempio"], ["memoriavett", "Memoria condivisa (vettoriale)"], ["giro", "Giro di aggiornamento"], ["contenuti", "Contenuti: brief e stili di montaggio"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["scatolanera", "Scatola nera"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["misure", "Consumi (dove vanno i token)"], ["sistema", "Backup e costi"]];
+const SEZIONI_IMPOSTAZIONI = [["profilo", "Il mio profilo"], ["struttura", "Aziende e dipartimenti"], ["collegamenti", "Google e caselle di posta"], ["connessioni", "Connessioni a siti e app"], ["siti", "Siti e hosting (chiavi)"],
+  ["canali", "Canali (Telegram)"], ["social", "Social"], ["monitorsocial", "Profili social monitorati"], ["archivio", "Archivio NAS"], ["percorsi", "Percorsi"], ["iniziative", "Iniziative"], ["utenti", "Utenti e collaboratori"], ["aggiornamenti", "Aggiornamenti"], ["sicurezza", "Modelli AI, chiavi e garanzie"], ["registro", "Registro decisioni"], ["memoria", "Memoria di lavoro"], ["imprese", "Schede d'impresa"], ["tavoli", "Tavoli di lavoro"], ["noteaurora", "Note di Aurora"], ["miglioramenti", "Miglioramento degli agenti"], ["spesareparti", "Spesa per reparto"], ["dipendenze", "Controllo delle librerie"], ["diagnostica", "Diagnostica (log scaricabile)"], ["esempio", "Impara da un esempio"], ["memoriavett", "Memoria condivisa (vettoriale)"], ["giro", "Giro di aggiornamento"], ["contenuti", "Contenuti: brief e stili di montaggio"], ["dossier", "Dossier e fiducia"], ["biblioteca", "Biblioteca (Padre Casati)"], ["studi", "Studi di Padre Casati"], ["cerimoniere", "Cerimoniere"], ["quando", "Quando lavora"], ["smistamento", "Smistamento e consegne"], ["reparti", "Reparti pronti"], ["sandbox", "Sandbox del codice"], ["scatolanera", "Scatola nera"], ["salute", "Salute degli agenti"], ["sentinelle", "Sentinelle e casi di prova"], ["app", "App su smartphone"], ["voce", "Voce"], ["misure", "Consumi (dove vanno i token)"], ["sistema", "Backup e costi"]];
 
-function vai(vista, sezione) { if (_contatoreVisto[vista] && stato.novita && stato.novita[vista] > 0) registraUso(etichettaVista(), "contatore_aperto", { elemento: vista }); segnaVisto(vista); if (stato.ruolo === "titolare" && vista === "email") { sezione = "collegamenti"; vista = "impostazioni"; } if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") { try { Voce.fermaTutto(); } catch (e) { /* la voce non deve mai impedire di cambiare pagina */ } } stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
+function vai(vista, sezione) { if (_contatoreVisto[vista] && stato.novita && stato.novita[vista] > 0) registraUso(etichettaVista(), "contatore_aperto", { elemento: vista }); segnaVisto(vista); if (stato.ruolo === "titolare" && vista === "impostazioni" && sezione && SEZIONI_FUORI.has(sezione)) vista = "sez"; if (stato.ruolo === "titolare" && vista === "sez" && sezione && !SEZIONI_FUORI.has(sezione)) vista = "impostazioni"; if (stato.ruolo === "titolare" && (vista === "percorsi" || vista === "iniziative")) { sezione = vista; vista = "impostazioni"; } if (vista !== "chat") { try { Voce.fermaTutto(); } catch (e) { /* la voce non deve mai impedire di cambiare pagina */ } } stato.percorsoAperto = null; stato.vista = vista; if (sezione) stato.sezione = sezione; disegna(); }
 
 function cornice(contenuto) {
   if (window.name === "opifex-organigramma" || location.hash === "#organigramma") {   // finestra a parte: solo l'organigramma
     radice.replaceChildren(h("main", { class: "largo org-finestra" }, contenuto)); return;
   }
   const soloPC = matchMedia("(max-width:800px), (pointer:coarse)").matches;   // le Finestre servono il PC: da telefono non compaiono
-  const voci = (stato.ruolo === "titolare" ? VISTE : VISTE_COLLABORATORE).filter(v => !(soloPC && v[0] === "finestre"));
-  const attiva = (id) => stato.vista === id || (id === "dashboard" && (stato.vista === "richieste" || stato.vista === "organigramma")) || (id === "progetti" && stato.vista === "progetto") || (id === "crm" && stato.vista === "contatto");
   const nav = [];
-  for (const [id, nome] of voci) {
-    if (stato.ruolo === "titolare" && GRUPPO_MENU[id]) nav.push(h("div", { class: "bt-gruppo" }, GRUPPO_MENU[id]));
-    nav.push(h("button", { "data-uso": "menu-" + id, class: attiva(id) ? "attivo" : "", "aria-current": attiva(id) ? "page" : null, onclick: () => vai(id) },
-      icona(id), h("span", { class: "bt-et" }, nome + (id === "dashboard" && stato.richieste ? " (" + stato.richieste + ")" : "")),
-      id === "progetti" && stato.ruolo === "titolare" ? h("span", { id: "badge-progetti", class: "badge-chat", title: "Domande degli agenti e squadre da approvare", style: (stato.richieste + (stato.squadreAttesa || 0)) ? "" : "display:none" }, String((stato.richieste || 0) + (stato.squadreAttesa || 0))) : null,
-      (id === "ginnasio" || id === "documenti" || id === "progetti") && stato.ruolo === "titolare" ? h("span", { id: "novita-" + id, class: "badge-chat badge-novita", title: "Novità dall'ultima volta che hai guardato", style: stato.novita && stato.novita[id] ? "" : "display:none" }, stato.novita && stato.novita[id] ? String(stato.novita[id]) : "") : null,
-      id === "chat" ? h("span", { id: "badge-chat", class: "badge-chat", style: stato.chatNonLetti ? "" : "display:none" }, stato.chatNonLetti ? String(stato.chatNonLetti) : "") : null));
+  const bottone = (id, nome, attivo, dove, badge) => h("button", { "data-uso": "menu-" + id, class: attivo ? "attivo" : "", "aria-current": attivo ? "page" : null, onclick: dove },
+    icona(id), h("span", { class: "bt-et" }, nome), badge);
+  if (stato.ruolo === "titolare") {
+    const g0 = gruppoAttivo();
+    for (const [id, nome, schede] of MENU) {
+      const att = !!g0 && g0[0] === id;
+      const badge = [
+        id === "oggi" && stato.richieste ? h("span", { class: "badge-chat", title: "Domande aperte" }, String(stato.richieste)) : null,
+        id === "lavoro" ? h("span", { id: "badge-progetti", class: "badge-chat", title: "Domande degli agenti e squadre da approvare", style: (stato.richieste + (stato.squadreAttesa || 0)) ? "" : "display:none" }, String((stato.richieste || 0) + (stato.squadreAttesa || 0))) : null,
+        id === "lavoro" ? h("span", { id: "novita-progetti", class: "badge-chat badge-novita", title: "Novità nei progetti", style: stato.novita && stato.novita.progetti ? "" : "display:none" }, stato.novita && stato.novita.progetti ? String(stato.novita.progetti) : "") : null,
+        id === "lavoro" ? h("span", { id: "novita-documenti", class: "badge-chat badge-novita", title: "Documenti nuovi", style: stato.novita && stato.novita.documenti ? "" : "display:none" }, stato.novita && stato.novita.documenti ? String(stato.novita.documenti) : "") : null,
+        id === "squadra" ? h("span", { id: "novita-ginnasio", class: "badge-chat badge-novita", title: "Novità dal Ginnasio", style: stato.novita && stato.novita.ginnasio ? "" : "display:none" }, stato.novita && stato.novita.ginnasio ? String(stato.novita.ginnasio) : "") : null,
+        id === "chat" ? h("span", { id: "badge-chat", class: "badge-chat", style: stato.chatNonLetti ? "" : "display:none" }, stato.chatNonLetti ? String(stato.chatNonLetti) : "") : null];
+      const prima = schede.find(t => !(soloPC && t[1] === "finestre")) || schede[0];
+      nav.push(bottone(id, nome, att, () => vai(prima[1], prima[2]), badge));
+    }
+  } else {
+    const attiva = (id) => stato.vista === id || (id === "progetti" && stato.vista === "progetto");
+    for (const [id, nome] of VISTE_COLLABORATORE)
+      nav.push(bottone(id, nome, attiva(id), () => vai(id), id === "chat" ? h("span", { id: "badge-chat", class: "badge-chat", style: stato.chatNonLetti ? "" : "display:none" }, stato.chatNonLetti ? String(stato.chatNonLetti) : "") : null));
   }
   radice.replaceChildren(
     h("header", {}, h("h1", {}, "Opifex", h("small", {}, "la bottega degli agenti")),
       h("nav", { "aria-label": "Menu principale" }, nav),
-      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, "2.0"))),
-    h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "organigramma" ? "largo" : "" }, contenuto));
+      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, "2.52"))),
+    h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "organigramma" ? "largo" : "" }, stato.ruolo === "titolare" ? schedeGruppo() : null, contenuto));
 }
 
 async function avvia() {
@@ -228,12 +275,12 @@ function disegna() {
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
   if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { chiudiVistaUso(stato.ultimaEtichetta); stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, posta: vistaPosta, computer: vistaComputer, sez: vistaSezione, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
   let contenuto;
   try { contenuto = vista(); }
   catch (e) {   // una schermata che si rompe non deve bloccare il menu: si mostra l'errore e si puo' andare altrove
     if (typeof registraUso === "function") registraUso(etichettaVista(), "errore", { categoria: "interfaccia" });
-    if (stato.vista === "impostazioni") stato.sezione = "profilo";
+    if (stato.vista === "impostazioni" || stato.vista === "sez") { stato.vista = "impostazioni"; stato.sezione = "profilo"; }
     contenuto = h("div", { class: "carta" }, avviso("Questa schermata non si è aperta (" + (e && e.message ? e.message : "errore") + "). Scegli un'altra voce dal menu: il resto funziona.", "no"),
       h("button", { class: "s", type: "button", onclick: () => vai("dashboard") }, "Torna alla plancia"));
   }

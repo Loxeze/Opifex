@@ -65,7 +65,8 @@ def evoluzione(conn) -> int:
 
 
 NOMI_VISTE = {"dashboard": "Dashboard", "task": "Task", "agenti": "Agenti", "ginnasio": "Ginnasio", "progetti": "Progetti", "documenti": "Documenti", "chat": "Chat",
-              "crm": "CRM", "riunioni": "Riunioni", "briefing": "Briefing", "impostazioni": "Impostazioni", "iniziative": "Iniziative", "percorsi": "Percorsi", "account": "Il mio account"}
+              "crm": "CRM", "riunioni": "Riunioni", "briefing": "Briefing", "impostazioni": "Impostazioni", "iniziative": "Iniziative", "percorsi": "Percorsi", "account": "Il mio account",
+              "posta": "Posta", "email": "Email marketing", "computer": "Computer locali", "sez": "Sezione", "finestre": "Finestre", "social": "Social"}
 
 
 def _nome_vista(v: str) -> str:

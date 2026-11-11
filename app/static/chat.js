@@ -372,7 +372,7 @@ function misuraAttese(agenteId, messaggi, precedenti) {
 }
 
 // ---------- ripartire da dove si era: ultima pagina aperta ----------
-function etichettaVista() { return stato.vista + (stato.vista === "impostazioni" && stato.sezione ? ":" + stato.sezione : ""); }
+function etichettaVista() { return stato.vista + ((stato.vista === "impostazioni" || stato.vista === "sez") && stato.sezione ? ":" + stato.sezione : ""); }
 function ricordaVista() {
   if ((VISTE.concat(VISTE_COLLABORATORE)).some(([id]) => id === stato.vista)) { memLocale("vista", stato.vista); memLocale("sezione", stato.sezione || null); }
 }

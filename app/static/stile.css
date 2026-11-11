@@ -445,3 +445,8 @@ i.task{background:var(--avv)}i.ritardo{background:var(--no)}i.milestone{backgrou
 .sn-passo summary{cursor:pointer;padding:4px 0}.sn-passo.sn-errore summary{color:#E06B5F}
 .sn-pre{white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto;font-size:12px;background:rgba(0,0,0,.18);padding:8px;border-radius:8px;margin:4px 0}
 .tabella-scorre{overflow-x:auto}
+/* 2.52 — schede della voce di menu aperta */
+.schede-gruppo{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 18px;padding-bottom:10px;border-bottom:1px solid rgba(127,127,127,.25)}
+.schede-gruppo button{padding:7px 14px;border-radius:999px;font-size:14px;min-height:36px}
+.schede-gruppo button.attivo{font-weight:700}
+@media (max-width:800px){.schede-gruppo{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}.schede-gruppo button{white-space:nowrap;flex:none}}
