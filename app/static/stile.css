@@ -419,4 +419,15 @@ i.task{background:var(--avv)}i.ritardo{background:var(--no)}i.milestone{backgrou
 .cr-el-titolo .nome{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:600px){.cr-el-testa{flex-wrap:wrap}.cr-el-titolo{flex-basis:100%;order:3}}
 .tach-riga { display: flex; gap: 16px; flex-wrap: wrap; }
-.tach { flex: 1 1 200px; max-width: 280px; min-width: 0; }
+.tach { flex: 1 1 170px; max-width: 230px; min-width: 0; }
+.portatile-testa { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.spia { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto; background: #8a8a8a; }
+.spia.accesa { background: #3FB68B; box-shadow: 0 0 0 4px rgba(63,182,139,.22); }
+.spia.lavora { background: #E8924A; box-shadow: 0 0 0 4px rgba(232,146,74,.28); animation: spia-lavora 1.2s ease-in-out infinite; }
+.spia.spenta { background: #D9534F; box-shadow: 0 0 0 4px rgba(217,83,79,.2); }
+@keyframes spia-lavora { 50% { box-shadow: 0 0 0 8px rgba(232,146,74,.08); } }
+@media (prefers-reduced-motion: reduce) { .spia.lavora { animation: none; } }
+.tach-riga { justify-content: space-around; }
+.tach-val { text-align: center; font-size: 1.25rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tach-val small { font-size: .8rem; font-weight: 400; opacity: .7; }
+.bt-portatile { margin-bottom: 16px; }

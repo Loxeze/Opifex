@@ -161,6 +161,9 @@ function vistaDashboard() {
   const titolo = h("h1", { class: "bt-titolo" }, saluto + (stato.nome ? " " + stato.nome.split(" ")[0] : "") + ". ");
   const sottotitolo = h("span", { class: "bt-corsivo" }, "Carico la plancia…"); titolo.append(sottotitolo);
   const kpi = h("section", { class: "bt-griglia bt-kpis" }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(() => h("article", { class: "bt-card bt-kpi" }, h("div", { class: "bt-sotto" }, "…"))));
+  const locale = h("section", { class: "bt-card bt-portatile", hidden: true }, h("div", { class: "bt-testa" }, h("div", { class: "bt-cap" }, "Modello locale · il portatile adesso"),
+    h("button", { class: "s", onclick: () => vai("impostazioni", "sicurezza") }, "Apri")));
+  if (stato.ruolo === "titolare") { locale.hidden = false; locale.append(pannelloPortatile()); }
   const riga1 = h("section", { class: "bt-griglia" });
   const riga2 = h("section", { class: "bt-griglia" });
   const colDec = h("div", { class: "bt-col" });
@@ -298,6 +301,6 @@ function vistaDashboard() {
   return h("div", { class: "bt-plancia bt-fitta" },
     h("div", { class: "bt-intesta" }, h("div", {}, h("div", { class: "bt-cap" }, new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })), titolo),
       h("div", { class: "bt-azioni" }, h("button", { class: "s", onclick: apriOrganigramma }, "Organigramma 3D ↗"), bottoneAllinea(), h("button", { class: "s", onclick: () => vai("task") }, "Task"), h("button", { class: "p", onclick: () => vai("riunioni") }, "Avvia una riunione"))),
-    lavoro.el, kpi, riga1, riga2,
+    lavoro.el, locale, kpi, riga1, riga2,
     garanzie.length ? h("p", { class: "bt-nota" }, "Dati interni e riservati bloccati verso: " + garanzie.map(f => f.nome).join(", ") + ". ", h("a", { href: "#", onclick: (e) => { e.preventDefault(); vai("impostazioni", "sicurezza"); } }, "Dichiara le garanzie")) : null);
 }

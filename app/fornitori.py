@@ -267,12 +267,52 @@ def controlla_troncamento(modello: str, token_prompt: int) -> bool:
     return True
 
 
+_LAVORO_LOCALE = {"in_corso": 0, "modello": "", "da": 0.0, "misure": []}   # cosa sta facendo il portatile adesso e a che velocita' (per la plancia)
+_BLOCCO_LOCALE = __import__("threading").Lock()
+
+
+def posta_locale(corpo: dict):
+    """Chiamata a Ollama con il conteggio delle richieste in corso e la misura della velocita' (token generati al secondo, tempo di lettura del prompt compreso)."""
+    import time as _t
+    with _BLOCCO_LOCALE:
+        _LAVORO_LOCALE["in_corso"] += 1
+        _LAVORO_LOCALE["modello"] = corpo.get("model") or ""
+        if _LAVORO_LOCALE["in_corso"] == 1:
+            _LAVORO_LOCALE["da"] = _t.time()
+    t0 = _t.monotonic()
+    try:
+        r = httpx.post(url_locale() + "/v1/chat/completions", json=corpo, timeout=httpx.Timeout(900, connect=5))
+    finally:
+        with _BLOCCO_LOCALE:
+            _LAVORO_LOCALE["in_corso"] = max(0, _LAVORO_LOCALE["in_corso"] - 1)
+    try:
+        if r.status_code == 200:
+            tok, dt = int((r.json().get("usage") or {}).get("completion_tokens") or 0), _t.monotonic() - t0
+            if tok >= 5 and dt > 0.2:
+                with _BLOCCO_LOCALE:
+                    _LAVORO_LOCALE["misure"] = (_LAVORO_LOCALE["misure"] + [{"token_s": round(tok / dt, 1), "token": tok, "secondi": round(dt, 1), "modello": corpo.get("model") or "", "quando": _t.time()}])[-20:]
+    except (ValueError, AttributeError, TypeError):
+        pass
+    return r
+
+
+def lavoro_locale() -> dict:
+    import time as _t
+    with _BLOCCO_LOCALE:
+        m = list(_LAVORO_LOCALE["misure"])
+        recenti = [x for x in m if _t.time() - x["quando"] < 1800]
+        return {"in_corso": _LAVORO_LOCALE["in_corso"], "modello_in_corso": _LAVORO_LOCALE["modello"] if _LAVORO_LOCALE["in_corso"] else "",
+                "da_secondi": int(_t.time() - _LAVORO_LOCALE["da"]) if _LAVORO_LOCALE["in_corso"] else 0,
+                "ultima": ({**m[-1], "secondi_fa": int(_t.time() - m[-1]["quando"])} if m else None),
+                "media_token_s": round(sum(x["token_s"] for x in recenti) / len(recenti), 1) if recenti else None}
+
+
 def _chiama_locale(modello: str, istruzioni: str, messaggio: str, max_token: int) -> Risposta:
     """Ollama espone lo stesso formato di OpenAI. Niente nuovi tentativi: se il portatile non risponde si ripiega subito."""
     corpo = {"model": modello, "max_tokens": max_token, "stream": False,
              "messages": [{"role": "system", "content": istruzioni}, {"role": "user", "content": messaggio}]}
     try:
-        r = httpx.post(url_locale() + "/v1/chat/completions", json=corpo, timeout=httpx.Timeout(900, connect=5))
+        r = posta_locale(corpo)
     except httpx.HTTPError as e:
         raise ErroreLocale(f"Il modello locale non risponde ({type(e).__name__}): il portatile e' acceso e collegato?") from None
     if r.status_code == 404:

@@ -107,6 +107,19 @@ with TestClient(app) as c:
     ok("solo il titolare", c.post("/gestione/locale/assegnazione", json={"modello": "buono"}).status_code in (401, 403))
     rs = c.get("/gestione/locale/risorse", headers=Hd).json()
     ok("risorse: scheda grafica e RAM dal portatile", rs["raggiungibile"] and rs["gpu_usata_gb"] == 7.0 and rs["ram_usata_gb"] == 13.0 and rs["modelli"][0]["percentuale_gpu"] == 35 and rs["vram_totale_gb"] == 8.0, str(rs))
+    from app import fornitori as _f
+    _f._LAVORO_LOCALE["misure"] = []
+    _f.chiama_modello("locale", "buono", "s", "Qual e' la capitale della Francia?", 50)
+    lv = c.get("/gestione/locale/risorse", headers=Hd).json()["lavoro"]
+    ok("plancia: nessuna richiesta in corso e misura dell'ultima chiamata registrata", lv["in_corso"] == 0 and lv["ultima"] is None or (lv["ultima"]["modello"] == "buono" and lv["ultima"]["token_s"] > 0), str(lv))
+    import threading as _th
+    visto = {}
+    reale_post = _f.httpx.post
+    def lento(*a_, **k_):
+        visto.update(_f.lavoro_locale()); return reale_post(*a_, **k_)
+    _f.httpx.post = lento
+    _f.chiama_modello("locale", "buono", "s", "Qual e' la capitale della Francia?", 50); _f.httpx.post = reale_post
+    ok("plancia: durante la chiamata risulta una richiesta in corso sul modello giusto, poi torna a zero", visto.get("in_corso") == 1 and visto.get("modello_in_corso") == "buono" and _f.lavoro_locale()["in_corso"] == 0, str(visto))
     c.put("/gestione/locale", headers=Hd, json={"url": "http://127.0.0.1:1", "ripiego": ""})
     ok("risorse: portatile spento = non raggiungibile, senza errori", c.get("/gestione/locale/risorse", headers=Hd).json()["raggiungibile"] is False)
 print("TOTALE", sum(ris), "/", len(ris))

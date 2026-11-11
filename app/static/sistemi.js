@@ -399,35 +399,54 @@ function bloccoCantieri() {
     corpo);
 }
 
-// Tachimetri: quanto del portatile sta usando il modello (da Ollama), aggiornati ogni 3 secondi finche' la scheda e' aperta
-function bloccoTachimetri() {
-  const corpo = h("div", { class: "tach-riga" }), nota = h("p", { class: "sotto" });
+// Il portatile al lavoro: collegamento, cosa sta facendo, tachimetri (scheda grafica, RAM, velocita'). Usato nella plancia e nella scheda Modello locale.
+function tachimetro(titolo, valore, massimo, unita, colore) {
   const NS = "http://www.w3.org/2000/svg";
-  const arco = (cx, cy, r, a0, a1) => { const p = (a) => [cx + r * Math.cos(a), cy - r * Math.sin(a)]; const [x0, y0] = p(a0), [x1, y1] = p(a1); return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 ${Math.abs(a1 - a0) > Math.PI ? 1 : 0} ${a1 < a0 ? 1 : 0} ${x1.toFixed(1)} ${y1.toFixed(1)}`; };
-  const tach = (titolo, valore, massimo, unita, colore) => {
-    const f = Math.max(0, Math.min(1, massimo ? valore / massimo : 0)), a = Math.PI * (1 - f);
-    const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 200 120"); svg.setAttribute("width", "100%"); svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", titolo + ": " + valore + " di " + massimo + " " + unita);
-    const mk = (n, at) => { const e = document.createElementNS(NS, n); for (const k in at) e.setAttribute(k, at[k]); svg.append(e); return e; };
-    mk("path", { d: arco(100, 100, 80, Math.PI, 0), fill: "none", stroke: "var(--bordo, #8884)", "stroke-width": 14, "stroke-linecap": "round" });
-    if (f > 0) mk("path", { d: arco(100, 100, 80, Math.PI, a), fill: "none", stroke: f > 0.9 ? "#C0392B" : colore, "stroke-width": 14, "stroke-linecap": "round" });
-    mk("line", { x1: 100, y1: 100, x2: 100 + 62 * Math.cos(a), y2: 100 - 62 * Math.sin(a), stroke: "var(--testo, #888)", "stroke-width": 3, "stroke-linecap": "round" });
-    mk("circle", { cx: 100, cy: 100, r: 6, fill: "var(--testo, #888)" });
-    return h("div", { class: "tach" }, svg, h("div", { class: "nome", style: "text-align:center" }, valore.toLocaleString("it-IT") + " / " + massimo + " " + unita), h("div", { class: "sotto", style: "text-align:center" }, titolo));
-  };
+  const arco = (cx, cy, r, a0, a1) => { const p = (a) => [cx + r * Math.cos(a), cy - r * Math.sin(a)]; const [x0, y0] = p(a0), [x1, y1] = p(a1); return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`; };
+  const f = Math.max(0, Math.min(1, massimo ? valore / massimo : 0)), a = Math.PI * (1 - f);
+  const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 200 116"); svg.setAttribute("width", "100%"); svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", titolo + ": " + valore + " di " + massimo + " " + unita);
+  const mk = (n, at) => { const e = document.createElementNS(NS, n); for (const k in at) e.setAttribute(k, at[k]); svg.append(e); return e; };
+  mk("path", { d: arco(100, 100, 80, Math.PI, 0), fill: "none", stroke: "currentColor", "stroke-opacity": 0.18, "stroke-width": 14, "stroke-linecap": "round" });
+  if (f > 0.005) mk("path", { d: arco(100, 100, 80, Math.PI, a), fill: "none", stroke: f > 0.92 ? "#D9534F" : colore, "stroke-width": 14, "stroke-linecap": "round" });
+  for (let k = 0; k <= 4; k++) { const t = Math.PI * (1 - k / 4); mk("line", { x1: 100 + 66 * Math.cos(t), y1: 100 - 66 * Math.sin(t), x2: 100 + 60 * Math.cos(t), y2: 100 - 60 * Math.sin(t), stroke: "currentColor", "stroke-opacity": 0.45, "stroke-width": 2 }); }
+  mk("line", { x1: 100, y1: 100, x2: 100 + 58 * Math.cos(a), y2: 100 - 58 * Math.sin(a), stroke: "currentColor", "stroke-width": 3, "stroke-linecap": "round" });
+  mk("circle", { cx: 100, cy: 100, r: 6, fill: "currentColor" });
+  return h("div", { class: "tach" }, svg, h("div", { class: "tach-val" }, valore.toLocaleString("it-IT") + " ", h("small", {}, "/ " + massimo + " " + unita)), h("div", { class: "sotto", style: "text-align:center" }, titolo));
+}
+
+function pannelloPortatile() {
+  const spia = h("span", { class: "spia" }), statoT = h("b", {}, "Controllo il collegamento…"), cosa = h("span", { class: "sotto" });
+  const corpo = h("div", { class: "tach-riga" }), nota = h("p", { class: "sotto" });
+  const el = h("div", { class: "portatile" }, h("div", { class: "portatile-testa" }, spia, statoT, cosa), corpo, nota);
+  let visto = false;
+  const durata = (s) => s < 60 ? s + " s" : Math.floor(s / 60) + " min";
   const agg = async () => {
-    if (!corpo.isConnected && corpo.dataset.visto) return;
+    if (visto && !el.isConnected) return;          // la pagina e' cambiata: smetto di interrogare il portatile
+    if (el.isConnected) visto = true;
+    if (document.hidden) { setTimeout(agg, 3000); return; }
     try {
-      const r = await api("GET", "/gestione/locale/risorse"); corpo.dataset.visto = "1";
-      if (!r.raggiungibile) { corpo.replaceChildren(); nota.textContent = "Portatile non raggiungibile: acceso, con Ollama e Tailscale attivi?"; }
-      else if (!r.modelli.length) { corpo.replaceChildren(tach("Scheda grafica", 0, r.vram_totale_gb, "GB", "#1E8466"), tach("Memoria (RAM)", 0, 32, "GB", "#2D6CDF")); nota.textContent = "Nessun modello caricato in questo momento: si carica alla prima richiesta."; }
-      else { corpo.replaceChildren(tach("Scheda grafica (modello)", r.gpu_usata_gb, r.vram_totale_gb, "GB", "#1E8466"), tach("Memoria (RAM) usata dal modello", r.ram_usata_gb, 32, "GB", "#2D6CDF"));
-        nota.textContent = r.modelli.map(m => m.nome + ": " + m.dimensione_gb + " GB, " + m.percentuale_gpu + "% sulla scheda grafica" + (m.contesto ? ", contesto " + m.contesto : "")).join(" · "); }
-    } catch (e) { nota.textContent = e.message; }
-    if (corpo.isConnected) setTimeout(agg, 3000);
+      const r = await api("GET", "/gestione/locale/risorse"), l = r.lavoro || {};
+      const vel = l.in_corso ? (l.media_token_s || 0) : 0, ultima = l.ultima;
+      spia.className = "spia " + (!r.raggiungibile ? "spenta" : l.in_corso ? "lavora" : "accesa");
+      statoT.textContent = !r.raggiungibile ? "Portatile non collegato" : l.in_corso ? "Portatile al lavoro" : "Portatile collegato, in attesa";
+      cosa.textContent = !r.raggiungibile ? " · acceso, con Ollama e Tailscale attivi?" : l.in_corso ? " · " + l.in_corso + (l.in_corso === 1 ? " richiesta" : " richieste") + " in corso su " + l.modello_in_corso + ", da " + durata(l.da_secondi)
+        : (ultima ? " · ultima risposta " + durata(ultima.secondi_fa) + " fa" : " · nessuna richiesta da quando Opifex e' stato avviato");
+      corpo.replaceChildren(
+        tachimetro("Scheda grafica usata dal modello", r.raggiungibile ? (r.gpu_usata_gb || 0) : 0, r.vram_totale_gb, "GB", "#3FB68B"),
+        tachimetro("RAM usata dal modello", r.raggiungibile ? (r.ram_usata_gb || 0) : 0, 32, "GB", "#5B8DEF"),
+        tachimetro(l.in_corso ? "Velocità (media recente)" : "Velocità dell'ultima risposta", l.in_corso ? vel : (ultima ? ultima.token_s : 0), 60, "token/s", "#E8924A"));
+      nota.textContent = !r.raggiungibile ? "" : r.modelli.length ? r.modelli.map(m => m.nome + ": " + m.dimensione_gb.toLocaleString("it-IT") + " GB, " + m.percentuale_gpu + "% sulla scheda grafica" + (m.contesto ? ", finestra " + m.contesto.toLocaleString("it-IT") + " token" : "")).join(" · ")
+        : "Nessun modello in memoria: si carica alla prima richiesta (può volerci un paio di minuti).";
+    } catch (e) { spia.className = "spia spenta"; statoT.textContent = "Stato del portatile non disponibile"; cosa.textContent = " · " + e.message; }
+    setTimeout(agg, 3000);
   };
-  setTimeout(agg, 50);
-  return h("div", {}, h("div", { class: "nome" }, "Il portatile al lavoro"), corpo, nota);
+  setTimeout(agg, 60);
+  return el;
+}
+
+function bloccoTachimetri() {
+  return h("div", {}, h("div", { class: "nome" }, "Il portatile al lavoro"), pannelloPortatile());
 }
 
 // Prova di affidabilita': stessi compiti per ogni modello locale, con un punteggio
