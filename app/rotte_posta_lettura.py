@@ -20,6 +20,7 @@ def _riga(r: dict) -> dict:
 
 @router.get("")
 def da_leggere(tutte: bool = False, _: dict = Depends(solo_titolare)):
+    in_corso = posta_vaglio.IN_CORSO.locked()   # prima dello stato: se il giro e' finito, il suo esito e' gia' scritto
     with connessione() as conn:
         cat = ("importante", "normale") if tutte else ("importante",)
         righe = conn.execute("""SELECT v.id, v.origine, v.casella_id, v.msg_id, v.casella, v.data, v.mittente, v.oggetto, v.categoria, v.urgenza,
@@ -34,7 +35,7 @@ def da_leggere(tutte: bool = False, _: dict = Depends(solo_titolare)):
             q = {}
         return {"email": [_riga(r) for r in righe], "conteggi": conteggi, "stato": posta_vaglio.stato(conn), "quadro": q,
                 "caselle": len(posta_vaglio.caselle(conn)), "modello": posta_vaglio.modello_locale(conn),
-                "attivo": posta_vaglio.vaglio_attivo(conn), "in_corso": posta_vaglio.IN_CORSO.locked(), "solo_locale": posta_vaglio.solo_locale(conn), "regole": posta_vaglio.regole(conn)}
+                "attivo": posta_vaglio.vaglio_attivo(conn), "in_corso": in_corso, "solo_locale": posta_vaglio.solo_locale(conn), "regole": posta_vaglio.regole(conn)}
 
 
 @router.post("/{vid}/letta")
