@@ -19,14 +19,6 @@ function vistaSezione() {
   return h("div", { class: "contenuto-sez" }, [mappa[stato.sezione]()].flat(Infinity));
 }
 
-// Posta: le email preparate dagli agenti da approvare, e dove si collegano le caselle
-function vistaPosta() {
-  return [h("h2", {}, "Posta"),
-    h("p", { class: "sotto" }, "Le email che gli agenti hanno preparato e aspettano il tuo via libera. Le caselle Gmail si collegano nella scheda «Caselle e Google»; quali agenti possono inviare e come si sceglie nella scheda di ciascun agente."),
-    codaEmailUscita(),
-    h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => vai("sez", "collegamenti") }, "Collega o controlla le caselle"), h("button", { class: "s", type: "button", onclick: () => vai("email") }, "Email marketing (Brevo)"))];
-}
-
 // Controllo › Computer locali: i computer con Ollama, i tachimetri, la prova di affidabilita', l'assegnazione e i cantieri
 function vistaComputer() {
   return [h("h2", {}, "Computer locali"), pannelloPortatile(), bloccoModelloLocale(ricarica)];

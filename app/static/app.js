@@ -157,7 +157,7 @@ const VISTE = [["dashboard", "Plancia"], ["briefing", "Briefing"], ["task", "Tas
 const MENU = [
   ["oggi", "Oggi", [["Plancia", "dashboard"], ["Briefing", "briefing"], ["Task", "task"], ["Riunioni", "riunioni"]]],
   ["chat", "Aurora e chat", [["Chat", "chat"]]],
-  ["posta", "Posta", [["Da approvare", "posta"], ["Caselle e Google", "sez", "collegamenti"]]],
+  ["posta", "Posta", [["La posta", "posta"], ["Caselle e Google", "sez", "collegamenti"]]],
   ["lavoro", "Lavoro", [["Progetti", "progetti"], ["Documenti", "documenti"], ["Tavoli di lavoro", "sez", "tavoli"], ["Schede d'impresa", "sez", "imprese"]]],
   ["contatti", "Contatti", [["Contatti e Radar", "crm"]]],
   ["comunicazione", "Comunicazione", [["Social", "social"], ["Profili monitorati", "sez", "monitorsocial"], ["Email marketing", "email"], ["Contenuti e stili", "sez", "contenuti"]]],
@@ -237,7 +237,7 @@ function cornice(contenuto) {
   radice.replaceChildren(
     h("header", {}, h("h1", {}, stato.edizione === 3 ? "Opifex 3" : "Opifex", h("small", {}, "la bottega degli agenti")),
       h("nav", { "aria-label": "Menu principale" }, nav),
-      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.0" : "2.53"))),
+      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.1" : "2.54"))),
     h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "organigramma" ? "largo" : "" }, stato.ruolo === "titolare" ? schedeGruppo() : null, contenuto));
 }
 

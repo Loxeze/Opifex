@@ -16,7 +16,7 @@ PROVA_ISTRUZIONI = contextvars.ContextVar('prova_istruzioni', default=None)   # 
 STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai', 'locale')   # chi sa usare gli strumenti degli agenti
 from . import memoria_pc
 from . import banco, creativi, best_practice, archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
-from . import progresso, n8n as n8n_mod, crm_contatti_agenti, ricerca_profonda, finestre, brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta
+from . import progresso, n8n as n8n_mod, crm_contatti_agenti, ricerca_profonda, finestre, brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta, posta_vaglio
 from . import strumenti_social, delega_online, budget_prompt, cantiere, scatola_nera
 from . import vademecum, note_aurora, scheda_impresa
 from .navigatore import ErroreNavigazione, Navigatore
@@ -389,6 +389,11 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             posta_c = (strumenti_posta.caselle_agente(conn, agente_id)
                        if a["fornitore"] in STRUMENTI_FORNITORI and puo_uscire("riservato", a["fascia_dati_max"], a["fascia_fornitore"],
                                                                         a["non_conservazione_attiva"], a["dpa_firmato"])[0] else None)
+            # posta solo in locale (di serie nella 3.0): gli agenti con un modello online non ricevono la posta, nemmeno se una casella e' affidata a loro
+            if a["fornitore"] != "locale" and (gmail_tool or posta_c) and posta_vaglio.solo_locale(conn):
+                gmail_tool, posta_c = False, None
+                a["istruzioni"] = a["istruzioni"] + ("\n\nPOSTA: le email di Lorenzo sono lette solo dai modelli locali, e tu usi un modello online: non hai accesso alle caselle. "
+                                                     "Se serve qualcosa dalla posta, rimanda Lorenzo alla schermata Posta (Da leggere, Situazioni) o all'agente Posta.")
             posta_tool = bool(posta_c)
             social_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["social_attivo"] and (__import__("app.social_nativo", fromlist=["x"]).ha_canali(conn) or __import__("app.buffer", fromlist=["x"]).collegato(conn)))
             mem_tool = bool(ok_int)   # lo strumento di memoria si aggiunge agli agenti che usano comunque degli strumenti
@@ -504,6 +509,9 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     gp = strumenti_posta.gestore(conn, posta_c, agente_id)
                     for s_ in strumenti_posta.STRUMENTI:
                         gestori[s_["name"]] = gp
+                if (gmail_tool or posta_tool) and a["fornitore"] == "locale":
+                    extra.append(posta_vaglio.STRUMENTO_SITUAZIONI)
+                    gestori["posta_situazioni"] = posta_vaglio.gestore_situazioni(conn)
                 if (gmail_tool or posta_tool) and a["invio_posta"] in ("approvazione", "diretto"):
                     modo_posta = "approvazione" if (cantiere.IN_CORSO.get() and a["invio_posta"] == "diretto") else a["invio_posta"]
                     u_extra.append(invio_posta.STRUMENTO_INVIA)

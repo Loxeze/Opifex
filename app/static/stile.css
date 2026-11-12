@@ -461,3 +461,23 @@ i.task{background:var(--avv)}i.ritardo{background:var(--no)}i.milestone{backgrou
 .avvio-piede{margin-top:16px;border-top:1px solid rgba(127,127,127,.2);padding-top:12px}
 .copiabile{user-select:all;padding:2px 6px;border-radius:6px;background:rgba(127,127,127,.12)}
 @media (max-width:800px){.avvio-griglia{grid-template-columns:1fr}.avvio-elenco{flex-direction:row;overflow-x:auto}.avvio-elenco button{white-space:nowrap;flex:none}}
+/* Posta: da leggere, situazioni, caselle */
+.posta-riga{display:flex;gap:8px;align-items:flex-start;margin-top:8px}
+.posta-voce{flex:1;min-width:0;padding:12px 14px;border:1px solid var(--bordo);border-radius:12px;background:var(--carta);cursor:pointer;display:flex;flex-direction:column;gap:4px}
+.posta-voce:hover,.posta-voce:focus-visible{border-color:var(--primario);outline:none}
+.posta-voce.urgente{border-left:4px solid var(--no)}
+.posta-voce.nonletta .posta-oggetto{font-weight:700}
+.posta-voce + .posta-voce{margin-top:6px}
+.posta-testa{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.posta-oggetto{font-weight:600;overflow-wrap:anywhere}
+.posta-etichette{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.etichetta.urg1{background:var(--bordo)}.etichetta.urg2{background:var(--avv-b);color:var(--avv)}.etichetta.urg3{background:var(--no-b);color:var(--no)}
+button.collegamento{background:none;border:0;padding:0;color:var(--primario);font:inherit;font-size:14px;cursor:pointer;text-align:left}
+button.piccolo{padding:6px 10px;font-size:13px;white-space:nowrap}
+.posta-lettore{margin:6px 0 12px;padding:14px;border:1px solid var(--bordo);border-radius:12px;background:var(--carta2)}
+.posta-testo{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.5;margin:8px 0;max-height:60vh;overflow:auto}
+.posta-situazioni{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:10px}
+.posta-sit{text-align:left;color:inherit;font:inherit;cursor:pointer;display:flex;flex-direction:column;gap:6px}
+.posta-sit:hover{border-color:var(--primario)}.posta-sit.chiusa{opacity:.6}
+.posta-riassunto{font-size:14px;line-height:1.45}
+.posta-quadro{margin:12px 0}

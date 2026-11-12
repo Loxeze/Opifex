@@ -262,3 +262,9 @@ body.bottega .schede-gruppo button.attivo{background:#1F4D43;color:#F5F2EB;borde
 body.bottega .avvio-elenco button{background:transparent;border:0;border-radius:10px;color:#4E5A55;box-shadow:none}
 body.bottega .avvio-elenco button.attivo{background:#1F4D43;color:#F5F2EB}
 body.bottega .avvio-elenco button.attivo .pallino{border-color:#F5F2EB}
+body.bottega .posta-voce{background:#FFFDF8;border-color:#E2DACB}
+body.bottega .posta-voce:hover,body.bottega .posta-voce:focus-visible{border-color:#1F4D43}
+body.bottega .posta-voce.urgente{border-left-color:#B5462B}
+body.bottega .posta-lettore{background:#F5F2EB;border-color:#E2DACB}
+body.bottega button.collegamento{color:#1F4D43}
+body.bottega .posta-sit:hover{border-color:#1F4D43}

@@ -73,7 +73,9 @@ with TestClient(app) as c:
     app_js = c.get("/app/app.js").text; pl = c.get("/app/plancia.js").text
     ok("menu laterale (2.52): voci raggruppate con le schede", all(f'["{g}", "{n}"' in app_js for g, n in [("oggi", "Oggi"), ("posta", "Posta"), ("lavoro", "Lavoro"), ("conoscenza", "Conoscenza"), ("officina", "Officina"), ("squadra", "Squadra"), ("controllo", "Controllo")]) and "schedeGruppo()" in app_js and "SEZIONI_FUORI" in app_js)
     dj = c.get("/app/dashboard.js").text
-    ok("nuove pagine: Posta, Computer locali, sezioni fuori dalle Impostazioni", all(x in dj for x in ("function vistaPosta", "function vistaComputer", "function vistaSezione", "function mappaImpostazioni")))
+    pj = c.get("/app/posta.js").text
+    ok("nuove pagine: Posta, Computer locali, sezioni fuori dalle Impostazioni", "function vistaPosta" in pj and all(x in dj for x in ("function vistaComputer", "function vistaSezione", "function mappaImpostazioni")))
+    ok("Posta (2.54): da leggere, situazioni, caselle, da approvare, filtro", all(x in pj for x in ('"Da leggere"', '"Situazioni"', '"Le caselle"', '"Da approvare"', '"Filtro"')) and 'src="posta.js"' in idx)
     ok("organigramma 3D in finestra a parte, con ripiego nella stessa pagina", 'window.open(location.pathname + "#organigramma", "opifex-organigramma"' in pl and 'vai("organigramma")' in pl and "organigramma: vistaOrganigrammaPagina" in app_js)
     ok("la plancia non ha piu' la chat tra agenti ne' la scena 3D incorporata", "chat-org" not in pl and "dialoghi/feed" not in pl and "vistaOrganigramma()" in pl and "scena-pagina" in pl)
     ok("grafici senza emoji e senza HTML dai dati", "innerHTML" not in pl and "insertAdjacentHTML" not in pl)

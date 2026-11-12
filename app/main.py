@@ -19,6 +19,7 @@ from .rotte_accessi import router as router_accessi
 from .rotte_finestre import router as router_finestre
 from .ponte import router as router_ponte
 from .rotte_avvio import router as router_avvio, router_pubblico as router_avvio_pubblico
+from .rotte_posta_lettura import router as router_posta_lettura
 from .rotte_progetti import router as router_progetti
 from .rotte_scheda import router as router_scheda
 from .rotte_ginnasio import router as router_ginnasio
@@ -212,6 +213,20 @@ async def _manutenzione():
         await asyncio.sleep(600)
 
 
+async def _filtro_posta():
+    """Ogni 5 minuti il modello locale vaglia la posta nuova, in un giro tutto suo: le sue risposte possono durare minuti e non devono
+    rallentare backup, allarmi e il resto della manutenzione."""
+    import asyncio
+    from . import posta_vaglio
+    await asyncio.sleep(120)
+    while True:
+        try:
+            await asyncio.to_thread(_passo, "filtro della posta (solo modello locale)", posta_vaglio.giro)
+        except Exception:  # noqa: BLE001
+            pass
+        await asyncio.sleep(300)
+
+
 async def _trigger_orari():
     """Ogni minuto controlla i trigger a orario accesi e li avvia; poi invia le notifiche push."""
     import asyncio
@@ -286,7 +301,7 @@ async def ciclo_vita(app: FastAPI):
             _cc.riavvio(conn)
     except Exception:
         pass
-    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari())]
+    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari()), asyncio.create_task(_filtro_posta())]
     yield
     for c in compiti:
         c.cancel()
@@ -417,6 +432,7 @@ app.include_router(router_dipendenze)
 app.include_router(router_diagnostica)
 app.include_router(router_avvio)
 app.include_router(router_avvio_pubblico)
+app.include_router(router_posta_lettura)
 app.include_router(router_impresa)
 app.include_router(router_tavoli)
 app.include_router(router_call)
