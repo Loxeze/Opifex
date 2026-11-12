@@ -33,7 +33,10 @@ def da_leggere(tutte: bool = False, _: dict = Depends(solo_titolare)):
             q = json.loads(posta_vaglio._imp(conn, "posta_quadro", "") or "{}")
         except ValueError:
             q = {}
-        return {"email": [_riga(r) for r in righe], "conteggi": conteggi, "stato": posta_vaglio.stato(conn), "quadro": q,
+        fare = [{**f, "scadenza": f["scadenza"].isoformat() if f["scadenza"] else None, "ultimo_il": f["ultimo_il"].isoformat() if f["ultimo_il"] else None}
+                for f in posta_vaglio.da_fare(conn)]
+        aperte = conn.execute("SELECT count(*) AS n FROM posta_situazioni WHERE aperta").fetchone()["n"]
+        return {"email": [_riga(r) for r in righe], "conteggi": conteggi, "da_fare": fare, "situazioni_aperte": aperte, "stato": posta_vaglio.stato(conn), "quadro": q,
                 "caselle": len(posta_vaglio.caselle(conn)), "modello": posta_vaglio.modello_locale(conn),
                 "attivo": posta_vaglio.vaglio_attivo(conn), "in_corso": in_corso, "solo_locale": posta_vaglio.solo_locale(conn), "regole": posta_vaglio.regole(conn)}
 
@@ -53,10 +56,10 @@ def tutte_lette(_: dict = Depends(solo_titolare)):
     return {"segnate": n}
 
 
-def _vaglia_dietro():
+def _vaglia_dietro(giorni: int | None = None):
     try:
         with connessione() as conn:
-            posta_vaglio.vaglia(conn, forza=True)
+            posta_vaglio.vaglia(conn, forza=True, giorni=giorni)
     except Exception as e:  # noqa: BLE001 - l'esito resta nello stato, la schermata lo mostra
         try:
             with connessione() as conn:
@@ -77,13 +80,30 @@ def vaglia_ora(_: dict = Depends(solo_titolare)):
     return {"in_corso": True}
 
 
+class Analisi(BaseModel):
+    giorni: int = Field(default=30, ge=3, le=90)
+
+
+@router.post("/analizza")
+def analizza(d: Analisi, _: dict = Depends(solo_titolare)):
+    """Rilegge le ultime settimane di tutte le caselle (anche le email inviate) e ricostruisce le conversazioni in corso.
+    Lavora in sottofondo finche' non ha finito: con il modello locale puo' volerci anche mezz'ora; la schermata segue l'avanzamento."""
+    if not posta_vaglio.IN_CORSO.acquire(blocking=False):
+        return {"in_corso": True, "gia": True}
+    threading.Thread(target=_vaglia_dietro, args=(d.giorni,), daemon=True, name="analisi-posta").start()
+    return {"in_corso": True}
+
+
 @router.get("/situazioni")
 def situazioni(chiuse: bool = False, _: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        sit = conn.execute("""SELECT s.id, s.titolo, s.interlocutori, s.riassunto, s.aperta, s.email_n, s.aggiornata_il,
-                                     (SELECT count(*) FROM posta_vaglio v WHERE v.situazione_id = s.id AND NOT v.letta) AS da_leggere
-                              FROM posta_situazioni s WHERE s.aperta OR %s ORDER BY s.aperta DESC, s.aggiornata_il DESC LIMIT 100""", (chiuse,)).fetchall()
-        return [{**s, "aggiornata_il": s["aggiornata_il"].isoformat()} for s in sit]
+        sit = conn.execute("""SELECT s.id, s.titolo, s.interlocutori, s.riassunto, s.aperta, s.email_n, s.aggiornata_il, s.tocca_a_te, s.prossimo_passo,
+                                     s.scadenza, s.ultimo_da, s.ultimo_il, s.da_riassumere,
+                                     (SELECT count(*) FROM posta_vaglio v WHERE v.situazione_id = s.id AND NOT v.letta AND v.categoria IN ('importante','normale')) AS da_leggere
+                              FROM posta_situazioni s WHERE s.aperta OR %s
+                              ORDER BY s.aperta DESC, s.tocca_a_te DESC, s.scadenza NULLS LAST, COALESCE(s.ultimo_il, s.aggiornata_il) DESC LIMIT 150""", (chiuse,)).fetchall()
+        return [{**s, "aggiornata_il": s["aggiornata_il"].isoformat(), "ultimo_il": s["ultimo_il"].isoformat() if s["ultimo_il"] else None,
+                 "scadenza": s["scadenza"].isoformat() if s["scadenza"] else None} for s in sit]
 
 
 @router.get("/situazioni/{sid}")
@@ -92,21 +112,25 @@ def situazione(sid: int, _: dict = Depends(solo_titolare)):
         s = conn.execute("SELECT * FROM posta_situazioni WHERE id=%s", (sid,)).fetchone()
         if not s:
             raise HTTPException(404, "Situazione non trovata")
-        em = conn.execute("""SELECT id, origine, casella_id, msg_id, casella, data, mittente, oggetto, riassunto, letta FROM posta_vaglio
+        em = conn.execute("""SELECT id, origine, casella_id, msg_id, casella, data, mittente, oggetto, riassunto, letta, da_me FROM posta_vaglio
                              WHERE situazione_id=%s ORDER BY data DESC NULLS LAST LIMIT 50""", (sid,)).fetchall()
-        return {**s, "creata_il": s["creata_il"].isoformat(), "aggiornata_il": s["aggiornata_il"].isoformat(), "email": [_riga(e) for e in em]}
+        return {**s, "creata_il": s["creata_il"].isoformat(), "aggiornata_il": s["aggiornata_il"].isoformat(),
+                "ultimo_il": s["ultimo_il"].isoformat() if s["ultimo_il"] else None, "scadenza": s["scadenza"].isoformat() if s["scadenza"] else None,
+                "email": [_riga(e) for e in em]}
 
 
 class ModificaSituazione(BaseModel):
     titolo: str | None = Field(default=None, min_length=1, max_length=120)
     aperta: bool | None = None
+    tocca_a_te: bool | None = None
 
 
 @router.put("/situazioni/{sid}")
 def modifica_situazione(sid: int, d: ModificaSituazione, _: dict = Depends(solo_titolare)):
     with connessione() as conn:
-        if not conn.execute("""UPDATE posta_situazioni SET titolo=COALESCE(%s, titolo), aperta=COALESCE(%s, aperta) WHERE id=%s RETURNING id""",
-                            (d.titolo, d.aperta, sid)).fetchone():
+        if not conn.execute("""UPDATE posta_situazioni SET titolo=COALESCE(%s, titolo), aperta=COALESCE(%s, aperta), tocca_a_te=COALESCE(%s::boolean, tocca_a_te),
+                                      prossimo_passo=CASE WHEN %s::boolean IS FALSE THEN '' ELSE prossimo_passo END WHERE id=%s RETURNING id""",
+                            (d.titolo, d.aperta, d.tocca_a_te, d.tocca_a_te, sid)).fetchone():
             raise HTTPException(404, "Situazione non trovata")
     return {"ok": True}
 

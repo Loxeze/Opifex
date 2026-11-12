@@ -20,6 +20,67 @@ function _apriEmail(chiave, msgId, dove) {
     .catch(e => riempi(box, avviso(e.message, "no")));
 }
 
+function _scadenza(iso) {
+  if (!iso) return null;
+  const d = new Date(iso + "T12:00:00"), giorni = Math.round((d - new Date()) / 86400000);
+  const testo = giorni < 0 ? "scaduta il " + d.toLocaleDateString("it-IT", { day: "numeric", month: "short" }) : giorni === 0 ? "scade oggi" : giorni === 1 ? "scade domani"
+    : "entro il " + d.toLocaleDateString("it-IT", { day: "numeric", month: "short" });
+  return h("span", { class: "etichetta " + (giorni <= 1 ? "urg3" : giorni <= 7 ? "urg2" : "urg1") }, testo);
+}
+function _chi(s) { return s.tocca_a_te ? h("span", { class: "etichetta urg2" }, "tocca a te") : h("span", { class: "etichetta" }, "aspetti " + (s.ultimo_da && s.ultimo_da !== "Lorenzo" ? "gli altri" : "una risposta")); }
+function _apriConversazione(id) { stato.postaScheda = 2; stato.postaSituazione = id; disegna(); }
+
+// Il punto: cosa tocca a Lorenzo nelle conversazioni in corso, l'analisi delle ultime settimane, il punto della situazione
+function _pannelloCosaFare() {
+  const box = h("div"); let seguiva = false, attesa = null, messaggio = null;
+  const carica = async () => {
+    clearTimeout(attesa);
+    let d; try { d = await api("GET", "/gestione/posta-in"); } catch (e) { riempi(box, avviso(e.message, "no")); return; }
+    const st = d.stato || {};
+    if (seguiva && !d.in_corso) messaggio = st.esito === "ok"
+      ? avviso("Fatto: " + (st.nuove || 0) + " email nuove, " + (st.vagliate || 0) + " lette, " + (st.situazioni || 0) + " conversazioni riassunte.", "ok")
+      : avviso("Non è riuscito: " + (st.esito || "") + (st.errore ? " — " + st.errore : "") + ". Quello che manca si fa al prossimo giro, sempre in locale.", "no");
+    seguiva = !!d.in_corso;
+    if (d.in_corso) attesa = setTimeout(() => { if (box.isConnected) carica(); }, 5000);
+    const giorni = h("select", { style: "width:auto;flex:0 0 auto" }, [["14", "ultime 2 settimane"], ["30", "ultimo mese"], ["60", "ultimi 2 mesi"]].map(([v, t]) => h("option", { value: v, selected: v === "30" }, t)));
+    const analizza = h("button", { class: d.situazioni_aperte ? "s" : "p", type: "button", disabled: !!d.in_corso }, "Analizza");
+    analizza.onclick = async () => { analizza.disabled = true; messaggio = null;
+      try { await api("POST", "/gestione/posta-in/analizza", { giorni: Number(giorni.value) }); seguiva = true; } catch (e) { messaggio = avviso(e.message, "no"); }
+      carica(); };
+    const lavoro = d.in_corso ? avviso("Il modello locale sta lavorando" + (st.fase ? ": " + st.fase : "…") + " La pagina si aggiorna da sola; puoi anche chiuderla.", "avv") : null;
+    const quadro = h("div");
+    const mostraQuadro = (q) => riempi(quadro, q && q.testo ? h("div", { class: "carta posta-quadro" }, h("h3", {}, "Il punto della situazione"),
+      h("div", { class: "sotto" }, q.quando ? "preparato " + _dataPosta(q.quando) + " dal modello locale" : ""), h("pre", { class: "posta-testo" }, q.testo)) : null);
+    mostraQuadro(d.quadro);
+    const bq = h("button", { class: "s", type: "button", disabled: !d.situazioni_aperte }, "Fammi il punto della situazione");
+    bq.onclick = async () => { bq.disabled = true; bq.textContent = "Il modello locale sta scrivendo…";
+      try { const r = await api("POST", "/gestione/posta-in/quadro", undefined, { scadenzaMs: 600000 }); mostraQuadro({ testo: r.testo, quando: new Date().toISOString() }); }
+      catch (e) { riempi(quadro, avviso(e.message, "no")); }
+      bq.disabled = false; bq.textContent = "Fammi il punto della situazione"; };
+    const fatto = (f, el) => h("button", { class: "s piccolo", type: "button", title: "Non tocca più a te", onclick: async (ev) => { ev.stopPropagation();
+      try { await api("PUT", "/gestione/posta-in/situazioni/" + f.id, { tocca_a_te: false }); el().remove(); } catch (e) { box.prepend(avviso(e.message, "no")); } } }, "✓ Fatto");
+    const voce = (f) => { let riga;
+      const scheda = h("div", { class: "posta-voce", role: "button", tabindex: "0", onclick: () => _apriConversazione(f.id) },
+        h("div", { class: "posta-testa" }, h("strong", {}, f.titolo), h("span", { class: "sotto" }, "ultimo messaggio di " + (f.ultimo_da || "?") + (f.ultimo_il ? " · " + _dataPosta(f.ultimo_il) : ""))),
+        f.prossimo_passo ? h("div", { class: "posta-passo" }, "→ " + f.prossimo_passo) : h("div", { class: "sotto" }, "Ti ha scritto " + (f.ultimo_da || "qualcuno") + " e non hai ancora risposto."),
+        h("div", { class: "posta-etichette" }, _scadenza(f.scadenza), h("span", { class: "sotto" }, f.interlocutori || "")));
+      riga = h("div", { class: "posta-riga" }, scheda, fatto(f, () => riga)); return riga; };
+    const vuoto = !d.situazioni_aperte
+      ? h("div", { class: "carta" }, h("h3", {}, "Ancora nessuna conversazione analizzata"),
+          h("p", {}, "Il filtro ha guardato solo le ultime email. Fagli rileggere le ultime settimane, comprese le risposte che hai mandato tu: ricostruisce le conversazioni in corso e ti dice dove tocca a te."),
+          h("div", { class: "azioni" }, giorni, analizza), h("p", { class: "sotto" }, "Con il modello locale può volerci da qualche minuto a mezz'ora, secondo quanta posta hai. Il testo delle email non esce dai tuoi computer."))
+      : null;
+    riempi(box, [messaggio, lavoro, vuoto,
+      d.situazioni_aperte ? [h("h3", {}, d.da_fare.length ? "Tocca a te (" + d.da_fare.length + ")" : "Niente in sospeso: nelle conversazioni in corso non tocca a te"),
+        d.da_fare.map(voce),
+        h("div", { class: "azioni", style: "margin-top:16px;align-items:center" }, bq),
+        h("div", { class: "azioni", style: "align-items:center" }, h("span", { class: "sotto" }, d.situazioni_aperte + " conversazioni in corso. Rileggi la posta di:"), giorni, analizza)] : null,
+      quadro]);
+  };
+  carica();
+  return box;
+}
+
 function _pannelloDaLeggere() {
   const box = h("div"); let tutte = false, messaggio = null, seguiva = false, attesa = null;
   const carica = async () => {
@@ -51,7 +112,7 @@ function _pannelloDaLeggere() {
         h("div", { class: "posta-etichette" },
           x.urgenza ? h("span", { class: "etichetta urg" + x.urgenza }, _URGENZA[x.urgenza]) : null,
           x.motivo ? h("span", { class: "sotto" }, x.motivo) : null,
-          x.situazione ? h("button", { class: "collegamento", type: "button", onclick: (ev) => { ev.stopPropagation(); stato.postaScheda = 1; stato.postaSituazione = x.situazione_id; disegna(); } }, "↳ " + x.situazione) : null));
+          x.situazione ? h("button", { class: "collegamento", type: "button", onclick: (ev) => { ev.stopPropagation(); _apriConversazione(x.situazione_id); } }, "↳ " + x.situazione) : null));
       const letta = h("button", { class: "s piccolo", type: "button", title: "Segna come letta", onclick: async (ev) => { ev.stopPropagation(); try { await api("POST", "/gestione/posta-in/" + x.id + "/letta"); riga.parentNode.remove(); } catch (e) { alertBox(e.message); } } }, "✓ Letta");
       const apri = () => _apriEmail(x.origine + "-" + x.casella_id, x.msg_id, contenitore);
       riga.onclick = apri; riga.onkeydown = (ev) => { if (ev.key === "Enter") apri(); };
@@ -72,28 +133,25 @@ function _pannelloDaLeggere() {
 
 function _pannelloSituazioni() {
   const box = h("div"), dett = h("div");
-  const quadro = h("div");
-  const mostraQuadro = (q) => riempi(quadro, q && q.testo ? h("div", { class: "carta posta-quadro" }, h("h3", {}, "Il punto della situazione"),
-    h("div", { class: "sotto" }, q.quando ? "preparato " + _dataPosta(q.quando) : ""), h("pre", { class: "posta-testo" }, q.testo)) : null);
-  const bq = h("button", { class: "p", type: "button" }, "Fammi il punto della situazione");
-  bq.onclick = async () => { bq.disabled = true; bq.textContent = "Il modello locale sta riassumendo…";
-    try { const r = await api("POST", "/gestione/posta-in/quadro", undefined, { scadenzaMs: 600000 }); mostraQuadro({ testo: r.testo, quando: new Date().toISOString() }); }
-    catch (e) { riempi(quadro, avviso(e.message, "no")); }
-    bq.disabled = false; bq.textContent = "Fammi il punto della situazione"; };
   const apri = async (id) => {
     let s; try { s = await api("GET", "/gestione/posta-in/situazioni/" + id); } catch (e) { riempi(dett, avviso(e.message, "no")); return; }
     const titolo = h("input", { value: s.titolo, style: "width:100%" });
     riempi(dett, h("div", { class: "carta" },
       h("label", {}, "Titolo", titolo),
-      h("div", { class: "sotto" }, (s.interlocutori || "") + " · " + s.email_n + " email · aggiornata " + _dataPosta(s.aggiornata_il)),
-      h("pre", { class: "posta-testo" }, s.riassunto || "Il riassunto arriva con la prossima email."),
+      h("div", { class: "sotto" }, (s.interlocutori || "") + " · " + s.email_n + " email · ultimo messaggio di " + (s.ultimo_da || "?") + " " + _dataPosta(s.ultimo_il || s.aggiornata_il)),
+      h("div", { class: "posta-etichette" }, _chi(s), _scadenza(s.scadenza)),
+      s.prossimo_passo ? h("div", { class: "posta-passo" }, "→ " + s.prossimo_passo) : null,
+      h("pre", { class: "posta-testo" }, s.riassunto || (s.da_riassumere ? "Il modello locale la riassume al prossimo giro." : "Nessun riassunto ancora.")),
       h("div", { class: "azioni" },
+        s.tocca_a_te ? h("button", { class: "s", type: "button", onclick: async () => { await api("PUT", "/gestione/posta-in/situazioni/" + id, { tocca_a_te: false }); apri(id); carica(); } }, "✓ Fatto, non tocca più a me")
+          : h("button", { class: "s", type: "button", onclick: async () => { await api("PUT", "/gestione/posta-in/situazioni/" + id, { tocca_a_te: true }); apri(id); carica(); } }, "Tocca a me"),
         h("button", { class: "s", type: "button", onclick: async () => { await api("PUT", "/gestione/posta-in/situazioni/" + id, { titolo: titolo.value }); carica(); } }, "Salva titolo"),
         h("button", { class: "s", type: "button", onclick: async () => { await api("PUT", "/gestione/posta-in/situazioni/" + id, { aperta: !s.aperta }); riempi(dett, null); carica(); } }, s.aperta ? "Chiudi la situazione" : "Riapri")),
       h("h3", {}, "Email"),
       s.email.map(e => { const r = h("div", { class: "posta-voce", role: "button", tabindex: "0" },
-        h("div", { class: "posta-testa" }, h("strong", {}, _mittente(e.mittente)), h("span", { class: "sotto" }, _dataPosta(e.data))),
+        h("div", { class: "posta-testa" }, h("strong", {}, e.da_me ? "Tu" : _mittente(e.mittente)), h("span", { class: "sotto" }, _dataPosta(e.data))),
         h("div", { class: "posta-oggetto" }, e.oggetto), e.riassunto ? h("div", { class: "sotto" }, e.riassunto) : null);
+        if (e.da_me) r.classList.add("mia");
         r.onclick = () => _apriEmail(e.origine + "-" + e.casella_id, e.msg_id, r); return r; })));
     dett.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -101,17 +159,17 @@ function _pannelloSituazioni() {
   const carica = async () => {
     let l; try { l = await api("GET", "/gestione/posta-in/situazioni?chiuse=" + (chiuse ? "1" : "0")); } catch (e) { riempi(box, avviso(e.message, "no")); return; }
     riempi(box, [h("label", { class: "sotto", style: "display:flex;gap:6px;align-items:center" }, h("input", { type: "checkbox", checked: chiuse, onchange: (ev) => { chiuse = ev.target.checked; carica(); } }), "Mostra anche le chiuse"),
-      l.length ? h("div", { class: "posta-situazioni" }, l.map(s => h("button", { type: "button", class: "carta posta-sit" + (s.aperta ? "" : " chiusa"), onclick: () => apri(s.id) },
-        h("strong", {}, s.titolo), h("div", { class: "sotto" }, (s.interlocutori || "").slice(0, 80)),
-        h("div", { class: "posta-riassunto" }, (s.riassunto || "").slice(0, 220) + ((s.riassunto || "").length > 220 ? "…" : "")),
-        h("div", { class: "sotto" }, _dataPosta(s.aggiornata_il) + " · " + s.email_n + " email" + (s.da_leggere ? " · " + s.da_leggere + " da leggere" : "")))))
-        : h("p", { class: "sotto" }, "Ancora nessuna situazione: nascono da sole quando il filtro trova email che fanno parte di un dialogo da seguire.")]);
+      l.length ? h("div", { class: "posta-situazioni" }, l.map(s => h("button", { type: "button", class: "carta posta-sit" + (s.aperta ? "" : " chiusa") + (s.tocca_a_te ? " tocca" : ""), onclick: () => apri(s.id) },
+        h("strong", {}, s.titolo), h("div", { class: "posta-etichette" }, _chi(s), _scadenza(s.scadenza)), h("div", { class: "sotto" }, (s.interlocutori || "").slice(0, 80)),
+        s.prossimo_passo ? h("div", { class: "posta-passo" }, "→ " + s.prossimo_passo) : null,
+        h("div", { class: "posta-riassunto" }, (s.riassunto || (s.da_riassumere ? "Da riassumere…" : "")).slice(0, 200) + ((s.riassunto || "").length > 200 ? "…" : "")),
+        h("div", { class: "sotto" }, _dataPosta(s.ultimo_il || s.aggiornata_il) + " · " + s.email_n + " email" + (s.da_leggere ? " · " + s.da_leggere + " da leggere" : "")))))
+        : h("p", { class: "sotto" }, "Ancora nessuna conversazione: nella scheda «Il punto» premi «Analizza» per ricostruire quelle delle ultime settimane.")]);
   };
-  api("GET", "/gestione/posta-in").then(d => mostraQuadro(d.quadro)).catch(() => {});
   carica();
   if (stato.postaSituazione) { apri(stato.postaSituazione); stato.postaSituazione = null; }
-  return [h("p", { class: "sotto" }, "Ogni dialogo che vale la pena seguire (una trattativa, una pratica, un progetto) diventa una situazione: il modello locale ne tiene il riassunto e lo aggiorna a ogni email nuova."),
-    h("div", { class: "azioni" }, bq), quadro, box, dett];
+  return [h("p", { class: "sotto" }, "Ogni conversazione da seguire (una trattativa, una pratica, un progetto), comprese le tue risposte: il modello locale ne tiene il riassunto e dice a chi tocca."),
+    dett, box];
 }
 
 function _pannelloCaselle() {
@@ -157,7 +215,7 @@ function _pannelloFiltro() {
 }
 
 function vistaPosta() {
-  const elenco = [["Da leggere", _pannelloDaLeggere()], ["Situazioni", _pannelloSituazioni()], ["Le caselle", _pannelloCaselle()],
+  const elenco = [["Il punto", _pannelloCosaFare()], ["Da leggere", _pannelloDaLeggere()], ["Conversazioni", _pannelloSituazioni()], ["Le caselle", _pannelloCaselle()],
     ["Da approvare", [h("p", { class: "sotto" }, "Le email che gli agenti hanno preparato e aspettano il tuo via libera."), codaEmailUscita()]], ["Filtro", _pannelloFiltro()]];
   const s = schede(elenco, stato.postaScheda || 0);
   s.querySelectorAll(".scheda-tab").forEach((b, i) => b.addEventListener("click", () => { stato.postaScheda = i; }));

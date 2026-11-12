@@ -481,3 +481,6 @@ button.piccolo{padding:6px 10px;font-size:13px;white-space:nowrap}
 .posta-sit:hover{border-color:var(--primario)}.posta-sit.chiusa{opacity:.6}
 .posta-riassunto{font-size:14px;line-height:1.45}
 .posta-quadro{margin:12px 0}
+.posta-passo{font-weight:600;color:var(--primario)}
+.posta-voce.mia{background:var(--carta2)}
+.posta-sit.tocca{border-left:4px solid var(--avv)}

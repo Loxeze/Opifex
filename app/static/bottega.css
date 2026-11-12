@@ -268,3 +268,5 @@ body.bottega .posta-voce.urgente{border-left-color:#B5462B}
 body.bottega .posta-lettore{background:#F5F2EB;border-color:#E2DACB}
 body.bottega button.collegamento{color:#1F4D43}
 body.bottega .posta-sit:hover{border-color:#1F4D43}
+body.bottega .posta-passo{color:#1F4D43}
+body.bottega .posta-voce.mia{background:#F5F2EB}

@@ -75,7 +75,7 @@ with TestClient(app) as c:
     dj = c.get("/app/dashboard.js").text
     pj = c.get("/app/posta.js").text
     ok("nuove pagine: Posta, Computer locali, sezioni fuori dalle Impostazioni", "function vistaPosta" in pj and all(x in dj for x in ("function vistaComputer", "function vistaSezione", "function mappaImpostazioni")))
-    ok("Posta (2.54): da leggere, situazioni, caselle, da approvare, filtro", all(x in pj for x in ('"Da leggere"', '"Situazioni"', '"Le caselle"', '"Da approvare"', '"Filtro"')) and 'src="posta.js"' in idx)
+    ok("Posta (2.55): il punto, da leggere, conversazioni, caselle, da approvare, filtro", all(x in pj for x in ('"Il punto"', '"Da leggere"', '"Conversazioni"', '"Le caselle"', '"Da approvare"', '"Filtro"')) and 'src="posta.js"' in idx)
     ok("organigramma 3D in finestra a parte, con ripiego nella stessa pagina", 'window.open(location.pathname + "#organigramma", "opifex-organigramma"' in pl and 'vai("organigramma")' in pl and "organigramma: vistaOrganigrammaPagina" in app_js)
     ok("la plancia non ha piu' la chat tra agenti ne' la scena 3D incorporata", "chat-org" not in pl and "dialoghi/feed" not in pl and "vistaOrganigramma()" in pl and "scena-pagina" in pl)
     ok("grafici senza emoji e senza HTML dai dati", "innerHTML" not in pl and "insertAdjacentHTML" not in pl)
