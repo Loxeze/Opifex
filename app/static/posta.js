@@ -28,6 +28,18 @@ function _scadenza(iso) {
   return h("span", { class: "etichetta " + (giorni <= 1 ? "urg3" : giorni <= 7 ? "urg2" : "urg1") }, testo);
 }
 function _chi(s) { return s.tocca_a_te ? h("span", { class: "etichetta urg2" }, "tocca a te") : h("span", { class: "etichetta" }, "aspetti " + (s.ultimo_da && s.ultimo_da !== "Lorenzo" ? "gli altri" : "una risposta")); }
+function _ora(iso) { return iso ? new Date(iso).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""; }
+// Cosa sta facendo il giro in corso: la fase, quante risposte ha dato il modello locale, quando l'ultima
+function _lavoroInCorso(d) {
+  const l = d.lavoro || {}, st = d.stato || {};
+  const minuti = l.iniziato ? Math.round((Date.now() - new Date(l.iniziato)) / 60000) : 0;
+  const fermo = !l.ultima_risposta && minuti >= 6 && /aspetto|legge|riassume/.test(l.fase || "");
+  return h("div", { class: "messaggio " + (fermo ? "no" : "avv") },
+    h("strong", {}, "Al lavoro" + (l.fase ? ": " + l.fase : "…")),
+    h("div", { class: "sotto" }, "Iniziato alle " + _ora(l.iniziato) + " · risposte del modello locale: " + (l.risposte || 0) + (l.ultima_risposta ? " (l'ultima alle " + _ora(l.ultima_risposta) + ")" : "")
+      + (st.vagliate ? " · email lette: " + st.vagliate : "") + ". La pagina si aggiorna da sola; puoi anche chiuderla."),
+    fermo ? h("div", {}, "Il modello locale non ha ancora risposto dopo " + minuti + " minuti: controlla che il computer con Ollama sia acceso e collegato (Impostazioni → Computer locali).") : null);
+}
 function _apriConversazione(id) { stato.postaScheda = 2; stato.postaSituazione = id; disegna(); }
 
 // Il punto: cosa tocca a Lorenzo nelle conversazioni in corso, l'analisi delle ultime settimane, il punto della situazione
@@ -47,7 +59,7 @@ function _pannelloCosaFare() {
     analizza.onclick = async () => { analizza.disabled = true; messaggio = null;
       try { await api("POST", "/gestione/posta-in/analizza", { giorni: Number(giorni.value) }); seguiva = true; } catch (e) { messaggio = avviso(e.message, "no"); }
       carica(); };
-    const lavoro = d.in_corso ? avviso("Il modello locale sta lavorando" + (st.fase ? ": " + st.fase : "…") + " La pagina si aggiorna da sola; puoi anche chiuderla.", "avv") : null;
+    const lavoro = d.in_corso ? _lavoroInCorso(d) : null;
     const quadro = h("div");
     const mostraQuadro = (q) => riempi(quadro, q && q.testo ? h("div", { class: "carta posta-quadro" }, h("h3", {}, "Il punto della situazione"),
       h("div", { class: "sotto" }, q.quando ? "preparato " + _dataPosta(q.quando) + " dal modello locale" : ""), h("pre", { class: "posta-testo" }, q.testo)) : null);
@@ -95,7 +107,7 @@ function _pannelloDaLeggere() {
     seguiva = !!d.in_corso;
     if (d.in_corso && box.isConnected !== false) attesa = setTimeout(() => { if (box.isConnected) carica(); }, 5000);
     const statoRiga = !d.caselle ? avviso("Nessuna casella collegata: collegale nella scheda «Collegamenti».", "avv")
-      : d.in_corso ? avviso("Il modello locale sta leggendo la posta… può volerci qualche minuto. La pagina si aggiorna da sola.", "avv")
+      : d.in_corso ? _lavoroInCorso(d)
       : !d.attivo ? avviso("Il filtro automatico è spento: «Controlla adesso» funziona lo stesso; per il controllo ogni 5 minuti accendilo nella scheda «Filtro».", "avv")
       : st.esito && st.esito !== "ok" ? avviso("Ultimo giro del filtro: " + st.esito + (st.errore ? " — " + st.errore : "") + ". Le email nuove aspettano: il testo non va mai a un modello online.", "no")
       : h("p", { class: "sotto" }, "Filtrate dal modello locale (" + d.modello + ")" + (st.quando ? " · ultimo giro " + _dataPosta(st.quando) : "") + ".");

@@ -36,9 +36,9 @@ IMAP = [em("Sent|10", "Lorenzo <info@logos.it>", "Convenzione Castello", 3, "Ari
         em("11", "Arianna <arianna@logos.it>", "Re: Convenzione Castello", 0.5, "Ho sentito il Comune: manca solo la delibera. Mi dici se sollecito?", "<c1@x>"),
         em("12", "Mario Rossi <mario@rossi.it>", "Foto della mostra", 5, "Ti giro le foto, buona serata", "<m1@x>")]
 lette, richieste = [], []
-def finto_gmail(conn, aid, n, g, ricerca="", tutto=False):
+def finto_gmail(conn, aid, n, g, ricerca="", tutto=False, avanzamento=None):
     richieste.append(("gmail", n, g, tutto)); return list(GMAIL)
-def finto_imap(c, n, g, ricerca="", tutto=False):
+def finto_imap(c, n, g, ricerca="", tutto=False, avanzamento=None):
     richieste.append(("imap", n, g, tutto)); return [x for x in IMAP if tutto or "|" not in x["id"]]
 posta_vaglio._elenco_gmail = finto_gmail
 posta_vaglio._elenco_imap = finto_imap
@@ -119,6 +119,8 @@ with TestClient(app) as c:
     ok("tocca a te (ultimo messaggio di Arianna), con prossimo passo e titolo del modello", ca[6] is True and ca[9] == "Arianna" and "sollecitare" in ca[7] and ca[2] == "Delibera per la convenzione", ca)
     ok("il modello vede chi ha scritto cosa: le tue righe come LORENZO", any("Analizzi una conversazione" in i and "[LORENZO" in m and "[Arianna" in m for _, _, i, m in chiamate))
     ok("Comune: scadenza letta anche da una risposta non pulita", cc[8] is not None and str(cc[8]) == "2026-11-14" and cc[7] == "Firmare e rimandare la convenzione", cc)
+    cs = sql("SELECT modello, count(*), sum(costo_stimato) FROM costi_api GROUP BY modello")
+    ok("le chiamate al modello locale si contano (costo zero): compaiono nel «risparmiato in locale»", cs == [("locale-auto", len(chiamate), 0)], cs)
     ok("il testo delle email non resta nel database", not sql("SELECT 1 FROM posta_vaglio WHERE riassunto LIKE '%IGNORA%' OR mittente LIKE '%IGNORA%'") and "anteprima" not in [r[0] for r in sql("SELECT column_name FROM information_schema.columns WHERE table_name='posta_vaglio'")])
     d = c.get("/gestione/posta-in", headers=H).json()
     ok("«Il punto»: tocca a te in due conversazioni, prima quella con scadenza", [f["titolo"] for f in d["da_fare"]] == ["Firmare la convenzione".replace("Firmare la convenzione", "Firma della convenzione"), "Delibera per la convenzione"] and d["situazioni_aperte"] == 2, d["da_fare"])
@@ -193,6 +195,9 @@ with TestClient(app) as c:
     # due richieste ravvicinate: la seconda non ne fa partire un altro e non da' errore
     from app import posta_vaglio as pv
     pv.IN_CORSO.acquire()
+    pv.LAVORO.update(fase="il modello locale legge le email: ne mancano 4", risposte=3)
+    lv = c.get("/gestione/posta-in", headers=H).json()["lavoro"]
+    ok("mentre lavora la schermata vede la fase e quante risposte ha dato il modello", lv and lv["fase"].startswith("il modello locale legge") and lv["risposte"] == 3, lv)
     r2 = c.post("/gestione/posta-in/vaglia", headers=H)
     ok("«Controlla adesso» mentre il filtro lavora gia': nessun errore, aspetta quello in corso", r2.status_code == 200 and r2.json().get("gia") and c.get("/gestione/posta-in", headers=H).json()["in_corso"] is True)
     pv.IN_CORSO.release()

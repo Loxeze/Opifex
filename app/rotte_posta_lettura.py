@@ -38,7 +38,7 @@ def da_leggere(tutte: bool = False, _: dict = Depends(solo_titolare)):
         aperte = conn.execute("SELECT count(*) AS n FROM posta_situazioni WHERE aperta").fetchone()["n"]
         return {"email": [_riga(r) for r in righe], "conteggi": conteggi, "da_fare": fare, "situazioni_aperte": aperte, "stato": posta_vaglio.stato(conn), "quadro": q,
                 "caselle": len(posta_vaglio.caselle(conn)), "modello": posta_vaglio.modello_locale(conn),
-                "attivo": posta_vaglio.vaglio_attivo(conn), "in_corso": in_corso, "solo_locale": posta_vaglio.solo_locale(conn), "regole": posta_vaglio.regole(conn)}
+                "attivo": posta_vaglio.vaglio_attivo(conn), "in_corso": in_corso, "lavoro": dict(posta_vaglio.LAVORO) if in_corso else None, "solo_locale": posta_vaglio.solo_locale(conn), "regole": posta_vaglio.regole(conn)}
 
 
 @router.post("/{vid}/letta")
