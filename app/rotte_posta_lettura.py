@@ -1,5 +1,6 @@
 """La posta dentro Opifex (solo titolare): da leggere (filtrata dal modello locale), situazioni, caselle da sfogliare, impostazioni del filtro."""
 import json
+import threading
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -33,7 +34,7 @@ def da_leggere(tutte: bool = False, _: dict = Depends(solo_titolare)):
             q = {}
         return {"email": [_riga(r) for r in righe], "conteggi": conteggi, "stato": posta_vaglio.stato(conn), "quadro": q,
                 "caselle": len(posta_vaglio.caselle(conn)), "modello": posta_vaglio.modello_locale(conn),
-                "attivo": posta_vaglio.vaglio_attivo(conn), "solo_locale": posta_vaglio.solo_locale(conn), "regole": posta_vaglio.regole(conn)}
+                "attivo": posta_vaglio.vaglio_attivo(conn), "in_corso": posta_vaglio.IN_CORSO.locked(), "solo_locale": posta_vaglio.solo_locale(conn), "regole": posta_vaglio.regole(conn)}
 
 
 @router.post("/{vid}/letta")
@@ -51,15 +52,28 @@ def tutte_lette(_: dict = Depends(solo_titolare)):
     return {"segnate": n}
 
 
-@router.post("/vaglia")
-def vaglia_ora(_: dict = Depends(solo_titolare)):
-    if not posta_vaglio.IN_CORSO.acquire(blocking=False):
-        raise HTTPException(409, "Il filtro sta gia' lavorando")
+def _vaglia_dietro():
     try:
         with connessione() as conn:
-            return posta_vaglio.vaglia(conn, forza=True)
+            posta_vaglio.vaglia(conn, forza=True)
+    except Exception as e:  # noqa: BLE001 - l'esito resta nello stato, la schermata lo mostra
+        try:
+            with connessione() as conn:
+                posta_vaglio._segna_stato(conn, esito="non riuscito", errore=str(e)[:300])
+        except Exception:  # noqa: BLE001
+            pass
     finally:
         posta_vaglio.IN_CORSO.release()
+
+
+@router.post("/vaglia")
+def vaglia_ora(_: dict = Depends(solo_titolare)):
+    """Parte subito e risponde subito: il modello locale puo' metterci minuti, la schermata segue lo stato.
+    Se un giro e' gia' in corso (anche quello automatico), non ne parte un altro: si aspetta quello."""
+    if not posta_vaglio.IN_CORSO.acquire(blocking=False):
+        return {"in_corso": True, "gia": True}
+    threading.Thread(target=_vaglia_dietro, daemon=True, name="filtro-posta").start()
+    return {"in_corso": True}
 
 
 @router.get("/situazioni")

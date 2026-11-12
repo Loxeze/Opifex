@@ -21,20 +21,28 @@ function _apriEmail(chiave, msgId, dove) {
 }
 
 function _pannelloDaLeggere() {
-  const box = h("div"); let tutte = false;
+  const box = h("div"); let tutte = false, messaggio = null, seguiva = false, attesa = null;
   const carica = async () => {
+    clearTimeout(attesa);
     let d;
     try { d = await api("GET", "/gestione/posta-in?tutte=" + (tutte ? "1" : "0")); } catch (e) { riempi(box, avviso(e.message, "no")); return; }
     const st = d.stato || {};
+    if (seguiva && !d.in_corso) {   // il controllo chiesto e' finito: il risultato resta sullo schermo finche' non ne chiedi un altro
+      messaggio = st.esito === "ok" ? avviso("Controllo finito: " + (st.nuove || 0) + " email nuove, " + (st.vagliate || 0) + " lette dal modello locale.", "ok")
+        : avviso("Il controllo non è riuscito: " + (st.esito || "") + (st.errore ? " — " + st.errore : "") + ". Le email restano in attesa e verranno lette al prossimo giro.", "no");
+    }
+    seguiva = !!d.in_corso;
+    if (d.in_corso && box.isConnected !== false) attesa = setTimeout(() => { if (box.isConnected) carica(); }, 5000);
     const statoRiga = !d.caselle ? avviso("Nessuna casella collegata: collegale nella scheda «Collegamenti».", "avv")
-      : !d.attivo ? avviso("Il filtro è spento: accendilo nella scheda «Filtro».", "avv")
-      : st.esito && st.esito !== "ok" ? avviso("Filtro " + st.esito + (st.errore ? ": " + st.errore : "") + ". Le email nuove aspettano: il testo non va mai a un modello online.", "avv")
+      : d.in_corso ? avviso("Il modello locale sta leggendo la posta… può volerci qualche minuto. La pagina si aggiorna da sola.", "avv")
+      : !d.attivo ? avviso("Il filtro automatico è spento: «Controlla adesso» funziona lo stesso; per il controllo ogni 5 minuti accendilo nella scheda «Filtro».", "avv")
+      : st.esito && st.esito !== "ok" ? avviso("Ultimo giro del filtro: " + st.esito + (st.errore ? " — " + st.errore : "") + ". Le email nuove aspettano: il testo non va mai a un modello online.", "no")
       : h("p", { class: "sotto" }, "Filtrate dal modello locale (" + d.modello + ")" + (st.quando ? " · ultimo giro " + _dataPosta(st.quando) : "") + ".");
-    const lavora = h("button", { class: "s", type: "button" }, "Controlla adesso");
-    lavora.onclick = async () => { lavora.disabled = true; lavora.textContent = "Il modello locale sta leggendo…";
-      try { const r = await api("POST", "/gestione/posta-in/vaglia", undefined, { scadenzaMs: 600000 }); if (r.errore) alertBox(r.errore); } catch (e) { alertBox(e.message); }
+    const lavora = h("button", { class: "s", type: "button", disabled: !!d.in_corso }, d.in_corso ? "Il modello locale sta leggendo…" : "Controlla adesso");
+    lavora.onclick = async () => { lavora.disabled = true; lavora.textContent = "Il modello locale sta leggendo…"; messaggio = null;
+      try { await api("POST", "/gestione/posta-in/vaglia"); seguiva = true; } catch (e) { messaggio = avviso("Non sono riuscito a far partire il controllo: " + e.message, "no"); }
       carica(); };
-    const alertBox = (t) => box.prepend(avviso(t, "no"));
+    const alertBox = (t) => { messaggio = avviso(t, "no"); box.prepend(messaggio); };
     const voce = (x) => {
       const riga = h("div", { class: "posta-voce" + (x.urgenza >= 2 ? " urgente" : ""), role: "button", tabindex: "0" },
         h("div", { class: "posta-testa" }, h("strong", {}, _mittente(x.mittente)), h("span", { class: "sotto" }, _dataPosta(x.data) + " · " + x.casella)),
@@ -53,7 +61,7 @@ function _pannelloDaLeggere() {
     const c = d.conteggi || {};
     const filtro = h("label", { class: "sotto", style: "display:flex;gap:6px;align-items:center" }, h("input", { type: "checkbox", checked: tutte, onchange: (ev) => { tutte = ev.target.checked; carica(); } }), "Mostra anche quelle normali");
     const tutteLette = d.email.length ? h("button", { class: "s", type: "button", onclick: async () => { await api("POST", "/gestione/posta-in/tutte-lette"); carica(); } }, "Segna tutte come lette") : null;
-    riempi(box, [statoRiga,
+    riempi(box, [messaggio, statoRiga,
       h("p", { class: "sotto" }, "Ultimi 14 giorni: " + (c.importante || 0) + " importanti, " + (c.normale || 0) + " normali, " + (c.scartabile || 0) + " scartate dal filtro."),
       h("div", { class: "azioni" }, lavora, tutteLette, filtro),
       d.email.length ? d.email.map(voce) : h("p", { class: "sotto" }, tutte ? "Nessuna email da leggere." : "Nessuna email importante da leggere.")]);

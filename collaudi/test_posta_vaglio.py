@@ -68,6 +68,18 @@ def finto_diretto(fornitore, modello, istruzioni, messaggio, max_token=1500, web
 esecuzione.chiama_modello = finto_diretto
 agente_browser._chiama_api = lambda corpo: (ricevuti.append(corpo), {"stop_reason": "end_turn", "usage": {"input_tokens": 10, "output_tokens": 5}, "content": [{"type": "text", "text": "ok"}]})[1]
 
+import time
+def vaglia(c, H):
+    """Il controllo parte in sottofondo: si aspetta che finisca e si legge l'esito dallo stato."""
+    p = c.post("/gestione/posta-in/vaglia", headers=H).json()
+    assert p.get("in_corso"), p
+    for _ in range(100):
+        d = c.get("/gestione/posta-in", headers=H).json()
+        if not d["in_corso"]:
+            return d["stato"]
+        time.sleep(0.1)
+    raise AssertionError("il controllo non finisce")
+
 with TestClient(app) as c:
     H = {"Authorization": "Bearer " + accedi(c, "l@p.it", "PasswordLunga!2026")}
     d = c.get("/gestione/posta-in", headers=H).json()
@@ -77,7 +89,7 @@ with TestClient(app) as c:
         ok("filtro spento: il giro automatico non fa nulla", posta_vaglio.giro(k) == {"saltato": "vaglio spento"} and not chiamate)
     r = c.put("/gestione/posta-in/impostazioni", headers=H, json={"attivo": True, "solo_locale": True, "regole": "Sempre importanti i Comuni."})
     ok("impostazioni salvate", r.status_code == 200 and c.get("/gestione/posta-in", headers=H).json()["regole"] == "Sempre importanti i Comuni.")
-    r = c.post("/gestione/posta-in/vaglia", headers=H).json()
+    r = vaglia(c, H)
     ok("primo giro: 3 email raccolte e vagliate", r.get("nuove") == 3 and r.get("vagliate") == 3, r)
     ok("ogni chiamata e' andata al modello LOCALE, mai online", chiamate and all(f == "locale" for f, *_ in chiamate), {f for f, *_ in chiamate})
     ok("senza agente Posta locale si usa «locale-auto»", all(m == "locale-auto" for _, m, *_ in chiamate))
@@ -94,7 +106,7 @@ with TestClient(app) as c:
     ok("«Da leggere» mostra solo l'importante, con motivo e situazione", [e["msg_id"] for e in d["email"]] == ["g1"] and d["email"][0]["situazione"] == "Convenzione Castello" and d["email"][0]["motivo"], d["email"])
     ok("con «anche le normali» compare anche Arianna", {e["msg_id"] for e in c.get("/gestione/posta-in?tutte=1", headers=H).json()["email"]} == {"g1", "11"})
     n = len(chiamate)
-    r = c.post("/gestione/posta-in/vaglia", headers=H).json()
+    r = vaglia(c, H)
     ok("secondo giro: nessuna email nuova, nessuna chiamata", r.get("nuove") == 0 and r.get("vagliate") == 0 and len(chiamate) == n, r)
     # lettura dentro Opifex
     l = c.get(f"/gestione/posta-in/caselle/imap-{iid}", headers=H).json()
@@ -117,7 +129,7 @@ with TestClient(app) as c:
     # computer locale spento: niente ripiego online
     GMAIL.append({"id": "g3", "da": "Regione <bandi@regione.liguria.it>", "oggetto": "Bando cultura", "data": ora, "non_letta": True, "anteprima": "Scadenza 15/12"})
     guasto["locale"] = True; n = len(chiamate)
-    r = c.post("/gestione/posta-in/vaglia", headers=H).json()
+    r = vaglia(c, H)
     ok("computer locale spento: l'email resta da vagliare e nessun modello online la vede", r.get("nuove") == 1 and r.get("errore") and sql("SELECT categoria FROM posta_vaglio WHERE msg_id='g3'")[0][0] == "da_vagliare"
        and all(f == "locale" for f, *_ in chiamate[n:]))
     st = c.get("/gestione/posta-in", headers=H).json()["stato"]
@@ -125,7 +137,7 @@ with TestClient(app) as c:
     q = c.post("/gestione/posta-in/quadro", headers=H)
     ok("anche il punto della situazione aspetta (503), non va online", q.status_code == 503)
     guasto["locale"] = False
-    r = c.post("/gestione/posta-in/vaglia", headers=H).json()
+    r = vaglia(c, H)
     ok("quando il computer torna, l'email viene vagliata", r.get("vagliate") == 1 and sql("SELECT categoria FROM posta_vaglio WHERE msg_id='g3'")[0][0] == "importante")
     # agenti: con «solo locale» un agente online non riceve la posta
     marco = sql("SELECT id FROM agenti WHERE attivo AND modello LIKE 'claude%%' ORDER BY id LIMIT 1")[0][0]
@@ -141,5 +153,11 @@ with TestClient(app) as c:
     c.post(f"/agenti/{marco}/chat", headers=H, json={"messaggio": "guarda la posta", "fascia_dati": "interno"})
     nomi = [t["name"] for t in (ricevuti[0].get("tools") or [])] if ricevuti else []
     ok("spegnendo «solo locale» l'agente riavrebbe la posta (comportamento della 2)", "gmail_cerca" in nomi and "posta_situazioni" not in nomi, nomi)
+    # due richieste ravvicinate: la seconda non ne fa partire un altro e non da' errore
+    from app import posta_vaglio as pv
+    pv.IN_CORSO.acquire()
+    r2 = c.post("/gestione/posta-in/vaglia", headers=H)
+    ok("«Controlla adesso» mentre il filtro lavora gia': nessun errore, aspetta quello in corso", r2.status_code == 200 and r2.json().get("gia") and c.get("/gestione/posta-in", headers=H).json()["in_corso"] is True)
+    pv.IN_CORSO.release()
     ok("solo il titolare vede la posta", c.get("/gestione/posta-in").status_code in (401, 403))
 print(f"TOTALE {sum(ris)}/{len(ris)}")
