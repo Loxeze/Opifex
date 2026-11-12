@@ -1,5 +1,6 @@
 # Quando cambia il numero in VERSIONE sul ramo main costruisce il pacchetto di aggiornamento e crea la release vX.Y.Z con i suoi file,
 # cosi' l'aggiornamento automatico di Opifex la trova senza passaggi a mano. Se la release esiste gia' non fa nulla.
+# (riavvio del rilascio 2.53.0)
 name: Rilascio
 on:
   push:
