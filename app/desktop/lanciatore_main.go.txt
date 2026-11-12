@@ -27,13 +27,49 @@ import (
 var indicePy []byte
 
 const (
-	versione   = 7 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
-	urlPredef  = "https://app.opifex.space"
-	porta      = "8765"
-	pyZipURL   = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip"
-	getPipURL  = "https://bootstrap.pypa.io/get-pip.py"
+	versione    = 7 // versione di questo eseguibile: Opifex ne propone una piu' alta quando serve aggiornarlo
+	porta       = "8765"
+	pyZipURL    = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip"
+	getPipURL   = "https://bootstrap.pypa.io/get-pip.py"
 	revIniziale = 1
 )
+
+// urlPredef e' l'indirizzo di Opifex a cui si collega l'app. Si puo' fissare alla compilazione:
+//
+//	go build -ldflags "-X main.indirizzo=https://aurora.opifex.space"
+//
+// In quel caso l'app, all'avvio, porta anche le impostazioni gia' presenti su quell'indirizzo (l'indice resta lo stesso).
+var indirizzo = ""
+var urlPredef = "https://app.opifex.space"
+
+func init() {
+	if indirizzo != "" {
+		urlPredef = strings.TrimRight(indirizzo, "/")
+	}
+}
+
+// fissaIndirizzo scrive l'indirizzo scelto alla compilazione in config.json (lanciatore) e opifex.json (programma),
+// lasciando intatte le altre voci.
+func fissaIndirizzo(base string) {
+	if indirizzo == "" {
+		return
+	}
+	for _, f := range []struct{ nome, chiave string }{{"config.json", "opifex_url"}, {"opifex.json", "url"}} {
+		p := filepath.Join(base, f.nome)
+		m := map[string]any{}
+		if b, err := os.ReadFile(p); err == nil {
+			json.Unmarshal(b, &m)
+		}
+		if v, _ := m[f.chiave].(string); v == urlPredef {
+			continue
+		}
+		m[f.chiave] = urlPredef
+		if b, err := json.Marshal(m); err == nil {
+			os.WriteFile(p, b, 0o644)
+			logga(base, "indirizzo di Opifex impostato su "+urlPredef+" in "+f.nome)
+		}
+	}
+}
 
 var pacchettiIniziali = []string{"numpy", "pillow", "pypdf", "imageio-ffmpeg", "faster-whisper", "open_clip_torch", "opencv-python-headless"}
 
@@ -361,6 +397,7 @@ func main() {
 		fmt.Println("=== Opifex · Archivio ===")
 	}
 
+	fissaIndirizzo(base)
 	m, url := prendiManifesto(base)
 	if m == nil {
 		logga(base, "manifesto NON raggiungibile su "+url)
