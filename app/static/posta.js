@@ -11,12 +11,74 @@ function _mittente(da) { return String(da || "").replace(/\s*<[^>]*>/, "").repla
 const _URGENZA = ["", "da guardare", "presto", "oggi"];
 
 // Lettore: apre un'email in una carta sotto la riga cliccata
-function _apriEmail(chiave, msgId, dove) {
+// «Mi interessa / Non mi interessa»: il filtro impara da qui. vid = la riga del filtro; se manca (scheda Le caselle) si passa la casella.
+function _pulsantiInteresse(x, dopo) {
+  let stato_ = x.interessa;
+  const si = h("button", { class: "s piccolo voto", type: "button", title: "Mi interessa: il filtro te le porterà in evidenza" }, "👍 Mi interessa");
+  const no = h("button", { class: "s piccolo voto", type: "button", title: "Non mi interessa: il filtro le scarterà" }, "👎 Non mi interessa");
+  const mostra = () => { si.classList.toggle("scelto", stato_ === true); no.classList.toggle("scelto", stato_ === false); };
+  const vota = async (ev, v) => { ev.stopPropagation(); const nuovo = stato_ === v ? null : v;
+    try {
+      if (x.vaglio_id || x.id_vaglio) await api("POST", "/gestione/posta-in/" + (x.vaglio_id || x.id_vaglio) + "/interesse", { interessa: nuovo });
+      else { const r = await api("POST", "/gestione/posta-in/interesse", { chiave: x.chiave, msg_id: x.msg_id, da: x.da || "", oggetto: x.oggetto || "", interessa: nuovo === null ? v : nuovo }); x.vaglio_id = r.id; }
+      stato_ = nuovo; mostra(); if (dopo) dopo(nuovo);
+    } catch (e) { si.parentNode && si.parentNode.append(avviso(e.message, "no")); } };
+  si.onclick = (ev) => vota(ev, true); no.onclick = (ev) => vota(ev, false); mostra();
+  return h("span", { class: "posta-voti" }, si, no);
+}
+
+// Modulo «nuovo compito» (per te o per un collaboratore). proposta: già pronta (da una conversazione) oppure la chiede al modello locale (da un'email).
+function _moduloCompito(dove, { vid, sid, proposta }) {
+  if (dove._compito) { dove._compito.remove(); dove._compito = null; return; }
+  const box = h("div", { class: "carta posta-compito" }, h("p", { class: "sotto" }, vid && !proposta ? "Il modello locale legge l'email e prepara una proposta di compito…" : "…"));
+  dove._compito = box; dove.after(box);
+  const disegnaModulo = (p, persone) => {
+    const titolo = h("input", { value: p.titolo || "", maxlength: 200 });
+    const descr = h("textarea", { style: "min-height:90px" }, p.descrizione || "");
+    const scad = h("input", { type: "date", value: p.scadenza || "" });
+    const prio = h("select", {}, ["bassa", "normale", "alta", "urgente"].map(v => h("option", { value: v, selected: v === (p.priorita || "normale") }, v)));
+    const chi = h("select", {}, [h("option", { value: "" }, "A me"),
+      h("optgroup", { label: "Persone" }, persone.utenti.map(u => h("option", { value: "u" + u.id, selected: p.assegnato_utente_id === u.id }, u.nome))),
+      persone.agenti.length ? h("optgroup", { label: "Agenti" }, persone.agenti.map(a => h("option", { value: "a" + a.id }, a.nome))) : null]);
+    const msg = h("div");
+    const salva = h("button", { class: "p", type: "button" }, "Crea il compito");
+    salva.onclick = async () => { salva.disabled = true; msg.replaceChildren();
+      const v = chi.value, corpo = { titolo: titolo.value.trim(), descrizione: descr.value.trim() || null, scadenza: scad.value || null, priorita: prio.value,
+        assegnato_utente_id: v.startsWith("u") ? Number(v.slice(1)) : null, assegnato_agente_id: v.startsWith("a") ? Number(v.slice(1)) : null };
+      try { const r = await api("POST", vid ? "/gestione/posta-in/" + vid + "/compito" : "/gestione/posta-in/situazioni/" + sid + "/compito", corpo);
+        riempi(box, [avviso("Compito creato.", "ok"), h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => vai("lavoro") }, "Vai ai compiti"),
+          h("button", { class: "s", type: "button", onclick: () => { box.remove(); dove._compito = null; } }, "Chiudi"))]);
+        void r; }
+      catch (e) { msg.replaceChildren(avviso(e.message, "no")); salva.disabled = false; } };
+    riempi(box, [h("h3", {}, "Nuovo compito"), h("label", {}, "Cosa fare", titolo), h("label", {}, "Dettagli", descr),
+      h("div", { class: "posta-campi" }, h("label", {}, "Per chi", chi), h("label", {}, "Entro il", scad), h("label", {}, "Priorità", prio)),
+      msg, h("div", { class: "azioni" }, salva, h("button", { class: "s", type: "button", onclick: () => { box.remove(); dove._compito = null; } }, "Annulla"))]);
+    titolo.focus();
+  };
+  (async () => {
+    let persone = { utenti: [], agenti: [] };
+    try { persone = await api("GET", "/gestione/posta-in/persone"); } catch (e) { /* si crea comunque per te */ }
+    if (proposta || !vid) { disegnaModulo(proposta || {}, persone); return; }
+    try { disegnaModulo(await api("POST", "/gestione/posta-in/" + vid + "/proponi-compito", undefined, { scadenzaMs: 300000 }), persone); }
+    catch (e) { disegnaModulo({}, persone); box.prepend(avviso("Proposta non disponibile (" + e.message + "): scrivilo tu.", "avv")); }
+  })();
+}
+
+function _apriEmail(chiave, msgId, dove, info) {
   if (dove._aperto) { dove._aperto.remove(); dove._aperto = null; return; }
   const box = h("div", { class: "posta-lettore" }, h("p", { class: "sotto" }, "Apro l'email…"));
   dove._aperto = box; dove.after(box);
   api("GET", "/gestione/posta-in/caselle/" + chiave + "/" + encodeURIComponent(msgId))
-    .then(r => riempi(box, [h("pre", { class: "posta-testo" }, r.testo), h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => { box.remove(); dove._aperto = null; } }, "Chiudi"))]))
+    .then(r => {
+      const x = { ...(info || {}), vaglio_id: r.vaglio_id, interessa: r.interessa, chiave, msg_id: msgId };
+      const azioni = h("div", { class: "azioni" });
+      azioni.append(_pulsantiInteresse(x),
+        r.task_id ? h("span", { class: "etichetta" }, "compito già creato") : h("button", { class: "s", type: "button", onclick: () => _moduloCompito(azioni, { vid: r.vaglio_id }), disabled: !r.vaglio_id }, "+ Compito"),
+        h("button", { class: "s", type: "button", onclick: () => { box.remove(); dove._aperto = null; } }, "Chiudi"));
+      const nota = r.casella === "permesso" ? avviso("Letta qui, ma non segnata come letta in Gmail: serve un permesso in più. In Caselle e Google ricollega l'account spuntando anche «Gmail: segna come lette».", "avv")
+        : r.casella === "errore" ? h("p", { class: "sotto" }, "Non sono riuscito a segnarla come letta nella casella.") : null;
+      riempi(box, [h("pre", { class: "posta-testo" }, r.testo), nota, azioni]);
+    })
     .catch(e => riempi(box, avviso(e.message, "no")));
 }
 
@@ -76,7 +138,9 @@ function _pannelloCosaFare() {
         h("div", { class: "posta-testa" }, h("strong", {}, f.titolo), h("span", { class: "sotto" }, "ultimo messaggio di " + (f.ultimo_da || "?") + (f.ultimo_il ? " · " + _dataPosta(f.ultimo_il) : ""))),
         f.prossimo_passo ? h("div", { class: "posta-passo" }, "→ " + f.prossimo_passo) : h("div", { class: "sotto" }, "Ti ha scritto " + (f.ultimo_da || "qualcuno") + " e non hai ancora risposto."),
         h("div", { class: "posta-etichette" }, _scadenza(f.scadenza), h("span", { class: "sotto" }, f.interlocutori || "")));
-      riga = h("div", { class: "posta-riga" }, scheda, fatto(f, () => riga)); return riga; };
+      const compito = h("button", { class: "s piccolo", type: "button", onclick: (ev) => { ev.stopPropagation();
+        _moduloCompito(riga, { sid: f.id, proposta: { titolo: f.prossimo_passo || f.titolo, descrizione: (f.riassunto || "") + "\n\nConversazione: " + f.titolo + " (" + (f.interlocutori || "") + ")", scadenza: f.scadenza } }); } }, "+ Compito");
+      riga = h("div", { class: "posta-riga" }, scheda, h("div", { class: "posta-colonna" }, fatto(f, () => riga), compito)); return riga; };
     const vuoto = !d.situazioni_aperte
       ? h("div", { class: "carta" }, h("h3", {}, "Ancora nessuna conversazione analizzata"),
           h("p", {}, "Il filtro ha guardato solo le ultime email. Fagli rileggere le ultime settimane, comprese le risposte che hai mandato tu: ricostruisce le conversazioni in corso e ti dice dove tocca a te."),
@@ -124,9 +188,13 @@ function _pannelloDaLeggere() {
         h("div", { class: "posta-etichette" },
           x.urgenza ? h("span", { class: "etichetta urg" + x.urgenza }, _URGENZA[x.urgenza]) : null,
           x.motivo ? h("span", { class: "sotto" }, x.motivo) : null,
-          x.situazione ? h("button", { class: "collegamento", type: "button", onclick: (ev) => { ev.stopPropagation(); _apriConversazione(x.situazione_id); } }, "↳ " + x.situazione) : null));
-      const letta = h("button", { class: "s piccolo", type: "button", title: "Segna come letta", onclick: async (ev) => { ev.stopPropagation(); try { await api("POST", "/gestione/posta-in/" + x.id + "/letta"); riga.parentNode.remove(); } catch (e) { alertBox(e.message); } } }, "✓ Letta");
-      const apri = () => _apriEmail(x.origine + "-" + x.casella_id, x.msg_id, contenitore);
+          x.imparata ? h("span", { class: "etichetta imparata" }, "✦ " + x.imparata) : null,
+          x.situazione ? h("button", { class: "collegamento", type: "button", onclick: (ev) => { ev.stopPropagation(); _apriConversazione(x.situazione_id); } }, "↳ " + x.situazione) : null),
+        h("div", { class: "posta-etichette", onclick: (ev) => ev.stopPropagation() },
+          _pulsantiInteresse({ ...x, vaglio_id: x.id }, (v) => { if (v === false) setTimeout(() => contenitore.parentNode && contenitore.parentNode.remove(), 400); }),
+          x.task_id ? h("span", { class: "etichetta" }, "compito creato") : h("button", { class: "s piccolo", type: "button", onclick: (ev) => { ev.stopPropagation(); _moduloCompito(contenitore, { vid: x.id }); } }, "+ Compito")));
+      const letta = h("button", { class: "s piccolo", type: "button", title: "Segna come letta", onclick: async (ev) => { ev.stopPropagation(); try { const r = await api("POST", "/gestione/posta-in/" + x.id + "/letta"); riga.parentNode.parentNode.remove(); if (r.casella === "permesso") alertBox("Segnata come letta qui; per segnarla anche in Gmail ricollega l'account spuntando «Gmail: segna come lette»."); } catch (e) { alertBox(e.message); } } }, "✓ Letta");
+      const apri = () => _apriEmail(x.origine + "-" + x.casella_id, x.msg_id, contenitore, x);
       riga.onclick = apri; riga.onkeydown = (ev) => { if (ev.key === "Enter") apri(); };
       const contenitore = h("div", { class: "posta-riga" }, riga, letta);
       return h("div", {}, contenitore);
@@ -193,8 +261,9 @@ function _pannelloCaselle() {
     let l; try { l = await api("GET", "/gestione/posta-in/caselle/" + scelta + "?cerca=" + encodeURIComponent(cerca.value.trim())); } catch (e) { riempi(lista, avviso(e.message, "no")); return; }
     riempi(lista, l.length ? l.map(e => { const r = h("div", { class: "posta-voce" + (e.non_letta ? " nonletta" : ""), role: "button", tabindex: "0" },
       h("div", { class: "posta-testa" }, h("strong", {}, _mittente(e.da)), h("span", { class: "sotto" }, _dataPosta(e.data) + (e.categoria && e.categoria !== "da_vagliare" ? " · " + e.categoria : ""))),
-      h("div", { class: "posta-oggetto" }, e.oggetto || "(senza oggetto)"), h("div", { class: "sotto" }, e.riassunto || e.anteprima));
-      r.onclick = () => _apriEmail(scelta, e.id, r); r.onkeydown = (ev) => { if (ev.key === "Enter") r.click(); }; return r; }) : h("p", { class: "sotto" }, "Nessuna email."));
+      h("div", { class: "posta-oggetto" }, e.oggetto || "(senza oggetto)"), h("div", { class: "sotto" }, e.riassunto || e.anteprima),
+      h("div", { class: "posta-etichette", onclick: (ev) => ev.stopPropagation() }, _pulsantiInteresse({ vaglio_id: e.vaglio_id, interessa: e.interessa, chiave: scelta, msg_id: e.id, da: e.da, oggetto: e.oggetto })));
+      r.onclick = () => { r.classList.remove("nonletta"); _apriEmail(scelta, e.id, r, e); }; r.onkeydown = (ev) => { if (ev.key === "Enter") r.click(); }; return r; }) : h("p", { class: "sotto" }, "Nessuna email."));
   };
   api("GET", "/gestione/posta-in/caselle").then(cc => {
     if (!cc.length) { riempi(box, [avviso("Nessuna casella collegata.", "avv"), h("button", { class: "s", type: "button", onclick: () => vai("sez", "collegamenti") }, "Collega una casella")]); return; }
@@ -210,18 +279,31 @@ function _pannelloCaselle() {
 function _pannelloFiltro() {
   const box = h("div");
   api("GET", "/gestione/posta-in").then(d => {
-    const attivo = h("input", { type: "checkbox", checked: d.attivo }), solo = h("input", { type: "checkbox", checked: d.solo_locale });
+    const attivo = h("input", { type: "checkbox", checked: d.attivo }), solo = h("input", { type: "checkbox", checked: d.solo_locale }), segna = h("input", { type: "checkbox", checked: d.segna_casella });
+    const imparatoBox = h("div");
+    const caricaImparato = () => api("GET", "/gestione/posta-in/imparato").then(l => riempi(imparatoBox, l.length
+      ? h("div", { class: "posta-imparato" }, l.map(r => h("div", { class: "posta-imparato-riga" },
+          h("span", { class: "etichetta " + (r.voto > 0 ? "si" : "no") }, r.voto > 0 ? "👍 ti interessa" : "👎 non ti interessa"),
+          h("span", { class: "posta-imparato-chi" }, r.mittente), h("span", { class: "sotto" }, r.segnali + " segnali"),
+          h("button", { class: "collegamento", type: "button", onclick: async () => { await api("DELETE", "/gestione/posta-in/imparato?mittente=" + encodeURIComponent(r.mittente)); caricaImparato(); } }, "dimentica"))))
+      : h("p", { class: "sotto" }, "Ancora niente: usa «Mi interessa» / «Non mi interessa» sulle email, e apri quelle che ti servono. Il filtro impara da questo.")))
+      .catch(e => riempi(imparatoBox, avviso(e.message, "no")));
+    caricaImparato();
     const reg = h("textarea", { style: "min-height:140px;width:100%", placeholder: "Es.: sempre importanti le email di Comuni, Regione, università e partner dei progetti; scadenze dei bandi; Arianna, Matteo, Giuseppe, Fabio. Scarta le newsletter di software e le notifiche dei social." }, d.regole || "");
     const msg = h("div");
     riempi(box, [
       h("label", { style: "display:flex;gap:8px;align-items:center" }, attivo, "Filtro acceso: ogni 5 minuti il modello locale legge le email nuove e le smista"),
       h("label", { style: "display:flex;gap:8px;align-items:center" }, solo, "La posta passa solo dai modelli locali: gli agenti con un modello online non leggono le caselle"),
+      h("label", { style: "display:flex;gap:8px;align-items:center" }, segna, "Quando apro un'email qui, segnala come letta anche nella mia casella"),
       h("label", {}, "Cosa conta per te (il filtro lo segue)", reg),
       h("p", { class: "sotto" }, "Modello usato: " + d.modello + " (quello dell'agente Posta se è locale). Se nessun computer locale risponde, il filtro aspetta: non ripiega mai su un modello online."),
       h("div", { class: "azioni" }, h("button", { class: "p", type: "button", onclick: async () => { msg.replaceChildren();
-        try { await api("PUT", "/gestione/posta-in/impostazioni", { attivo: attivo.checked, solo_locale: solo.checked, regole: reg.value }); msg.replaceChildren(avviso("Salvato.", "ok")); }
+        try { await api("PUT", "/gestione/posta-in/impostazioni", { attivo: attivo.checked, solo_locale: solo.checked, segna_casella: segna.checked, regole: reg.value }); msg.replaceChildren(avviso("Salvato.", "ok")); }
         catch (e) { msg.replaceChildren(avviso(e.message, "no")); } } }, "Salva"),
-        h("button", { class: "s", type: "button", onclick: () => vai("sez", "collegamenti") }, "Collega o controlla le caselle")), msg]);
+        h("button", { class: "s", type: "button", onclick: () => vai("sez", "collegamenti") }, "Collega o controlla le caselle")), msg,
+      h("h3", { style: "margin-top:24px" }, "Cosa ha imparato da te"),
+      h("p", { class: "sotto" }, "Dai pulsanti «Mi interessa / Non mi interessa», dalle email che apri (qui o nella tua casella) e da quelle da cui crei un compito. Chi ti interessa finisce sempre in evidenza; chi non ti interessa viene scartato senza disturbare il modello."),
+      imparatoBox]);
   }).catch(e => riempi(box, avviso(e.message, "no")));
   return box;
 }

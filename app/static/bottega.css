@@ -270,3 +270,4 @@ body.bottega button.collegamento{color:#1F4D43}
 body.bottega .posta-sit:hover{border-color:#1F4D43}
 body.bottega .posta-passo{color:#1F4D43}
 body.bottega .posta-voce.mia{background:#F5F2EB}
+body.bottega button.voto.scelto{background:#1F4D43;border-color:#1F4D43;color:#fff}

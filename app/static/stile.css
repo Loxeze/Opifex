@@ -484,3 +484,14 @@ button.piccolo{padding:6px 10px;font-size:13px;white-space:nowrap}
 .posta-passo{font-weight:600;color:var(--primario)}
 .posta-voce.mia{background:var(--carta2)}
 .posta-sit.tocca{border-left:4px solid var(--avv)}
+.posta-voti{display:inline-flex;gap:6px;flex-wrap:wrap}
+button.voto.scelto{background:var(--primario);color:#fff;border-color:var(--primario)}
+.posta-colonna{display:flex;flex-direction:column;gap:6px}
+.posta-compito{margin:6px 0 12px;display:flex;flex-direction:column;gap:10px}
+.posta-compito input,.posta-compito textarea,.posta-compito select{width:100%}
+.posta-campi{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.etichetta.imparata{background:var(--carta2)}
+.posta-imparato{display:flex;flex-direction:column;gap:6px}
+.posta-imparato-riga{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.posta-imparato-chi{font-weight:600;overflow-wrap:anywhere}
+.etichetta.si{background:var(--ok-b, #e4f1ea);color:var(--ok, #1f6b44)}.etichetta.no{background:var(--no-b);color:var(--no)}

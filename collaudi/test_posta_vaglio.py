@@ -45,6 +45,23 @@ posta_vaglio._elenco_imap = finto_imap
 def finto_leggi(conn, o, cid, mid):
     lette.append((o, cid, mid)); return "Da: x\nOggetto: y\n\nTesto completo dell'email " + mid
 posta_vaglio.leggi = finto_leggi
+from app import strumenti_posta
+flag_imap = []
+class FintaImap:
+    def select(self, c, readonly=False): flag_imap.append(("select", c, readonly)); return ("OK", [b"1"])
+    def uid(self, *a): flag_imap.append(a); return ("OK", [b""])
+    def logout(self): pass
+strumenti_posta._connetti = lambda c: FintaImap()
+gmail_modify = []
+_rich_vera = strumenti_gmail._richiesta
+def finto_richiesta(metodo, url, tok, **kw):
+    gmail_modify.append((metodo, url, kw.get("json")))
+    if permesso_gmail["manca"]:
+        raise strumenti_gmail.ErroreGoogle("Gmail ha risposto 403: Request had insufficient authentication scopes.")
+    return {}
+permesso_gmail = {"manca": True}
+strumenti_gmail._richiesta = finto_richiesta
+strumenti_gmail.token_accesso = lambda conn, a: "tok"
 
 chiamate, guasto = [], {"locale": False}
 def finto_modello(fornitore, modello, istruzioni, messaggio, max_token=1500, web=None):
@@ -56,6 +73,8 @@ def finto_modello(fornitore, modello, istruzioni, messaggio, max_token=1500, web
         for n, blocco in enumerate(messaggio.split("\n--- ")[1:], 1):
             if "Arianna" in blocco:
                 voci.append({"n": n, "categoria": "normale", "urgenza": 1, "riassunto": "Arianna: manca la delibera", "motivo": "aggiornamento"})
+            elif "Proroga" in blocco:
+                voci.append({"n": n, "categoria": "normale", "urgenza": 0, "riassunto": "Proroga", "motivo": ""})
             elif "Mario" in blocco:
                 voci.append({"n": n, "categoria": "normale", "urgenza": 0, "riassunto": "Mario manda le foto", "motivo": "foto"})
             else:
@@ -70,6 +89,9 @@ def finto_modello(fornitore, modello, istruzioni, messaggio, max_token=1500, web
                                         "prossimo_passo": "Dire ad Arianna se sollecitare il Comune", "tocca_a_lorenzo": True, "scadenza": None}), 1, 1)
         return Risposta("Ecco il JSON: " + json.dumps({"titolo": "Firma della convenzione", "riassunto": "Il Comune ha mandato la convenzione da firmare.",
                                                       "prossimo_passo": "Firmare e rimandare la convenzione", "tocca_a_lorenzo": True, "scadenza": "2026-11-14"}), 1, 1)
+    if "proponi UN compito" in istruzioni:
+        return Risposta(json.dumps({"titolo": "Mandare le foto della mostra a Giuseppe", "descrizione": "Girare le foto di Mario a Giuseppe per il montaggio.",
+                                    "scadenza": "2026-11-20", "priorita": "alta", "per": "Giuseppe"}), 1, 1)
     return Risposta("DA FARE: firmare la convenzione entro il 14/11.", 30, 10)
 fornitori.chiama_modello = finto_modello
 
@@ -178,6 +200,76 @@ with TestClient(app) as c:
     r = vaglia(c, H)
     ok("quando il computer torna, l'email viene vagliata e diventa una conversazione", r.get("vagliate") == 1 and sql("SELECT categoria FROM posta_vaglio WHERE msg_id='g3'")[0][0] == "importante"
        and sql("SELECT count(*) FROM posta_situazioni WHERE filo LIKE %s", ("%g:t3",))[0][0] == 1)
+    # ---- 2.56: impara da te, compiti dalle email, letta anche nella casella
+    mario = sql("SELECT id FROM posta_vaglio WHERE msg_id='12'")[0][0]
+    r = c.post(f"/gestione/posta-in/{mario}/interesse", headers=H, json={"interessa": False}).json()
+    ok("«Non mi interessa»: l'email esce subito dalle normali", r.get("categoria") == "scartabile" and sql("SELECT categoria, interessa FROM posta_vaglio WHERE id=%s", (mario,))[0] == ("scartabile", False))
+    n = len(chiamate)
+    IMAP.append(em("13", "Mario Rossi <mario@rossi.it>", "Altre foto", 0.1, "Eccone altre", "<m2@x>"))
+    vaglia(c, H)
+    ok("la volta dopo, le email di Mario sono scartate da sole, senza chiedere al modello",
+       sql("SELECT categoria, imparata FROM posta_vaglio WHERE msg_id='13'")[0] == ("scartabile", "non ti interessa (imparato da te)") and not any("Altre foto" in m for *_, m in chiamate[n:]))
+    nuovo = em("g7", "Fondazione Carige <bandi@fondazionecarige.it>", "Nuovo bando", 0.05, "Bando per la cultura", "g:t7")
+    GMAIL.append(nuovo)
+    cat0 = None
+    vaglia(c, H)
+    fid = sql("SELECT id, categoria FROM posta_vaglio WHERE msg_id='g7'")[0]
+    c.post(f"/gestione/posta-in/{fid[0]}/interesse", headers=H, json={"interessa": True})
+    ok("«Mi interessa»: va fra le importanti", sql("SELECT categoria, interessa FROM posta_vaglio WHERE id=%s", (fid[0],))[0] == ("importante", True))
+    GMAIL.append(em("g8", "Fondazione Carige <bandi@fondazionecarige.it>", "Proroga", 0.01, "Proroga del bando", "g:t8"))
+    n = len(chiamate)
+    vaglia(c, H)
+    ok("la volta dopo, anche se il modello la direbbe normale, chi ti interessa finisce in evidenza",
+       sql("SELECT categoria, imparata FROM posta_vaglio WHERE msg_id='g8'")[0] == ("importante", "ti interessa chi scrive (imparato da te)"))
+    prompt = next((m for _, _, i, m in chiamate[n:] if "filtro della posta" in i), "")
+    ok("il modello riceve cosa ha imparato: chi interessa, chi no, esempi di oggetti", "bandi@fondazionecarige.it" in prompt and "mario@rossi.it" in prompt and "Nuovo bando" in prompt, prompt[-600:])
+    im = c.get("/gestione/posta-in/imparato", headers=H).json()
+    ok("«Cosa ha imparato da te»: Mario no, Fondazione si'", {(x["mittente"], x["voto"] > 0) for x in im} >= {("mario@rossi.it", False), ("bandi@fondazionecarige.it", True)}, im)
+    ok("«dimentica» toglie quello che ha imparato su un mittente", c.delete("/gestione/posta-in/imparato?mittente=mario@rossi.it", headers=H).json()["tolti"] >= 1
+       and not any(x["mittente"] == "mario@rossi.it" for x in c.get("/gestione/posta-in/imparato", headers=H).json()))
+    # aperta: segnale + letta nella casella
+    flag_imap.clear(); gmail_modify.clear()
+    t = c.get(f"/gestione/posta-in/caselle/imap-{iid}/11", headers=H).json()
+    ok("aprire un'email IMAP la segna come letta anche nella casella (\\Seen)", t["casella"] == "ok" and any(a[:2] == ("STORE", "11") and "Seen" in a[3] for a in flag_imap if len(a) >= 4)
+       and ("select", "INBOX", False) in flag_imap, flag_imap)
+    ok("e aprirla e' un segno d'interesse (leggero)", sql("SELECT peso FROM posta_interesse WHERE fonte='aperta' AND vaglio_id=(SELECT id FROM posta_vaglio WHERE msg_id='11')") == [(1,)])
+    t = c.get(f"/gestione/posta-in/caselle/gmail-{gid}/g7", headers=H).json()
+    ok("Gmail senza il permesso in piu': si legge lo stesso e la schermata spiega cosa fare", t["casella"] == "permesso" and "Testo completo" in t["testo"]
+       and gmail_modify and gmail_modify[-1][1].endswith("/messages/g7/modify") and gmail_modify[-1][2] == {"removeLabelIds": ["UNREAD"]})
+    permesso_gmail["manca"] = False
+    ok("con il permesso, Gmail la segna come letta", c.get(f"/gestione/posta-in/caselle/gmail-{gid}/g8", headers=H).json()["casella"] == "ok")
+    c.put("/gestione/posta-in/impostazioni", headers=H, json={"segna_casella": False}); gmail_modify.clear()
+    ok("si puo' spegnere: allora nella casella non si tocca nulla", c.get(f"/gestione/posta-in/caselle/gmail-{gid}/g1", headers=H).json()["casella"] is None and not gmail_modify)
+    c.put("/gestione/posta-in/impostazioni", headers=H, json={"segna_casella": True})
+    from app import google as g_
+    ok("il permesso Gmail «segna come lette» e' facoltativo e separato (l'invio resta escluso dagli altri)", "gmail.modify" in g_.SCOPE["gmail_letto"][0] and "gmail.modify" not in " ".join(g_.SCOPE["gmail"]))
+    # letta nella tua casella senza passare da Opifex: segno d'interesse
+    IMAP.append(em("14", "Ente Parco <info@parco.it>", "Sopralluogo", 0.02, "Possiamo fare il sopralluogo giovedi'?", "<p1@x>"))
+    vaglia(c, H)
+    IMAP[-1] = {**IMAP[-1], "non_letta": False}
+    vaglia(c, H)
+    ok("se la leggi nella tua casella (non da Opifex), il filtro lo nota", sql("SELECT peso FROM posta_interesse WHERE fonte='letta_altrove' AND vaglio_id=(SELECT id FROM posta_vaglio WHERE msg_id='14')") == [(1,)])
+    # compiti
+    giu = sql("INSERT INTO utenti (nome,email,password_hash,ruolo_globale) VALUES ('Giuseppe Videomaker','g@p.it',%s,'collaboratore') RETURNING id", (cifra_password("PasswordLunga!2026"),))[0][0]
+    pe = c.get("/gestione/posta-in/persone", headers=H).json()
+    ok("a chi affidare: tu, i collaboratori, gli agenti", {"L", "Giuseppe Videomaker"} <= {u["nome"] for u in pe["utenti"]} and pe["agenti"])
+    vid13 = sql("SELECT id FROM posta_vaglio WHERE msg_id='12'")[0][0]
+    p = c.post(f"/gestione/posta-in/{vid13}/proponi-compito", headers=H).json()
+    ok("il modello locale propone il compito: titolo, scadenza, priorita', per chi (e il riferimento all'email)", p["titolo"].startswith("Mandare le foto") and p["scadenza"] == "2026-11-20"
+       and p["priorita"] == "alta" and p["assegnato_utente_id"] == giu and "Dall'email di Mario Rossi" in p["descrizione"] and chiamate[-1][0] == "locale", p)
+    r = c.post(f"/gestione/posta-in/{vid13}/compito", headers=H, json={"titolo": p["titolo"], "descrizione": p["descrizione"], "scadenza": p["scadenza"], "priorita": p["priorita"], "assegnato_utente_id": giu})
+    tk = sql("SELECT titolo, assegnato_utente_id, scadenza, priorita FROM task WHERE id=%s", (r.json()["task_id"],))[0] if r.status_code == 201 else None
+    ok("compito creato per Giuseppe, collegato all'email", tk and tk[1] == giu and str(tk[2]) == "2026-11-20" and tk[3] == "alta" and sql("SELECT task_id FROM posta_vaglio WHERE id=%s", (vid13,))[0][0] == r.json()["task_id"], (r.status_code, r.text[:200]))
+    ok("e il filtro impara che quel tipo di email ti interessa", sql("SELECT peso FROM posta_interesse WHERE fonte='compito' AND vaglio_id=%s", (vid13,)) == [(2,)])
+    r = c.post(f"/gestione/posta-in/{fid[0]}/compito", headers=H, json={"titolo": "Leggere il bando Carige"})
+    ok("senza scegliere nessuno, il compito e' tuo", r.status_code == 201 and sql("SELECT u.nome FROM task t JOIN utenti u ON u.id=t.assegnato_utente_id WHERE t.id=%s", (r.json()["task_id"],))[0][0] == "L")
+    r = c.post(f"/gestione/posta-in/situazioni/{cc[0]}/compito", headers=H, json={"titolo": "Firmare la convenzione", "scadenza": "2026-11-14"})
+    ok("compito anche da una conversazione (Il punto → + Compito)", r.status_code == 201)
+    ok("titoli vuoti e priorita' inventate rifiutati", c.post(f"/gestione/posta-in/{vid13}/compito", headers=H, json={"titolo": ""}).status_code == 422
+       and c.post(f"/gestione/posta-in/{vid13}/compito", headers=H, json={"titolo": "x", "priorita": "subito"}).status_code == 422)
+    # «Mi interessa» dalla scheda Le caselle, su un'email che il filtro non aveva visto
+    r = c.post("/gestione/posta-in/interesse", headers=H, json={"chiave": f"imap-{iid}", "msg_id": "999", "da": "Nuovo Cliente <ciao@cliente.it>", "oggetto": "Preventivo", "interessa": True})
+    ok("«Mi interessa» anche da Le caselle (email mai vista dal filtro)", r.status_code == 200 and sql("SELECT interessa, categoria FROM posta_vaglio WHERE msg_id='999'")[0] == (True, "importante"))
     # agenti: con «solo locale» un agente online non riceve la posta
     marco = sql("SELECT id FROM agenti WHERE attivo AND modello LIKE 'claude%%' ORDER BY id LIMIT 1")[0][0]
     sql("UPDATE agenti SET gmail_account_id=%s WHERE id=%s", (gid, marco))

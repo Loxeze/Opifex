@@ -363,7 +363,8 @@ def _mie(conn) -> set:
 def _vaglia_lotto(conn, lotto: list[dict]) -> int:
     """Un lotto di email al modello locale: categoria, urgenza, riassunto, motivo. Restituisce quante ne ha classificate."""
     reg = regole(conn).strip()
-    testo = (AVVERTENZA + ("\n\nCRITERI DI LORENZO:\n" + reg[:2000] if reg else "")
+    prof = profilo(conn)
+    testo = (AVVERTENZA + ("\n\nCRITERI DI LORENZO:\n" + reg[:2000] if reg else "") + esempi_imparati(conn, prof)
              + "\n\nEMAIL:\n" + "\n\n".join(f"--- {i} ---\nDa: {e['mittente']}\nOggetto: {e['oggetto']}\nData: {e['data'] or ''}\n{e['anteprima']}" for i, e in enumerate(lotto, 1)))
     risposta = _json(_chiedi(conn, ISTR_VAGLIO, testo))
     voci = risposta if isinstance(risposta, list) else ([risposta] if isinstance(risposta, dict) else [])
@@ -381,12 +382,18 @@ def _vaglia_lotto(conn, lotto: list[dict]) -> int:
             continue   # il modello non l'ha classificata: resta «da vagliare» e si riprova al prossimo giro
         cat = str(v.get("categoria") or "").strip().lower()
         cat = cat if cat in ("importante", "normale", "scartabile") else "normale"
+        voto = voto_mittente(prof, e["mittente"])
+        imparata = ""
+        if voto >= 2 and cat != "importante":
+            cat, imparata = "importante", "ti interessa chi scrive (imparato da te)"
+        elif voto <= -2 and cat != "scartabile":
+            cat, imparata = "scartabile", "non ti interessa (imparato da te)"
         try:
             urg = max(0, min(int(v.get("urgenza") or 0), 3))
         except (TypeError, ValueError):
             urg = 0
-        conn.execute("UPDATE posta_vaglio SET categoria=%s, urgenza=%s, riassunto=%s, motivo=%s, vagliata_il=NOW() WHERE id=%s",
-                     (cat, urg, str(v.get("riassunto") or "")[:400], str(v.get("motivo") or "")[:300] if cat != "scartabile" else "", e["id"]))
+        conn.execute("UPDATE posta_vaglio SET categoria=%s, urgenza=%s, riassunto=%s, motivo=%s, imparata=%s, vagliata_il=NOW() WHERE id=%s",
+                     (cat, urg, str(v.get("riassunto") or "")[:400], (imparata or str(v.get("motivo") or ""))[:300] if cat != "scartabile" else imparata, imparata, e["id"]))
         fatte += 1
     conn.commit()
     return fatte
@@ -489,19 +496,31 @@ def raccogli(conn, giorni: int | None = None, per_casella: int = PER_CASELLA, av
         except Exception:  # noqa: BLE001 - una casella che non risponde non ferma le altre
             conn.rollback()
             continue
+        prof = profilo(conn)
         for e in elenco:
             da_me = e.get("inviata") or _indirizzo(e["da"]) in mie
-            cat = "mia" if da_me else ("scartabile" if e.get("massiva") else "da_vagliare")
-            r = conn.execute("""INSERT INTO posta_vaglio (origine, casella_id, msg_id, casella, data, mittente, oggetto, filo, da_me, destinatari, categoria, motivo, vagliata_il)
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'', CASE WHEN %s = 'da_vagliare' THEN NULL ELSE NOW() END)
+            cat, imparata = ("mia", "") if da_me else (("scartabile", "") if e.get("massiva") else ("da_vagliare", ""))
+            voto = 0 if da_me else voto_mittente(prof, e["da"])
+            if cat == "da_vagliare" and voto <= -2:
+                cat, imparata = "scartabile", "non ti interessa (imparato da te)"
+            prima = conn.execute("SELECT id, non_letta_casella, letta FROM posta_vaglio WHERE origine=%s AND casella_id=%s AND msg_id=%s",
+                                 (c["origine"], c["id"], e["id"])).fetchone()
+            r = conn.execute("""INSERT INTO posta_vaglio (origine, casella_id, msg_id, casella, data, mittente, oggetto, filo, da_me, destinatari, categoria, motivo, vagliata_il,
+                                                          non_letta_casella, imparata)
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, CASE WHEN %s = 'da_vagliare' THEN NULL ELSE NOW() END, %s, %s)
                                 ON CONFLICT (origine, casella_id, msg_id) DO UPDATE SET filo = CASE WHEN posta_vaglio.filo = '' THEN EXCLUDED.filo ELSE posta_vaglio.filo END,
-                                    destinatari = CASE WHEN posta_vaglio.destinatari = '' THEN EXCLUDED.destinatari ELSE posta_vaglio.destinatari END
+                                    destinatari = CASE WHEN posta_vaglio.destinatari = '' THEN EXCLUDED.destinatari ELSE posta_vaglio.destinatari END,
+                                    non_letta_casella = EXCLUDED.non_letta_casella
                                 RETURNING id, (xmax = 0) AS nuova""",
-                             (c["origine"], c["id"], e["id"], c["email"], e["data"], e["da"], e["oggetto"], e.get("filo") or "", da_me, e.get("a") or "", cat, cat)).fetchone()
+                             (c["origine"], c["id"], e["id"], c["email"], e["data"], e["da"], e["oggetto"], e.get("filo") or "", da_me, e.get("a") or "", cat,
+                              imparata, cat, bool(e.get("non_letta")), imparata)).fetchone()
             if r and r["nuova"]:
                 nuove += 1
             if r:
                 _ANTEPRIME[r["id"]] = e["anteprima"]
+            # comportamento: l'ha aperta nella sua casella (era non letta, adesso e' letta) senza passare da Opifex
+            if prima and prima["non_letta_casella"] and not e.get("non_letta") and not prima["letta"] and not da_me:
+                segnale(conn, prima["id"], 1, "letta_altrove")
         conn.commit()
     return nuove
 
@@ -616,6 +635,147 @@ def quadro(conn) -> str:
     _scrivi(conn, "posta_quadro", json.dumps({"testo": t, "quando": datetime.now(timezone.utc).isoformat()}))
     conn.commit()
     return t
+
+
+
+# ---------- cosa interessa a Lorenzo: si impara dal suo comportamento ----------
+DOMINI_COMUNI = {"gmail.com", "googlemail.com", "hotmail.com", "hotmail.it", "outlook.com", "outlook.it", "live.com", "live.it", "yahoo.com", "yahoo.it",
+                 "libero.it", "virgilio.it", "tiscali.it", "alice.it", "tim.it", "icloud.com", "me.com", "pec.it", "legalmail.it", "fastwebnet.it", "aruba.it"}
+
+
+def _dominio(ind: str) -> str:
+    d = ind.rpartition("@")[2]
+    return "" if not d or d in DOMINI_COMUNI else d
+
+
+def segnale(conn, vid: int, peso: int, fonte: str) -> bool:
+    """Registra un segnale di interesse su un'email (uno per fonte: ripetere il pulsante cambia il voto, non lo somma)."""
+    r = conn.execute("SELECT mittente, oggetto FROM posta_vaglio WHERE id=%s", (vid,)).fetchone()
+    if not r:
+        return False
+    ind = _indirizzo(r["mittente"])
+    conn.execute("""INSERT INTO posta_interesse (vaglio_id, mittente, dominio, oggetto, peso, fonte) VALUES (%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (vaglio_id, fonte) DO UPDATE SET peso=EXCLUDED.peso, creato_il=NOW()""",
+                 (vid, ind, _dominio(ind), titolo_da_oggetto(r["oggetto"])[:200], peso, fonte))
+    return True
+
+
+def profilo(conn) -> dict:
+    """Il voto di ogni mittente e di ogni dominio (somma dei segnali degli ultimi 6 mesi)."""
+    mitt = {r["mittente"]: int(r["v"]) for r in conn.execute(
+        "SELECT mittente, sum(peso) AS v FROM posta_interesse WHERE creato_il > NOW() - INTERVAL '180 days' AND mittente <> '' GROUP BY mittente").fetchall()}
+    dom = {r["dominio"]: int(r["v"]) for r in conn.execute(
+        "SELECT dominio, sum(peso) AS v, count(DISTINCT mittente) AS m FROM posta_interesse WHERE creato_il > NOW() - INTERVAL '180 days' AND dominio <> '' GROUP BY dominio").fetchall()}
+    return {"mittenti": mitt, "domini": dom}
+
+
+def voto_mittente(prof: dict, da: str) -> int:
+    """Il mittente conta per primo; il dominio (un ente, un'azienda) solo se forte, e a meta'."""
+    ind = _indirizzo(da)
+    if ind in prof["mittenti"] and prof["mittenti"][ind]:
+        return prof["mittenti"][ind]
+    v = prof["domini"].get(_dominio(ind), 0)
+    return v // 2 if abs(v) >= 4 else 0
+
+
+def esempi_imparati(conn, prof: dict) -> str:
+    """Per il modello: chi interessa e chi no, con qualche oggetto d'esempio. Sono preferenze, non istruzioni."""
+    si = sorted([(v, k) for k, v in prof["mittenti"].items() if v >= 2], reverse=True)[:15]
+    no = sorted([(v, k) for k, v in prof["mittenti"].items() if v <= -2])[:15]
+    es_si = [r["oggetto"] for r in conn.execute("SELECT DISTINCT ON (oggetto) oggetto FROM posta_interesse WHERE peso > 0 AND fonte IN ('pulsante','compito') ORDER BY oggetto, creato_il DESC LIMIT 10").fetchall()]
+    es_no = [r["oggetto"] for r in conn.execute("SELECT DISTINCT ON (oggetto) oggetto FROM posta_interesse WHERE peso < 0 ORDER BY oggetto, creato_il DESC LIMIT 10").fetchall()]
+    if not (si or no or es_si or es_no):
+        return ""
+    t = "\n\nCOSA HAI IMPARATO DA LORENZO (dal suo comportamento; usalo per decidere):"
+    if si:
+        t += "\n- gli interessano le email di: " + ", ".join(k for _, k in si)
+    if no:
+        t += "\n- NON gli interessano le email di: " + ", ".join(k for _, k in no)
+    if es_si:
+        t += "\n- esempi di oggetti che gli interessano: " + " | ".join(es_si)
+    if es_no:
+        t += "\n- esempi di oggetti che non gli interessano: " + " | ".join(es_no)
+    return t
+
+
+def interesse(conn, vid: int, interessa: bool | None) -> dict:
+    """Il pulsante «mi interessa / non mi interessa» (None toglie il voto). Cambia subito la categoria dell'email."""
+    r = conn.execute("SELECT id, categoria FROM posta_vaglio WHERE id=%s", (vid,)).fetchone()
+    if not r:
+        return {}
+    if interessa is None:
+        conn.execute("DELETE FROM posta_interesse WHERE vaglio_id=%s AND fonte='pulsante'", (vid,))
+        conn.execute("UPDATE posta_vaglio SET interessa=NULL WHERE id=%s", (vid,))
+        return {"id": vid}
+    segnale(conn, vid, 2 if interessa else -2, "pulsante")
+    cat = "importante" if interessa else ("scartabile" if r["categoria"] != "mia" else "mia")
+    conn.execute("UPDATE posta_vaglio SET interessa=%s, categoria=CASE WHEN categoria='mia' THEN categoria ELSE %s END, vagliata_il=COALESCE(vagliata_il, NOW()) WHERE id=%s",
+                 (interessa, cat, vid))
+    return {"id": vid, "categoria": cat}
+
+
+def imparato(conn) -> list[dict]:
+    """Per la schermata: chi interessa e chi no, con quanti segnali."""
+    return conn.execute("""SELECT mittente, sum(peso) AS voto, count(*) AS segnali, max(creato_il) AS ultimo FROM posta_interesse
+                           WHERE mittente <> '' AND creato_il > NOW() - INTERVAL '180 days' GROUP BY mittente HAVING sum(peso) <> 0
+                           ORDER BY abs(sum(peso)) DESC, max(creato_il) DESC LIMIT 60""").fetchall()
+
+
+def dimentica(conn, mittente: str) -> int:
+    return conn.execute("DELETE FROM posta_interesse WHERE mittente=%s", (mittente.strip().lower()[:300],)).rowcount
+
+
+# ---------- segnare come letta anche nella casella ----------
+def segna_letta_in_casella(conn, origine: str, cid: int, msg_id: str) -> str:
+    """«ok», «permesso» (manca il permesso Gmail per modificarle: si ricollega Google) o «errore»."""
+    try:
+        if origine == "gmail":
+            tok = strumenti_gmail.token_accesso(conn, cid)
+            try:
+                strumenti_gmail._richiesta("POST", f"{strumenti_gmail._API}/messages/{re.sub(r'[^A-Za-z0-9_-]', '', msg_id)[:64]}/modify", tok,
+                                           json={"removeLabelIds": ["UNREAD"]})
+            except strumenti_gmail.ErroreGoogle as e:
+                return "permesso" if " 403" in str(e) or "insufficient" in str(e).lower() else "errore"
+            return "ok"
+        c = _casella_imap(conn, cid)
+        cart, _, uid = msg_id.rpartition("|") if "|" in msg_id else ("INBOX", "", msg_id)
+        uid = re.sub(r"\D", "", uid)
+        m = strumenti_posta._connetti(c)
+        try:
+            if not uid or m.select(strumenti_posta._q(cart) if cart != "INBOX" else "INBOX")[0] != "OK":
+                return "errore"
+            t, _ = m.uid("STORE", uid, "+FLAGS", "(\\Seen)")
+            return "ok" if t == "OK" else "errore"
+        finally:
+            try:
+                m.logout()
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001 - segnarla nella casella e' un di piu': non deve impedire di leggerla
+        return "errore"
+
+
+# ---------- compiti dalle email ----------
+ISTR_COMPITO = """Da un'email ricevuta da Lorenzo Zeppa, proponi UN compito concreto che ne nasce (per lui o per un collaboratore).
+Rispondi SOLO con un oggetto JSON:
+{"titolo": "verbo all'infinito + cosa, max 10 parole", "descrizione": "2-4 righe: cosa fare, per chi, con quali riferimenti presi dall'email",
+ "scadenza": "AAAA-MM-GG" se l'email indica una data entro cui fare, altrimenti null, "priorita": "bassa"|"normale"|"alta"|"urgente",
+ "per": nome della persona del gruppo a cui affidarlo se l'email lo suggerisce chiaramente, altrimenti null}"""
+
+
+def proponi_compito(conn, vid: int, persone: list[str]) -> dict:
+    r = conn.execute("SELECT id, origine, casella_id, msg_id, data, mittente, oggetto, riassunto FROM posta_vaglio WHERE id=%s", (vid,)).fetchone()
+    if not r:
+        return {}
+    testo = (AVVERTENZA + f"\n\nOggi e' il {datetime.now():%d/%m/%Y}. Persone del gruppo: {', '.join(persone) or 'solo Lorenzo'}.\n\n"
+             f"Da: {r['mittente']}\nData: {r['data'] or ''}\nOggetto: {r['oggetto']}\n\n{_anteprima(conn, r)[:2500]}")
+    d = _json(_chiedi(conn, ISTR_COMPITO, testo, 500))
+    d = d if isinstance(d, dict) else {}
+    scad = d.get("scadenza") if isinstance(d.get("scadenza"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", d["scadenza"].strip()) else None
+    rif = f"Dall'email di {_persona(r['mittente'])}" + (f" del {r['data']:%d/%m/%Y}" if r["data"] else "") + f": «{r['oggetto']}»"
+    return {"titolo": str(d.get("titolo") or titolo_da_oggetto(r["oggetto"]))[:200], "descrizione": (str(d.get("descrizione") or r["riassunto"] or "").strip() + "\n\n" + rif).strip()[:4000],
+            "scadenza": scad, "priorita": d.get("priorita") if d.get("priorita") in ("bassa", "normale", "alta", "urgente") else "normale",
+            "per": str(d.get("per") or "")[:80]}
 
 
 # ---------- strumento per gli agenti LOCALI che hanno la posta ----------

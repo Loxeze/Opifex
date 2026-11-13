@@ -13,8 +13,12 @@ SCOPE = {
     "drive": ["https://www.googleapis.com/auth/drive"],
     "gmail": ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.compose"],
     "calendar": ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.readonly"],
+    # facoltativo: serve solo a segnare come lette in Gmail le email aperte in Opifex. Google lo chiama «leggere, scrivere e inviare»:
+    # Opifex non invia mai da qui (l'invio passa sempre dall'approvazione), ma il permesso e' piu' ampio e lo si sceglie apposta.
+    "gmail_letto": ["https://www.googleapis.com/auth/gmail.modify"],
 }
-ETICHETTE_SERVIZI = {"drive": "Drive", "gmail": "Gmail (lettura e bozze)", "calendar": "Calendar"}
+ETICHETTE_SERVIZI = {"drive": "Drive", "gmail": "Gmail (lettura e bozze)", "calendar": "Calendar",
+                     "gmail_letto": "Gmail: segna come lette le email aperte in Opifex (permesso più ampio)"}
 _AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN = "https://oauth2.googleapis.com/token"
 _USERINFO = "https://openidconnect.googleapis.com/v1/userinfo"
