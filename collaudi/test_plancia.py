@@ -73,6 +73,7 @@ with TestClient(app) as c:
     app_js = c.get("/app/app.js").text; pl = c.get("/app/plancia.js").text
     ok("menu laterale (2.52): voci raggruppate con le schede", all(f'["{g}", "{n}"' in app_js for g, n in [("oggi", "Oggi"), ("posta", "Posta"), ("lavoro", "Lavoro"), ("conoscenza", "Conoscenza"), ("officina", "Officina"), ("squadra", "Squadra"), ("controllo", "Controllo")]) and "schedeGruppo()" in app_js and "SEZIONI_FUORI" in app_js)
     dj = c.get("/app/dashboard.js").text
+    ok("Task (2.56.1): voce propria nel menu, subito dopo Posta (anche nella barra in basso del telefono)", '["posta", "Posta"' in app_js and app_js.index('["task", "Task"') > app_js.index('["posta", "Posta"') and app_js.index('["task", "Task"') < app_js.index('["lavoro", "Lavoro"'))
     pj = c.get("/app/posta.js").text
     ok("nuove pagine: Posta, Computer locali, sezioni fuori dalle Impostazioni", "function vistaPosta" in pj and all(x in dj for x in ("function vistaComputer", "function vistaSezione", "function mappaImpostazioni")))
     ok("Posta (2.55): il punto, da leggere, conversazioni, caselle, da approvare, filtro", all(x in pj for x in ('"Il punto"', '"Da leggere"', '"Conversazioni"', '"Le caselle"', '"Da approvare"', '"Filtro"')) and 'src="posta.js"' in idx)

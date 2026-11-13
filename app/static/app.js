@@ -155,9 +155,10 @@ const VISTE = [["dashboard", "Plancia"], ["briefing", "Briefing"], ["task", "Tas
 // Il menu del titolare (2.52): poche voci, ognuna con le sue schede in alto. Ogni scheda: [etichetta, vista, sezione?].
 // Le sezioni con vista "sez" sono le stesse di prima, solo spostate fuori dalle Impostazioni.
 const MENU = [
-  ["oggi", "Oggi", [["Plancia", "dashboard"], ["Briefing", "briefing"], ["Task", "task"], ["Riunioni", "riunioni"]]],
+  ["oggi", "Oggi", [["Plancia", "dashboard"], ["Briefing", "briefing"], ["Riunioni", "riunioni"]]],
   ["chat", "Aurora e chat", [["Chat", "chat"]]],
   ["posta", "Posta", [["La posta", "posta"], ["Caselle e Google", "sez", "collegamenti"]]],
+  ["task", "Task", [["Task", "task"]]],
   ["lavoro", "Lavoro", [["Progetti", "progetti"], ["Documenti", "documenti"], ["Tavoli di lavoro", "sez", "tavoli"], ["Schede d'impresa", "sez", "imprese"]]],
   ["contatti", "Contatti", [["Contatti e Radar", "crm"]]],
   ["comunicazione", "Comunicazione", [["Social", "social"], ["Profili monitorati", "sez", "monitorsocial"], ["Email marketing", "email"], ["Contenuti e stili", "sez", "contenuti"]]],

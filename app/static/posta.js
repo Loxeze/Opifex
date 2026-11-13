@@ -46,7 +46,7 @@ function _moduloCompito(dove, { vid, sid, proposta }) {
       const v = chi.value, corpo = { titolo: titolo.value.trim(), descrizione: descr.value.trim() || null, scadenza: scad.value || null, priorita: prio.value,
         assegnato_utente_id: v.startsWith("u") ? Number(v.slice(1)) : null, assegnato_agente_id: v.startsWith("a") ? Number(v.slice(1)) : null };
       try { const r = await api("POST", vid ? "/gestione/posta-in/" + vid + "/compito" : "/gestione/posta-in/situazioni/" + sid + "/compito", corpo);
-        riempi(box, [avviso("Compito creato.", "ok"), h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => vai("lavoro") }, "Vai ai compiti"),
+        riempi(box, [avviso("Compito creato.", "ok"), h("div", { class: "azioni" }, h("button", { class: "s", type: "button", onclick: () => vai("task") }, "Vai ai compiti"),
           h("button", { class: "s", type: "button", onclick: () => { box.remove(); dove._compito = null; } }, "Chiudi"))]);
         void r; }
       catch (e) { msg.replaceChildren(avviso(e.message, "no")); salva.disabled = false; } };
