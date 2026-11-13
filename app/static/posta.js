@@ -53,7 +53,8 @@ function _moduloCompito(dove, { vid, sid, proposta }) {
     riempi(box, [h("h3", {}, "Nuovo compito"), h("label", {}, "Cosa fare", titolo), h("label", {}, "Dettagli", descr),
       h("div", { class: "posta-campi" }, h("label", {}, "Per chi", chi), h("label", {}, "Entro il", scad), h("label", {}, "Priorità", prio)),
       msg, h("div", { class: "azioni" }, salva, h("button", { class: "s", type: "button", onclick: () => { box.remove(); dove._compito = null; } }, "Annulla"))]);
-    titolo.focus();
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
+    box.querySelectorAll("input, textarea, select").forEach(el => el.addEventListener("focus", () => setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "center" }), 300)));
   };
   (async () => {
     let persone = { utenti: [], agenti: [] };
@@ -90,6 +91,12 @@ function _scadenza(iso) {
   return h("span", { class: "etichetta " + (giorni <= 1 ? "urg3" : giorni <= 7 ? "urg2" : "urg1") }, testo);
 }
 function _chi(s) { return s.tocca_a_te ? h("span", { class: "etichetta urg2" }, "tocca a te") : h("span", { class: "etichetta" }, "aspetti " + (s.ultimo_da && s.ultimo_da !== "Lorenzo" ? "gli altri" : "una risposta")); }
+// Mentre stai leggendo un'email o scrivendo un compito, l'aggiornamento automatico della pagina aspetta: non deve chiuderti il modulo sotto le dita.
+function _occupato(box) {
+  if (box.querySelector(".posta-compito, .posta-lettore")) return true;
+  const a = document.activeElement;
+  return !!(a && box.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+}
 function _ora(iso) { return iso ? new Date(iso).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""; }
 // Cosa sta facendo il giro in corso: la fase, quante risposte ha dato il modello locale, quando l'ultima
 function _lavoroInCorso(d) {
@@ -107,15 +114,16 @@ function _apriConversazione(id) { stato.postaScheda = 2; stato.postaSituazione =
 // Il punto: cosa tocca a Lorenzo nelle conversazioni in corso, l'analisi delle ultime settimane, il punto della situazione
 function _pannelloCosaFare() {
   const box = h("div"); let seguiva = false, attesa = null, messaggio = null;
-  const carica = async () => {
+  const carica = async (auto) => {
     clearTimeout(attesa);
+    if (auto && _occupato(box)) { attesa = setTimeout(() => { if (box.isConnected) carica(true); }, 5000); return; }
     let d; try { d = await api("GET", "/gestione/posta-in"); } catch (e) { riempi(box, avviso(e.message, "no")); return; }
     const st = d.stato || {};
     if (seguiva && !d.in_corso) messaggio = st.esito === "ok"
       ? avviso("Fatto: " + (st.nuove || 0) + " email nuove, " + (st.vagliate || 0) + " lette, " + (st.situazioni || 0) + " conversazioni riassunte.", "ok")
       : avviso("Non è riuscito: " + (st.esito || "") + (st.errore ? " — " + st.errore : "") + ". Quello che manca si fa al prossimo giro, sempre in locale.", "no");
     seguiva = !!d.in_corso;
-    if (d.in_corso) attesa = setTimeout(() => { if (box.isConnected) carica(); }, 5000);
+    if (d.in_corso) attesa = setTimeout(() => { if (box.isConnected) carica(true); }, 5000);
     const giorni = h("select", { style: "width:auto;flex:0 0 auto" }, [["14", "ultime 2 settimane"], ["30", "ultimo mese"], ["60", "ultimi 2 mesi"]].map(([v, t]) => h("option", { value: v, selected: v === "30" }, t)));
     const analizza = h("button", { class: d.situazioni_aperte ? "s" : "p", type: "button", disabled: !!d.in_corso }, "Analizza");
     analizza.onclick = async () => { analizza.disabled = true; messaggio = null;
@@ -159,8 +167,9 @@ function _pannelloCosaFare() {
 
 function _pannelloDaLeggere() {
   const box = h("div"); let tutte = false, messaggio = null, seguiva = false, attesa = null;
-  const carica = async () => {
+  const carica = async (auto) => {
     clearTimeout(attesa);
+    if (auto && _occupato(box)) { attesa = setTimeout(() => { if (box.isConnected) carica(true); }, 5000); return; }
     let d;
     try { d = await api("GET", "/gestione/posta-in?tutte=" + (tutte ? "1" : "0")); } catch (e) { riempi(box, avviso(e.message, "no")); return; }
     const st = d.stato || {};
@@ -169,7 +178,7 @@ function _pannelloDaLeggere() {
         : avviso("Il controllo non è riuscito: " + (st.esito || "") + (st.errore ? " — " + st.errore : "") + ". Le email restano in attesa e verranno lette al prossimo giro.", "no");
     }
     seguiva = !!d.in_corso;
-    if (d.in_corso && box.isConnected !== false) attesa = setTimeout(() => { if (box.isConnected) carica(); }, 5000);
+    if (d.in_corso && box.isConnected !== false) attesa = setTimeout(() => { if (box.isConnected) carica(true); }, 5000);
     const statoRiga = !d.caselle ? avviso("Nessuna casella collegata: collegale nella scheda «Collegamenti».", "avv")
       : d.in_corso ? _lavoroInCorso(d)
       : !d.attivo ? avviso("Il filtro automatico è spento: «Controlla adesso» funziona lo stesso; per il controllo ogni 5 minuti accendilo nella scheda «Filtro».", "avv")

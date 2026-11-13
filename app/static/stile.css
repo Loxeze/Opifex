@@ -495,3 +495,8 @@ button.voto.scelto{background:var(--primario);color:#fff;border-color:var(--prim
 .posta-imparato-riga{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .posta-imparato-chi{font-weight:600;overflow-wrap:anywhere}
 .etichetta.si{background:var(--ok-b, #e4f1ea);color:var(--ok, #1f6b44)}.etichetta.no{background:var(--no-b);color:var(--no)}
+/* modulo «nuovo compito»: i pulsanti restano raggiungibili sopra la tastiera del telefono */
+.posta-compito{scroll-margin-top:12px;padding-bottom:max(16px, env(safe-area-inset-bottom, 0px))}
+.posta-compito .azioni{position:sticky;bottom:0;background:var(--carta, #fffdf8);padding:10px 0;z-index:2}
+/* sul telefono la barra del menu in basso e' fissa: i pulsanti del modulo restano appena sopra */
+@media (max-width:820px){.posta-compito .azioni{bottom:calc(76px + env(safe-area-inset-bottom, 0px))}.posta-compito{margin-bottom:110px}}
