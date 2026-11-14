@@ -111,6 +111,31 @@ function _lavoroInCorso(d) {
 }
 function _apriConversazione(id) { stato.postaScheda = 2; stato.postaSituazione = id; disegna(); }
 
+// Recupero della posta passata (dal 1 gennaio): a che punto e' ogni casella
+function _cartaStorico(d, ricarica) {
+  const st = d.storico || {}; if (!st.elenco || !st.elenco.length) return null;
+  const dal = new Date(st.dal + "T12:00:00"), oggi = new Date();
+  const mesiTot = Math.max(1, (oggi.getFullYear() - dal.getFullYear()) * 12 + oggi.getMonth() - dal.getMonth() + 1);
+  const righe = st.elenco.map(c => {
+    const s_ = (st.caselle || {})[c.chiave] || {};
+    const fino = s_.dal === st.dal && s_.fino_a ? new Date(s_.fino_a + "T12:00:00") : dal;
+    const fatti = s_.fatto ? mesiTot : Math.min(mesiTot, Math.max(0, (fino.getFullYear() - dal.getFullYear()) * 12 + fino.getMonth() - dal.getMonth()));
+    return h("div", { class: "storico-riga" },
+      h("div", { class: "posta-testa" }, h("strong", {}, c.email), h("span", { class: "sotto" }, s_.fatto ? "✓ completato" : fatti ? "fino a " + MESI_IT[(fino.getMonth() + 11) % 12].toLowerCase() : "da iniziare")),
+      h("div", { class: "storico-barra" }, h("div", { style: "width:" + Math.round(100 * fatti / mesiTot) + "%" })),
+      h("div", { class: "sotto" }, (s_.email || 0) + " email lette · " + (s_.documenti || 0) + " fatture e ricevute trovate" + (s_.errore ? " · ⚠ " + s_.errore : "")));
+  });
+  const tutto = st.elenco.every(c => ((st.caselle || {})[c.chiave] || {}).fatto && ((st.caselle || {})[c.chiave] || {}).dal === st.dal);
+  const data = h("input", { type: "date", value: st.dal, style: "width:auto" });
+  const vai_ = h("button", { class: tutto ? "s" : "p", type: "button", disabled: !!d.in_corso }, tutto ? "Ricontrolla" : "Recupera adesso");
+  vai_.onclick = async () => { vai_.disabled = true; try { await api("PUT", "/gestione/posta-in/storico", { dal: data.value, subito: true }); } catch (e) { alert(e.message); } ricarica(true); };
+  return h("div", { class: "carta" }, h("h3", {}, "Recupero della posta dal " + dal.toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })),
+    h("p", { class: "sotto" }, tutto ? "Tutta la posta del periodo è stata recuperata. Le caselle che collegherai dopo verranno recuperate da sole."
+      : (st.attivo ? "Va avanti da solo, un mese per casella a ogni giro del filtro. «Recupera adesso» lo fa tutto di seguito, in sottofondo. " : "Il recupero automatico è spento: usa «Recupera adesso». ")
+      + "Per le email vecchie cerca fatture, ricevute e pagamenti e ricostruisce le conversazioni ancora aperte; non le mette fra le «da leggere»."),
+    righe, h("div", { class: "azioni", style: "align-items:center" }, h("span", { class: "sotto" }, "Dal"), data, vai_));
+}
+
 // Il punto: cosa tocca a Lorenzo nelle conversazioni in corso, l'analisi delle ultime settimane, il punto della situazione
 function _pannelloCosaFare() {
   const box = h("div"); let seguiva = false, attesa = null, messaggio = null;
@@ -159,7 +184,7 @@ function _pannelloCosaFare() {
         d.da_fare.map(voce),
         h("div", { class: "azioni", style: "margin-top:16px;align-items:center" }, bq),
         h("div", { class: "azioni", style: "align-items:center" }, h("span", { class: "sotto" }, d.situazioni_aperte + " conversazioni in corso. Rileggi la posta di:"), giorni, analizza)] : null,
-      quadro]);
+      quadro, _cartaStorico(d, () => carica())]);
   };
   carica();
   return box;

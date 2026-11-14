@@ -26,6 +26,9 @@ GIORNI_GIRO = 2           # ai giri automatici gli ultimi 2
 PER_CASELLA = 40          # email lette per casella a ogni giro automatico
 PER_CASELLA_ANALISI = 300 # email lette per casella quando si chiede l'analisi delle ultime settimane
 PER_GIRO = 24             # email vagliate al massimo per giro automatico (il computer locale serve anche agli agenti)
+PER_MESE_STORICO = 3000    # email lette al massimo per casella e per mese nel recupero dal 1 gennaio
+STORICO_DAL = "2026-01-01" # da quando si recupera la posta (si cambia dalla schermata)
+RECENTI_GIORNI = 30        # piu' vecchie di cosi', nel recupero, le email sono «storiche»: non da leggere, non nuove conversazioni
 AMM_PER_GIRO = 12         # email che sembrano fatture/ricevute esaminate al massimo per giro automatico
 SIT_PER_GIRO = 6          # conversazioni riassunte al massimo per giro automatico
 LOTTO = 6                 # email per chiamata al modello locale
@@ -167,9 +170,11 @@ def _allegati_gmail(parte: dict) -> list[str]:
 GMAIL_RACCOLTA = "-in:spam -in:trash -in:drafts -in:chats -category:promotions -category:social -category:forums"
 
 
-def _elenco_gmail(conn, aid: int, n: int, giorni: int, ricerca: str = "", tutto: bool = False, avanzamento=None) -> list[dict]:
+def _elenco_gmail(conn, aid: int, n: int, giorni: int, ricerca: str = "", tutto: bool = False, avanzamento=None, finestra=None) -> list[dict]:
     tok = strumenti_gmail.token_accesso(conn, aid)
     q = ricerca.strip()[:200] if ricerca else (f"newer_than:{giorni}d {GMAIL_RACCOLTA}" if tutto else f"in:inbox newer_than:{giorni}d")
+    if finestra:   # un periodo preciso (il recupero dal 1 gennaio, mese per mese)
+        q = f"after:{finestra[0]:%Y/%m/%d} before:{finestra[1]:%Y/%m/%d} {GMAIL_RACCOLTA}"
     ids, pagina = [], None
     while len(ids) < n:
         par = {"q": q, "maxResults": min(100, n - len(ids))}
@@ -257,11 +262,13 @@ def _msg_imap(m, u: bytes, cartella: str) -> dict:
             "anteprima": _pulisci(testo)[:ANTEPRIMA]}
 
 
-def _elenco_imap(c: dict, n: int, giorni: int, ricerca: str = "", tutto: bool = False, avanzamento=None) -> list[dict]:
+def _elenco_imap(c: dict, n: int, giorni: int, ricerca: str = "", tutto: bool = False, avanzamento=None, finestra=None) -> list[dict]:
     m = strumenti_posta._connetti(c)
     try:
         cartelle = ["INBOX"] + ([x for x in [_cartella_inviata(m)] if x] if tutto else [])
         crit = ["SINCE", (datetime.now() - timedelta(days=giorni)).strftime("%d-%b-%Y")] if not ricerca else ["TEXT", strumenti_posta._q(ricerca)]
+        if finestra:
+            crit = ["SINCE", finestra[0].strftime("%d-%b-%Y"), "BEFORE", finestra[1].strftime("%d-%b-%Y")]
         out = []
         for cart in cartelle:
             t, _ = m.select(strumenti_posta._q(cart) if cart != "INBOX" else "INBOX", readonly=True)
@@ -281,11 +288,12 @@ def _elenco_imap(c: dict, n: int, giorni: int, ricerca: str = "", tutto: bool = 
             pass
 
 
-def recenti(conn, origine: str, cid: int, n: int = 25, giorni: int = 14, ricerca: str = "", tutto: bool = False, avanzamento=None) -> list[dict]:
-    n = max(1, min(int(n), PER_CASELLA_ANALISI))
+def recenti(conn, origine: str, cid: int, n: int = 25, giorni: int = 14, ricerca: str = "", tutto: bool = False, avanzamento=None, finestra=None) -> list[dict]:
+    n = max(1, min(int(n), PER_MESE_STORICO if finestra else PER_CASELLA_ANALISI))
+    extra = {**({"avanzamento": avanzamento} if avanzamento else {}), **({"finestra": finestra} if finestra else {})}
     if origine == "gmail":
-        return _elenco_gmail(conn, cid, n, giorni, ricerca, tutto, **({"avanzamento": avanzamento} if avanzamento else {}))
-    return _elenco_imap(_casella_imap(conn, cid), n, giorni, ricerca, tutto, **({"avanzamento": avanzamento} if avanzamento else {}))
+        return _elenco_gmail(conn, cid, n, giorni, ricerca, tutto, **extra)
+    return _elenco_imap(_casella_imap(conn, cid), n, giorni, ricerca, tutto, **extra)
 
 
 def leggi(conn, origine: str, cid: int, msg_id: str) -> str:
@@ -433,7 +441,7 @@ def collega_fili(conn) -> int:
     (anche risposte di Lorenzo), e nessuna email solo scartabile. Aggiorna a chi tocca e segna da riassumere quelle che si sono mosse."""
     fili = conn.execute("""SELECT origine, casella_id, filo, max(data) AS ultimo, count(*) AS n,
                                   bool_or(categoria='importante') AS importante, bool_or(categoria IN ('da_vagliare')) AS in_attesa,
-                                  bool_and(categoria IN ('scartabile')) AS solo_scarti, max(situazione_id) AS sid,
+                                  bool_and(categoria IN ('scartabile', 'storica')) AS solo_scarti, max(situazione_id) AS sid,
                                   bool_or(situazione_id IS NULL AND categoria <> 'scartabile') AS nuove
                            FROM posta_vaglio WHERE filo <> '' GROUP BY origine, casella_id, filo""").fetchall()
     toccate = 0
@@ -442,6 +450,8 @@ def collega_fili(conn) -> int:
             continue
         if not f["sid"] and not (f["importante"] or f["n"] >= 2):
             continue
+        if not f["sid"] and f["ultimo"] and f["ultimo"] < datetime.now(timezone.utc) - timedelta(days=RECENTI_GIORNI):
+            continue   # una conversazione ferma da piu' di un mese non diventa una situazione (il recupero dell'anno non la riapre)
         righe = conn.execute("""SELECT id, data, mittente, oggetto, da_me, categoria, destinatari FROM posta_vaglio
                                 WHERE origine=%s AND casella_id=%s AND filo=%s AND categoria <> 'scartabile' ORDER BY data NULLS FIRST""",
                              (f["origine"], f["casella_id"], f["filo"])).fetchall()
@@ -647,7 +657,14 @@ def giro(conn):
     if not IN_CORSO.acquire(blocking=False):
         return {"saltato": "gia' in corso"}
     try:
-        return vaglia(conn)
+        esito = vaglia(conn)
+        if storico_attivo(conn) and not esito.get("errore") and not esito.get("saltato"):
+            try:   # poi un mese della posta passata (dal 1 gennaio), finche' non e' tutta recuperata
+                esito["storico"] = storico(conn, False, lambda **kw: LAVORO.update(kw))
+            except ErroreFornitore as e:   # computer locale spento: il recupero riprende al giro dopo, dallo stesso punto
+                conn.rollback()
+                esito["storico"] = {"errore": str(e)[:200]}
+        return esito
     finally:
         IN_CORSO.release()
 
@@ -741,10 +758,11 @@ def _stato_iniziale(tipo: str, direzione: str) -> str:
 
 def amministrazione(conn, limite: int, avanzamento=None) -> int:
     """Esamina le email non ancora controllate: il setaccio a parole scarta quasi tutto, le candidate vanno al modello locale
-    (a lotti di 4) che dice se sono documenti amministrativi e ne estrae i dati. Restituisce quante email ha esaminato col modello."""
+    (a lotti di 4) che dice se sono documenti amministrativi e ne estrae i dati. Restituisce quante email ha deciso (0 = nessun passo avanti:
+    chi la chiama in un ciclo si ferma, cosi' una risposta illeggibile del modello non lo fa girare all'infinito)."""
     righe = conn.execute("""SELECT id, origine, casella_id, msg_id, data, mittente, oggetto, allegati, da_me FROM posta_vaglio
                             WHERE NOT amm_controllata ORDER BY data DESC NULLS LAST LIMIT %s""", (limite * 8,)).fetchall()
-    candidate = []
+    candidate, progressi = [], 0
     for r in righe:
         if len(candidate) >= limite:
             break
@@ -753,6 +771,7 @@ def amministrazione(conn, limite: int, avanzamento=None) -> int:
             candidate.append({**r, "anteprima": testo})
         else:
             conn.execute("UPDATE posta_vaglio SET amm_controllata=TRUE WHERE id=%s", (r["id"],))
+            progressi += 1
     conn.commit()
     for i in range(0, len(candidate), 4):
         lotto = candidate[i:i + 4]
@@ -773,7 +792,10 @@ def amministrazione(conn, limite: int, avanzamento=None) -> int:
         for k, e in enumerate(lotto, 1):
             v = per_n.get(k)
             if v is None:
-                continue   # il modello non ha risposto per questa: si riprova al prossimo giro
+                if per_n:   # il modello ha risposto per le altre ma non per questa: la si considera non un documento
+                    conn.execute("UPDATE posta_vaglio SET amm_controllata=TRUE WHERE id=%s", (e["id"],))
+                    progressi += 1
+                continue   # risposta illeggibile: si riprova al prossimo giro
             if v.get("documento") is True or str(v.get("documento")).lower() == "true":
                 tipo = v.get("tipo") if v.get("tipo") in ("fattura", "ricevuta", "avviso_pagamento", "sollecito", "nota_credito", "altro") else "altro"
                 direzione = v.get("direzione") if v.get("direzione") in ("uscita", "entrata") else ("entrata" if e["da_me"] else "uscita")
@@ -783,10 +805,11 @@ def amministrazione(conn, limite: int, avanzamento=None) -> int:
                               _importo(v.get("importo")), str(v.get("valuta") or "EUR").upper()[:5], _data_o_none(v.get("data_documento")) or (e["data"].date() if e["data"] else None),
                               _data_o_none(v.get("scadenza")), str(v.get("numero") or "")[:60], _stato_iniziale(tipo, direzione)))
             conn.execute("UPDATE posta_vaglio SET amm_controllata=TRUE WHERE id=%s", (e["id"],))
+            progressi += 1
         conn.commit()
         for e in lotto:
             etichetta_in_casella(conn, e["id"])
-    return len(candidate)
+    return progressi
 
 
 ETICHETTA_GMAIL = "Opifex/Amministrazione"
@@ -982,6 +1005,117 @@ def archivia_in_sospeso(conn, limite: int = 10) -> int:
         conn.execute("UPDATE posta_amministrazione SET aggiornato_il=NOW() WHERE id=%s", (r["id"],))
         archivia_documento(conn, r["id"])
     return len(righe)
+
+
+
+# ---------- recupero della posta dal 1 gennaio: per ogni casella, mese per mese ----------
+def storico_dal(conn):
+    try:
+        return datetime.strptime(_imp(conn, "posta_storico_dal", STORICO_DAL), "%Y-%m-%d").date()
+    except ValueError:
+        return datetime.strptime(STORICO_DAL, "%Y-%m-%d").date()
+
+
+def storico_stato(conn) -> dict:
+    """{chiave casella: {"fino_a": "AAAA-MM-GG", "fatto": bool, "email": n, "documenti": n, "errore": ""}}"""
+    try:
+        return json.loads(_imp(conn, "posta_storico_stato", "") or "{}")
+    except ValueError:
+        return {}
+
+
+def storico_attivo(conn) -> bool:
+    from . import edizione
+    return _imp(conn, "posta_storico_attivo", "1" if edizione.tre() else "0") == "1"
+
+
+def _mese_dopo(d):
+    return (d.replace(day=1) + timedelta(days=32)).replace(day=1)
+
+
+def storico_passo(conn, avanzamento=None) -> dict | None:
+    """Un mese di una casella: scarica le email (comprese le inviate), le registra come «storiche» (non da leggere),
+    e il setaccio cerca fatture e ricevute fra queste. Le caselle nuove entrano da sole. None = niente da fare."""
+    stato = storico_stato(conn)
+    dal = storico_dal(conn)
+    oggi = datetime.now(timezone.utc).date()
+    limite_recenti = oggi - timedelta(days=RECENTI_GIORNI)
+    for c in caselle(conn):
+        if c.get("errore"):
+            continue
+        s_ = stato.get(c["chiave"]) or {}
+        if s_.get("dal") != dal.isoformat():   # data di partenza cambiata, o casella nuova: si ricomincia da capo
+            s_ = {"dal": dal.isoformat(), "fino_a": dal.isoformat(), "fatto": False, "email": 0, "documenti": 0}
+        if s_.get("fatto"):
+            continue
+        inizio = datetime.strptime(s_["fino_a"], "%Y-%m-%d").date()
+        if inizio >= oggi:
+            s_["fatto"] = True
+            stato[c["chiave"]] = s_
+            _scrivi(conn, "posta_storico_stato", json.dumps(stato))
+            conn.commit()
+            continue
+        fine = min(_mese_dopo(inizio), oggi + timedelta(days=1))
+        if avanzamento:
+            avanzamento(fase=f"recupero la posta di {c['email']}: {MESI[inizio.month - 1].lower()} {inizio.year}")
+        try:
+            elenco = recenti(conn, c["origine"], c["id"], PER_MESE_STORICO, 1, tutto=True, finestra=(inizio, fine))
+        except Exception as e:  # noqa: BLE001 - la casella non risponde: si riprova al giro dopo, dallo stesso mese
+            conn.rollback()
+            s_["errore"] = str(e)[:200]
+            stato[c["chiave"]] = s_
+            _scrivi(conn, "posta_storico_stato", json.dumps(stato))
+            conn.commit()
+            return {"casella": c["email"], "errore": str(e)[:200]}
+        mie, nuove = _mie(conn), 0
+        for e in elenco:
+            da_me = e.get("inviata") or _indirizzo(e["da"]) in mie
+            vecchia = e["data"] is not None and e["data"].date() < limite_recenti
+            cat = "mia" if da_me else ("scartabile" if e.get("massiva") else ("storica" if vecchia else "da_vagliare"))
+            r = conn.execute("""INSERT INTO posta_vaglio (origine, casella_id, msg_id, casella, data, mittente, oggetto, filo, da_me, destinatari, categoria, letta, allegati,
+                                                          vagliata_il, non_letta_casella)
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, CASE WHEN %s = 'da_vagliare' THEN NULL ELSE NOW() END, %s)
+                                ON CONFLICT (origine, casella_id, msg_id) DO UPDATE SET
+                                    filo = CASE WHEN posta_vaglio.filo = '' THEN EXCLUDED.filo ELSE posta_vaglio.filo END,
+                                    allegati = CASE WHEN posta_vaglio.allegati = '' THEN EXCLUDED.allegati ELSE posta_vaglio.allegati END
+                                RETURNING id, (xmax = 0) AS nuova""",
+                             (c["origine"], c["id"], e["id"], c["email"], e["data"], e["da"], e["oggetto"], e.get("filo") or "", da_me, e.get("a") or "",
+                              cat, cat == "storica", e.get("allegati") or "", cat, bool(e.get("non_letta")))).fetchone()
+            if r:
+                _ANTEPRIME[r["id"]] = e["anteprima"]
+                nuove += 1 if r["nuova"] else 0
+        conn.commit()
+        documenti = 0
+        while True:   # le fatture e le ricevute di questo mese, subito (il testo e' ancora in memoria)
+            n = amministrazione(conn, AMM_PER_GIRO, avanzamento)
+            documenti += n
+            if not n:
+                break
+        archivia_in_sospeso(conn, 50)
+        s_.update(fino_a=fine.isoformat(), email=s_.get("email", 0) + len(elenco), errore="",
+                  documenti=conn.execute("""SELECT count(*) AS n FROM posta_amministrazione a JOIN posta_vaglio v ON v.id = a.vaglio_id
+                                            WHERE v.origine=%s AND v.casella_id=%s AND v.data >= %s""", (c["origine"], c["id"], dal)).fetchone()["n"])
+        s_["fatto"] = fine > oggi
+        stato[c["chiave"]] = s_
+        _scrivi(conn, "posta_storico_stato", json.dumps(stato))
+        conn.commit()
+        _ANTEPRIME.clear()
+        return {"casella": c["email"], "mese": f"{inizio:%Y-%m}", "email": len(elenco), "nuove": nuove, "esaminate": documenti}
+    return None
+
+
+def storico(conn, tutto: bool = False, avanzamento=None) -> dict:
+    """Il recupero: un mese per giro (giro automatico, ogni 5 minuti), oppure fino in fondo («Recupera adesso»).
+    Il modello locale lavora solo sulle email che il setaccio indica come fatture o ricevute."""
+    fatti = []
+    while True:
+        r = storico_passo(conn, avanzamento)
+        if r is None:
+            break
+        fatti.append(r)
+        if not tutto or r.get("errore"):
+            break
+    return {"passi": fatti, "stato": storico_stato(conn)}
 
 
 # ---------- cosa interessa a Lorenzo: si impara dal suo comportamento ----------

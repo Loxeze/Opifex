@@ -38,7 +38,9 @@ def da_leggere(tutte: bool = False, _: dict = Depends(solo_titolare)):
         fare = [{**f, "scadenza": f["scadenza"].isoformat() if f["scadenza"] else None, "ultimo_il": f["ultimo_il"].isoformat() if f["ultimo_il"] else None}
                 for f in posta_vaglio.da_fare(conn)]
         aperte = conn.execute("SELECT count(*) AS n FROM posta_situazioni WHERE aperta").fetchone()["n"]
-        return {"email": [_riga(r) for r in righe], "conteggi": conteggi, "da_fare": fare, "situazioni_aperte": aperte, "stato": posta_vaglio.stato(conn), "quadro": q,
+        storico = {"dal": posta_vaglio.storico_dal(conn).isoformat(), "attivo": posta_vaglio.storico_attivo(conn), "caselle": posta_vaglio.storico_stato(conn),
+                   "elenco": [{"chiave": c["chiave"], "email": c["email"]} for c in posta_vaglio.caselle(conn)]}
+        return {"email": [_riga(r) for r in righe], "conteggi": conteggi, "da_fare": fare, "situazioni_aperte": aperte, "storico": storico, "stato": posta_vaglio.stato(conn), "quadro": q,
                 "caselle": len(posta_vaglio.caselle(conn)), "modello": posta_vaglio.modello_locale(conn),
                 "attivo": posta_vaglio.vaglio_attivo(conn), "in_corso": in_corso, "lavoro": dict(posta_vaglio.LAVORO) if in_corso else None, "solo_locale": posta_vaglio.solo_locale(conn), "regole": posta_vaglio.regole(conn),
                 "segna_casella": _segna_in_casella(conn), "etichetta_casella": posta_vaglio._imp(conn, "posta_etichetta_casella", "1") == "1"}
@@ -448,3 +450,43 @@ def esporta_csv(anno: int | None = None, _: dict = Depends(solo_titolare)):
                     r["attivita"], "si" if r["verificato"] else "no", " | ".join(f.get("link", "") for f in (r["file_drive"] or [])), r["link_sito"], r["casella"], r["oggetto"]])
     return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="opifex-amministrazione{"-" + str(anno) if anno else ""}.csv"'})
+
+
+class Storico(BaseModel):
+    dal: date | None = None
+    attivo: bool | None = None
+    subito: bool = False
+
+
+def _storico_dietro():
+    try:
+        with connessione() as conn:
+            posta_vaglio.LAVORO.update(risposte=0, ultima_risposta=None, iniziato=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat())
+            posta_vaglio.storico(conn, True, lambda **kw: posta_vaglio.LAVORO.update(kw))
+    except Exception as e:  # noqa: BLE001
+        try:
+            with connessione() as conn:
+                posta_vaglio._segna_stato(conn, esito="recupero interrotto", errore=str(e)[:300])
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        posta_vaglio.IN_CORSO.release()
+
+
+@router.put("/storico")
+def imposta_storico(d: Storico, _: dict = Depends(solo_titolare)):
+    """Il recupero della posta passata: da quando (di serie il 1 gennaio 2026), acceso o spento, e «Recupera adesso» (fino in fondo, in sottofondo).
+    Acceso, va avanti da solo un mese alla volta a ogni giro del filtro; le caselle collegate dopo entrano da sole."""
+    with connessione() as conn:
+        if d.dal is not None:
+            if d.dal.year < 2000 or d.dal > date.today():
+                raise HTTPException(422, "Data non valida")
+            posta_vaglio._scrivi(conn, "posta_storico_dal", d.dal.isoformat())
+        if d.attivo is not None:
+            posta_vaglio._scrivi(conn, "posta_storico_attivo", "1" if d.attivo else "0")
+    if d.subito:
+        if not posta_vaglio.IN_CORSO.acquire(blocking=False):
+            return {"in_corso": True, "gia": True}
+        threading.Thread(target=_storico_dietro, daemon=True, name="recupero-posta").start()
+        return {"in_corso": True}
+    return {"ok": True}

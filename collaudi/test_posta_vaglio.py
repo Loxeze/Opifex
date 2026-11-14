@@ -36,9 +36,15 @@ IMAP = [em("Sent|10", "Lorenzo <info@logos.it>", "Convenzione Castello", 3, "Ari
         em("11", "Arianna <arianna@logos.it>", "Re: Convenzione Castello", 0.5, "Ho sentito il Comune: manca solo la delibera. Mi dici se sollecito?", "<c1@x>"),
         em("12", "Mario Rossi <mario@rossi.it>", "Foto della mostra", 5, "Ti giro le foto, buona serata", "<m1@x>")]
 lette, richieste = [], []
-def finto_gmail(conn, aid, n, g, ricerca="", tutto=False, avanzamento=None):
+STORICO = {"gmail": [], "imap": []}
+finestre = []
+def _nella(lista, f):
+    finestre.append(f); return [x for x in lista if f[0] <= x["data"].date() < f[1]]
+def finto_gmail(conn, aid, n, g, ricerca="", tutto=False, avanzamento=None, finestra=None):
+    if finestra: return _nella(STORICO["gmail"], finestra)
     richieste.append(("gmail", n, g, tutto)); return list(GMAIL)
-def finto_imap(c, n, g, ricerca="", tutto=False, avanzamento=None):
+def finto_imap(c, n, g, ricerca="", tutto=False, avanzamento=None, finestra=None):
+    if finestra: return _nella(STORICO["imap"], finestra)
     richieste.append(("imap", n, g, tutto)); return [x for x in IMAP if tutto or "|" not in x["id"]]
 posta_vaglio._elenco_gmail = finto_gmail
 posta_vaglio._elenco_imap = finto_imap
@@ -359,6 +365,48 @@ with TestClient(app) as c:
         link = do.salva_testo(k, "agenti", ["Riunioni", "2026-11-14 - Convenzione: Castello"], "Verbale - Convenzione", "Decisioni: firmare entro venerdi'.")
     ok("un verbale si salva come documento Google in Agenti/Riunioni/<data - titolo>", link and caricati and b"application/vnd.google-apps.document" in caricati[0][2]
        and b"firmare entro venerdi'" in caricati[0][2] and any(n == "2026-11-14 - Convenzione  Castello" for _, n in creati), (link, creati[-3:]))
+    # ---- 2.58: recupero della posta dal 1 gennaio (qui: da 75 giorni fa), mese per mese, anche per le caselle nuove
+    from datetime import date as _date
+    dal = (ora - timedelta(days=75)).date()
+    def vecchia(id_, da, ogg, giorni, testo, filo, **kw):
+        x = em(id_, da, ogg, giorni * 24, testo, filo, **kw); return x
+    STORICO["gmail"] += [vecchia("s1", "Aruba <fatture@aruba.it>", "Fattura n. 88/2026", 70, "In allegato la fattura del dominio.", "g:s1"),
+                         vecchia("s2", "Marco <marco@amici.it>", "Calcetto", 60, "Giochiamo giovedi'?", "g:s2"),
+                         vecchia("s3", "Marco <marco@amici.it>", "Re: Calcetto", 59, "Allora ci sei?", "g:s2"),
+                         vecchia("s4", "Comune <protocollo@comune.it>", "Richiesta documenti", 3, "Ci servono i documenti entro lunedi'", "g:s4")]
+    STORICO["imap"] += [vecchia("40", "Enel <bollette@enel.it>", "Bolletta di settembre", 50, "Bolletta importo 50 euro scadenza, scaricala dall'area clienti", "<b9@x>")]
+    CONTENUTI["s1"] = ("ok", [("Fattura_88.pdf", "application/pdf", b"%PDF fattura 88")])
+    CONTENUTI["40"] = ('<a href="https://www.enel.it/area-clienti/bolletta?n=9">Scarica la bolletta</a>', [])
+    d = c.get("/gestione/posta-in", headers=H).json()["storico"]
+    ok("recupero: di serie dal 1 gennaio 2026, spento nella 2 (qui) e acceso nella 3", d["dal"] == "2026-01-01" and d["attivo"] is False, d)
+    finestre.clear()
+    r = c.put("/gestione/posta-in/storico", headers=H, json={"dal": dal.isoformat(), "subito": True}).json()
+    for _ in range(200):
+        if not c.get("/gestione/posta-in", headers=H).json()["in_corso"]:
+            break
+        time.sleep(0.1)
+    st = c.get("/gestione/posta-in", headers=H).json()["storico"]
+    ok("«Recupera adesso»: ogni casella mese per mese fino a oggi", r.get("in_corso") and all((st["caselle"].get(k) or {}).get("fatto") for k in (f"gmail-{gid}", f"imap-{iid}"))
+       and len(finestre) >= 6 and finestre[0][0] == dal and all(f[1] <= _date.today() + timedelta(days=1) for f in finestre), (st, finestre[:4]))
+    cat = {r_[0]: r_[1:] for r_ in sql("SELECT msg_id, categoria, letta, situazione_id FROM posta_vaglio WHERE msg_id IN ('s1','s2','s3','s4','40')")}
+    ok("le email vecchie sono «storiche»: non da leggere, non nuove conversazioni (il calcetto di due mesi fa resta chiuso)",
+       cat["s2"][0] == "storica" and cat["s2"][1] is True and cat["s2"][2] is None and cat["s3"][2] is None, cat)
+    ok("le email recenti trovate nel recupero passano dal filtro normale", cat["s4"][0] in ("da_vagliare", "importante", "normale"), cat)
+    docs = {r_[0]: r_[1:] for r_ in sql("SELECT v.msg_id, a.tipo, a.drive_stato, a.da_sito FROM posta_amministrazione a JOIN posta_vaglio v ON v.id=a.vaglio_id WHERE v.msg_id IN ('s1','40')")}
+    ok("fra le vecchie trova fatture e bollette: la fattura va su Drive, la bolletta segnata «dal sito»", docs.get("s1", (None,))[0] == "fattura" and docs["s1"][1] == "salvato"
+       and docs.get("40", (None, None, None))[2] is True, docs)
+    ok("il conteggio per casella e' giusto", st["caselle"][f"gmail-{gid}"]["email"] == 4 and st["caselle"][f"imap-{iid}"]["documenti"] >= 1, st["caselle"])
+    # una casella collegata dopo entra da sola nel giro automatico, un mese alla volta
+    sql("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('posta_storico_attivo', '1') ON CONFLICT (chiave) DO UPDATE SET valore='1'")
+    nuova = sql("INSERT INTO caselle_posta (etichetta,email,host,utente,password_cifrata,stato) VALUES ('Renovatio','info@renovatio.it','imap.hostinger.com','info@renovatio.it',%s,'attiva') RETURNING id", (cassaforte.cifra("pw"),))[0][0]
+    finestre.clear()
+    with psycopg.connect(DSN, autocommit=True, row_factory=psycopg.rows.dict_row) as k:
+        posta_vaglio.giro(k)
+        uno = len(finestre)
+        posta_vaglio.giro(k)
+    stn = c.get("/gestione/posta-in", headers=H).json()["storico"]["caselle"].get(f"imap-{nuova}") or {}
+    ok("una casella nuova entra da sola nel recupero, un mese per ogni giro del filtro", uno == 1 and len(finestre) == 2 and stn.get("dal") == dal.isoformat() and not stn.get("fatto"), (finestre, stn))
+    ok("date assurde rifiutate", c.put("/gestione/posta-in/storico", headers=H, json={"dal": "2999-01-01"}).status_code == 422)
     # agenti: con «solo locale» un agente online non riceve la posta
     marco = sql("SELECT id FROM agenti WHERE attivo AND modello LIKE 'claude%%' ORDER BY id LIMIT 1")[0][0]
     sql("UPDATE agenti SET gmail_account_id=%s WHERE id=%s", (gid, marco))

@@ -33,3 +33,7 @@ ALTER TABLE posta_amministrazione ADD COLUMN IF NOT EXISTS link_sito TEXT NOT NU
 -- verbali di tavoli e riunioni salvati anche su Drive (Agenti/Tavoli, Agenti/Riunioni)
 ALTER TABLE tavoli ADD COLUMN IF NOT EXISTS drive_link TEXT;
 ALTER TABLE riunioni_importate ADD COLUMN IF NOT EXISTS drive_link TEXT;
+
+-- 2.58: recupero della posta dal 1 gennaio (per casella, mese per mese): le email vecchie sono «storiche», non da leggere
+ALTER TABLE posta_vaglio DROP CONSTRAINT IF EXISTS posta_vaglio_categoria_check;
+ALTER TABLE posta_vaglio ADD CONSTRAINT posta_vaglio_categoria_check CHECK (categoria IN ('da_vagliare', 'importante', 'normale', 'scartabile', 'mia', 'storica'));

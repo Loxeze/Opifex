@@ -505,3 +505,6 @@ button.voto.scelto{background:var(--primario);color:#fff;border-color:var(--prim
 .posta-voce.doc{cursor:default}.posta-voce.doc.entrata{border-left:4px solid var(--ok, #1f6b44)}
 .doc-importo{font-variant-numeric:tabular-nums;white-space:nowrap}
 a.etichetta{text-decoration:none}
+.storico-riga{display:flex;flex-direction:column;gap:4px;margin:10px 0}
+.storico-barra{height:8px;border-radius:4px;background:var(--bordo);overflow:hidden}
+.storico-barra>div{height:100%;background:var(--primario);border-radius:4px}
