@@ -8,6 +8,7 @@
 - da_fare() / quadro(): cosa tocca a Lorenzo, e il punto della situazione su tutto.
 Il testo delle email non va MAI a un modello online: se nessun computer locale risponde, il vaglio aspetta.
 Il testo delle email e' dato non fidato: il modello e' avvisato e le sue risposte sono solo etichette e riassunti, mai azioni."""
+import base64
 import email
 import json
 import re
@@ -25,6 +26,7 @@ GIORNI_GIRO = 2           # ai giri automatici gli ultimi 2
 PER_CASELLA = 40          # email lette per casella a ogni giro automatico
 PER_CASELLA_ANALISI = 300 # email lette per casella quando si chiede l'analisi delle ultime settimane
 PER_GIRO = 24             # email vagliate al massimo per giro automatico (il computer locale serve anche agli agenti)
+AMM_PER_GIRO = 12         # email che sembrano fatture/ricevute esaminate al massimo per giro automatico
 SIT_PER_GIRO = 6          # conversazioni riassunte al massimo per giro automatico
 LOTTO = 6                 # email per chiamata al modello locale
 ANTEPRIMA = 900           # caratteri di ogni email che il modello vede
@@ -155,6 +157,13 @@ def titolo_da_oggetto(o: str) -> str:
     return t.strip() or "(senza oggetto)"
 
 
+def _allegati_gmail(parte: dict) -> list[str]:
+    nomi = [parte["filename"]] if parte.get("filename") else []
+    for p in parte.get("parts", []) or []:
+        nomi += _allegati_gmail(p)
+    return nomi
+
+
 GMAIL_RACCOLTA = "-in:spam -in:trash -in:drafts -in:chats -category:promotions -category:social -category:forums"
 
 
@@ -191,6 +200,7 @@ def _elenco_gmail(conn, aid: int, n: int, giorni: int, ricerca: str = "", tutto:
         out.append({"id": m["id"], "da": intest("From")[:300], "a": (intest("To") + ", " + intest("Cc")).strip(", ")[:600], "oggetto": intest("Subject")[:300], "data": quando,
                     "non_letta": "UNREAD" in (x.get("labelIds") or []), "inviata": "SENT" in (x.get("labelIds") or []), "massiva": _massiva(intest),
                     "filo": "g:" + str(x.get("threadId") or m.get("threadId") or m["id"]),
+                    "allegati": ", ".join(_allegati_gmail(x.get("payload", {})))[:500],
                     "anteprima": _pulisci(strumenti_gmail._testo(x.get("payload", {})))[:ANTEPRIMA] or x.get("snippet", "")})
     return out
 
@@ -213,6 +223,19 @@ def _cartella_inviata(m) -> str | None:
     return next((x for x in nomi if re.search(r"(^|[./])(sent( items| messages)?|posta inviata|inviata|inviati|elementi inviati)$", x, re.I)), None)
 
 
+def _allegati_imap(msg) -> str:
+    """I nomi dei file allegati (anche da un messaggio letto solo in parte: bastano le intestazioni delle parti)."""
+    nomi = []
+    try:
+        for parte in msg.walk():
+            n = parte.get_filename()
+            if n:
+                nomi.append(str(n))
+    except Exception:  # noqa: BLE001 - un messaggio troncato puo' rompere il parser a meta': si tiene quello che si e' letto
+        pass
+    return ", ".join(dict.fromkeys(nomi))[:500]
+
+
 def _msg_imap(m, u: bytes, cartella: str) -> dict:
     t, x = m.uid("FETCH", u, "(FLAGS BODY.PEEK[]<0.24000>)")
     grezzo = next((p[1] for p in (x or []) if isinstance(p, tuple)), b"")
@@ -230,6 +253,7 @@ def _msg_imap(m, u: bytes, cartella: str) -> dict:
             "oggetto": intest("Subject"), "data": _data_testo(str(msg["Date"] or "")), "non_letta": b"\\Seen" not in (meta or b""),
             "inviata": cartella != "INBOX", "massiva": cartella == "INBOX" and _massiva(intest),
             "filo": _filo_da(str(msg["Message-ID"] or ""), str(msg["In-Reply-To"] or ""), str(msg["References"] or ""), intest("Subject")),
+            "allegati": _allegati_imap(msg),
             "anteprima": _pulisci(testo)[:ANTEPRIMA]}
 
 
@@ -506,14 +530,15 @@ def raccogli(conn, giorni: int | None = None, per_casella: int = PER_CASELLA, av
             prima = conn.execute("SELECT id, non_letta_casella, letta FROM posta_vaglio WHERE origine=%s AND casella_id=%s AND msg_id=%s",
                                  (c["origine"], c["id"], e["id"])).fetchone()
             r = conn.execute("""INSERT INTO posta_vaglio (origine, casella_id, msg_id, casella, data, mittente, oggetto, filo, da_me, destinatari, categoria, motivo, vagliata_il,
-                                                          non_letta_casella, imparata)
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, CASE WHEN %s = 'da_vagliare' THEN NULL ELSE NOW() END, %s, %s)
+                                                          non_letta_casella, imparata, allegati)
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, CASE WHEN %s = 'da_vagliare' THEN NULL ELSE NOW() END, %s, %s, %s)
                                 ON CONFLICT (origine, casella_id, msg_id) DO UPDATE SET filo = CASE WHEN posta_vaglio.filo = '' THEN EXCLUDED.filo ELSE posta_vaglio.filo END,
                                     destinatari = CASE WHEN posta_vaglio.destinatari = '' THEN EXCLUDED.destinatari ELSE posta_vaglio.destinatari END,
+                                    allegati = CASE WHEN posta_vaglio.allegati = '' THEN EXCLUDED.allegati ELSE posta_vaglio.allegati END,
                                     non_letta_casella = EXCLUDED.non_letta_casella
                                 RETURNING id, (xmax = 0) AS nuova""",
                              (c["origine"], c["id"], e["id"], c["email"], e["data"], e["da"], e["oggetto"], e.get("filo") or "", da_me, e.get("a") or "", cat,
-                              imparata, cat, bool(e.get("non_letta")), imparata)).fetchone()
+                              imparata, cat, bool(e.get("non_letta")), imparata, e.get("allegati") or "")).fetchone()
             if r and r["nuova"]:
                 nuove += 1
             if r:
@@ -549,7 +574,7 @@ def vaglia(conn, forza: bool = False, giorni: int | None = None) -> dict:
     if not caselle(conn):
         return {"saltato": "nessuna casella collegata"}
     analisi = giorni is not None
-    conto = {"nuove": 0, "vagliate": 0, "situazioni": 0}
+    conto = {"nuove": 0, "vagliate": 0, "situazioni": 0, "documenti": 0}
     LAVORO.update(risposte=0, ultima_risposta=None, iniziato=datetime.now(timezone.utc).isoformat(), fase="inizio")
 
     def avanza(**kw):
@@ -574,6 +599,18 @@ def vaglia(conn, forza: bool = False, giorni: int | None = None) -> dict:
                 resto = conn.execute("SELECT count(*) AS n FROM posta_vaglio WHERE categoria='da_vagliare'").fetchone()["n"]
                 (avanza if analisi else lambda **kw: LAVORO.update(kw))(fase=f"il modello locale legge le email: ne mancano {resto}")
             if not analisi or not fatte_ora:
+                break
+        fatte_amm = 0
+        while True:   # fatture, ricevute, avvisi di pagamento: prima un setaccio a parole, poi il modello locale estrae i dati
+            n_amm = amministrazione(conn, AMM_PER_GIRO, (avanza if analisi else lambda **kw: LAVORO.update(kw)))
+            fatte_amm += n_amm
+            if not analisi or not n_amm:
+                break
+        conto["documenti"] = fatte_amm
+        if analisi:
+            avanza(fase="salvo fatture e ricevute su Drive")
+        for _giro in range(30 if analisi else 1):   # con un tetto: niente giri infiniti se Drive continua a non rispondere
+            if not archivia_in_sospeso(conn, 10):
                 break
         collega_fili(conn)
         while True:
@@ -636,6 +673,315 @@ def quadro(conn) -> str:
     conn.commit()
     return t
 
+
+
+
+# ---------- amministrazione: fatture, ricevute, avvisi di pagamento ----------
+_PAROLE_AMM = re.compile(
+    r"\b(fattur\w*|invoice|ricevut\w*|receipt|quietanz\w*|pagament\w*|payment|pagato|paid|bonific\w*|addebit\w*|accredit\w*|"
+    r"avviso di pagamento|pago\s?pa|f24|mav|rid|sdd|bollett\w*|sollecit\w*|insolut\w*|scadenz\w*|rata|rate|canone|abbonamento|rinnovo|"
+    r"nota di credito|credit note|estratto conto|parcella|preventivo accettato|ordine n|order|importo|totale|iva|€|eur\b)", re.I)
+_ALLEGATI_AMM = re.compile(r"(fattur|invoice|ricevut|receipt|\.xml\b|\.p7m\b|f24|quietanz|bollett|nota.?credito|estratto)", re.I)
+
+
+def candidata_amm(oggetto: str, testo: str, allegati: str) -> bool:
+    """Setaccio a parole, senza modello: o lo dicono gli allegati (fattura.pdf, .xml della fattura elettronica), o l'oggetto,
+    o il testo con almeno due parole del mestiere (cosi' «ordine» da solo non basta)."""
+    if _ALLEGATI_AMM.search(allegati or ""):
+        return True
+    if re.search(r"(fattur|invoice|ricevut|receipt|pagament|payment|sollecit|avviso di pagamento|pagopa|f24|bollett|nota di credito|scadenz|addebit|bonific)", oggetto or "", re.I):
+        return True
+    return len({m.group(0).lower()[:6] for m in _PAROLE_AMM.finditer((testo or "")[:2500])}) >= 3
+
+
+ISTR_AMM = """Esamini email ricevute o mandate da Lorenzo Zeppa per il controllo di gestione delle sue attivita'.
+Per ogni email decidi se e' un documento amministrativo: una fattura, una ricevuta o conferma di pagamento, un avviso di pagamento
+(da pagare: bollette, pagoPA, F24, rinnovi, rate), un sollecito, una nota di credito. Newsletter, offerte e preventivi NON lo sono.
+Se lo e', estrai i dati che leggi nell'email (non inventare: se un dato manca, null).
+Rispondi SOLO con un array JSON, un oggetto per email, nello stesso ordine:
+[{"n": 1, "documento": true, "tipo": "fattura|ricevuta|avviso_pagamento|sollecito|nota_credito|altro",
+  "direzione": "uscita" se Lorenzo deve pagare o ha pagato, "entrata" se Lorenzo incassa (fatture che emette lui, pagamenti ricevuti),
+  "controparte": "chi emette o chi paga", "descrizione": "per cosa, in poche parole", "importo": 123.45, "valuta": "EUR",
+  "data_documento": "AAAA-MM-GG", "scadenza": "AAAA-MM-GG", "numero": "numero del documento"}]
+Per le email che non sono documenti: {"n": 2, "documento": false}"""
+
+
+def _data_o_none(v):
+    if isinstance(v, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", v.strip()):
+        try:
+            return datetime.strptime(v.strip(), "%Y-%m-%d").date()
+        except ValueError:
+            return None
+    return None
+
+
+def _importo(v):
+    if isinstance(v, (int, float)):
+        return round(float(v), 2) if abs(v) < 1e9 else None
+    if isinstance(v, str):
+        t = re.sub(r"[^\d,.\-]", "", v)
+        if re.search(r",\d{1,2}$", t):
+            t = t.replace(".", "").replace(",", ".")
+        else:
+            t = t.replace(",", "")
+        try:
+            return round(float(t), 2) if t else None
+        except ValueError:
+            return None
+    return None
+
+
+def _stato_iniziale(tipo: str, direzione: str) -> str:
+    if tipo == "ricevuta":
+        return "pagato" if direzione == "uscita" else "incassato"
+    if tipo in ("fattura", "avviso_pagamento", "sollecito"):
+        return "da_pagare" if direzione == "uscita" else "da_incassare"
+    return "da_verificare"
+
+
+def amministrazione(conn, limite: int, avanzamento=None) -> int:
+    """Esamina le email non ancora controllate: il setaccio a parole scarta quasi tutto, le candidate vanno al modello locale
+    (a lotti di 4) che dice se sono documenti amministrativi e ne estrae i dati. Restituisce quante email ha esaminato col modello."""
+    righe = conn.execute("""SELECT id, origine, casella_id, msg_id, data, mittente, oggetto, allegati, da_me FROM posta_vaglio
+                            WHERE NOT amm_controllata ORDER BY data DESC NULLS LAST LIMIT %s""", (limite * 8,)).fetchall()
+    candidate = []
+    for r in righe:
+        if len(candidate) >= limite:
+            break
+        testo = _anteprima(conn, r)
+        if candidata_amm(r["oggetto"], testo, r["allegati"]):
+            candidate.append({**r, "anteprima": testo})
+        else:
+            conn.execute("UPDATE posta_vaglio SET amm_controllata=TRUE WHERE id=%s", (r["id"],))
+    conn.commit()
+    for i in range(0, len(candidate), 4):
+        lotto = candidate[i:i + 4]
+        if avanzamento:
+            avanzamento(fase="il modello locale cerca fatture, ricevute e pagamenti")
+        testo = (AVVERTENZA + f"\n\nOggi e' il {datetime.now():%d/%m/%Y}.\n\nEMAIL:\n" + "\n\n".join(
+            f"--- {k} ---\n{'Mandata da LORENZO a: ' + (e.get('destinatari') or '') if e['da_me'] else 'Da: ' + e['mittente']}\nOggetto: {e['oggetto']}\n"
+            f"Data: {e['data'] or ''}\nAllegati: {e['allegati'] or 'nessuno'}\n{e['anteprima'][:1500]}" for k, e in enumerate(lotto, 1)))
+        voci = _json(_chiedi(conn, ISTR_AMM, testo, 1200))
+        voci = voci if isinstance(voci, list) else ([voci] if isinstance(voci, dict) else [])
+        per_n = {}
+        for k, v in enumerate(voci, 1):
+            if isinstance(v, dict):
+                try:
+                    per_n[int(v.get("n") or k)] = v
+                except (TypeError, ValueError):
+                    per_n[k] = v
+        for k, e in enumerate(lotto, 1):
+            v = per_n.get(k)
+            if v is None:
+                continue   # il modello non ha risposto per questa: si riprova al prossimo giro
+            if v.get("documento") is True or str(v.get("documento")).lower() == "true":
+                tipo = v.get("tipo") if v.get("tipo") in ("fattura", "ricevuta", "avviso_pagamento", "sollecito", "nota_credito", "altro") else "altro"
+                direzione = v.get("direzione") if v.get("direzione") in ("uscita", "entrata") else ("entrata" if e["da_me"] else "uscita")
+                conn.execute("""INSERT INTO posta_amministrazione (vaglio_id, tipo, direzione, controparte, descrizione, importo, valuta, data_documento, scadenza, numero, stato)
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (vaglio_id) DO NOTHING""",
+                             (e["id"], tipo, direzione, str(v.get("controparte") or _persona(e["mittente"]))[:200], str(v.get("descrizione") or "")[:300],
+                              _importo(v.get("importo")), str(v.get("valuta") or "EUR").upper()[:5], _data_o_none(v.get("data_documento")) or (e["data"].date() if e["data"] else None),
+                              _data_o_none(v.get("scadenza")), str(v.get("numero") or "")[:60], _stato_iniziale(tipo, direzione)))
+            conn.execute("UPDATE posta_vaglio SET amm_controllata=TRUE WHERE id=%s", (e["id"],))
+        conn.commit()
+        for e in lotto:
+            etichetta_in_casella(conn, e["id"])
+    return len(candidate)
+
+
+ETICHETTA_GMAIL = "Opifex/Amministrazione"
+
+
+def etichetta_in_casella(conn, vid: int) -> bool:
+    """Mette l'etichetta «Opifex/Amministrazione» anche in Gmail (serve il permesso «Gmail: segna come lette»). Le caselle IMAP restano come sono."""
+    if _imp(conn, "posta_etichetta_casella", "1") != "1":
+        return False
+    r = conn.execute("""SELECT a.id, v.origine, v.casella_id, v.msg_id FROM posta_amministrazione a JOIN posta_vaglio v ON v.id = a.vaglio_id
+                        WHERE a.vaglio_id=%s AND NOT a.etichetta_casella""", (vid,)).fetchone()
+    if not r or r["origine"] != "gmail":
+        return False
+    try:
+        tok = strumenti_gmail.token_accesso(conn, r["casella_id"])
+        chiave = f"gmail_etichetta_amm_{r['casella_id']}"
+        lid = _imp(conn, chiave, "")
+        if not lid:
+            esistenti = strumenti_gmail._richiesta("GET", f"{strumenti_gmail._API}/labels", tok).get("labels", [])
+            lid = next((x["id"] for x in esistenti if x.get("name") == ETICHETTA_GMAIL), "")
+            if not lid:
+                lid = strumenti_gmail._richiesta("POST", f"{strumenti_gmail._API}/labels", tok,
+                                                 json={"name": ETICHETTA_GMAIL, "labelListVisibility": "labelShow", "messageListVisibility": "show"})["id"]
+            _scrivi(conn, chiave, lid)
+        strumenti_gmail._richiesta("POST", f"{strumenti_gmail._API}/messages/{r['msg_id']}/modify", tok, json={"addLabelIds": [lid]})
+        conn.execute("UPDATE posta_amministrazione SET etichetta_casella=TRUE WHERE id=%s", (r["id"],))
+        conn.commit()
+        return True
+    except Exception:  # noqa: BLE001 - senza il permesso (o con Gmail che non risponde) l'etichetta resta solo in Opifex
+        conn.rollback()
+        return False
+
+
+
+# ---------- documenti su Drive: Controllo di gestione/Passive (o Attive)/<anno>/<mm - Mese> ----------
+MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"]
+_TIPI_FILE = {"pdf": "application/pdf", "xml": "application/xml", "p7m": "application/pkcs7-mime", "zip": "application/zip",
+              "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "html": "text/html"}
+MAX_FILE = 15 * 1024 * 1024
+_LINK_RICEVUTA = re.compile(r"(fattur|invoice|ricevut|receipt|scarica|download|bollett|document|area.?clienti|billing|account|pagament|payment|visualizza|view)", re.I)
+_AGGANCI = ("fattur", "invoice", "ricevut", "receipt", "scarica", "download", "bollett", "documento", "visualizza", "view", "pdf")
+
+
+def _contenuto(conn, origine: str, cid: int, msg_id: str) -> tuple[str, list]:
+    """Il testo (con i link) e gli allegati veri di un'email: [(nome, mime, bytes)]. Solo per i documenti amministrativi."""
+    allegati, html = [], ""
+    if origine == "gmail":
+        tok = strumenti_gmail.token_accesso(conn, cid)
+        x = strumenti_gmail._richiesta("GET", f"{strumenti_gmail._API}/messages/{re.sub(r'[^A-Za-z0-9_-]', '', msg_id)[:64]}", tok, params={"format": "full"})
+
+        def giro_parti(parte):
+            nonlocal html
+            corpo = parte.get("body", {}) or {}
+            if parte.get("filename") and corpo.get("attachmentId") and (corpo.get("size") or 0) <= MAX_FILE:
+                d = strumenti_gmail._richiesta("GET", f"{strumenti_gmail._API}/messages/{x['id']}/attachments/{corpo['attachmentId']}", tok)
+                allegati.append((parte["filename"], parte.get("mimeType") or "", base64.urlsafe_b64decode((d.get("data") or "") + "==")))
+            elif parte.get("mimeType") in ("text/html", "text/plain") and corpo.get("data") and not parte.get("filename"):
+                t = base64.urlsafe_b64decode(corpo["data"] + "==").decode("utf-8", "replace")
+                html = html + "\n" + t if parte.get("mimeType") == "text/html" or not html else html
+            for p_ in parte.get("parts", []) or []:
+                giro_parti(p_)
+        giro_parti(x.get("payload", {}))
+        return html, allegati
+    cart, _, uid = msg_id.rpartition("|") if "|" in msg_id else ("INBOX", "", msg_id)
+    uid = re.sub(r"\D", "", uid)
+    m = strumenti_posta._connetti(_casella_imap(conn, cid))
+    try:
+        if not uid or m.select(strumenti_posta._q(cart) if cart != "INBOX" else "INBOX", readonly=True)[0] != "OK":
+            return "", []
+        t, dati = m.uid("FETCH", uid, "(BODY.PEEK[])")
+        msg = email.message_from_bytes(next((p_[1] for p_ in (dati or []) if isinstance(p_, tuple)), b""), policy=policy.default)
+        for parte in msg.walk():
+            if parte.is_multipart():
+                continue
+            nome = parte.get_filename()
+            if nome:
+                dati_f = parte.get_payload(decode=True) or b""
+                if len(dati_f) <= MAX_FILE:
+                    allegati.append((str(nome), parte.get_content_type(), dati_f))
+            elif parte.get_content_type() in ("text/html", "text/plain"):
+                try:
+                    html += "\n" + parte.get_content()
+                except Exception:  # noqa: BLE001
+                    pass
+        return html, allegati
+    finally:
+        try:
+            m.logout()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _documenti_veri(allegati: list) -> list:
+    """Solo i file che possono essere il documento: PDF, XML della fattura elettronica, .p7m, immagini non minuscole (i loghi no)."""
+    buoni = []
+    for nome, mime, dati in allegati:
+        est = nome.rsplit(".", 1)[-1].lower() if "." in nome else ""
+        if est not in _TIPI_FILE:
+            continue
+        if est in ("png", "jpg", "jpeg") and len(dati) < 30_000:
+            continue
+        if est == "html":
+            continue
+        buoni.append((nome, _TIPI_FILE[est], dati))
+    return buoni
+
+
+def link_ricevuta(html: str) -> str:
+    """Il link da cui scaricare la ricevuta quando non e' allegata (area clienti, «scarica la fattura»). Solo https; mai aperto dal server."""
+    migliori = []
+    for m in re.finditer(r"<a\b[^>]*href=[\"'](https://[^\"'\s<>]{8,600})[\"'][^>]*>(.*?)</a>", html or "", re.I | re.S):
+        url, testo = m.group(1), re.sub(r"<[^>]+>|\s+", " ", m.group(2)).strip().lower()
+        punti = sum(2 for k in _AGGANCI if k in testo) + (1 if _LINK_RICEVUTA.search(url) else 0)
+        if re.search(r"(unsubscribe|disiscriv|cancella.?iscriz|privacy|facebook|instagram|linkedin|twitter|youtube|mailto)", url + " " + testo, re.I):
+            continue
+        if punti >= 2:
+            migliori.append((punti, url))
+    if not migliori:
+        for m in re.finditer(r"https://[^\s<>\"']{8,600}", re.sub(r"<[^>]+>", " ", html or "")):
+            if _LINK_RICEVUTA.search(m.group(0)) and not re.search(r"(unsubscribe|privacy|facebook|instagram|linkedin)", m.group(0), re.I):
+                migliori.append((1, m.group(0)))
+    return sorted(migliori, key=lambda x: -x[0])[0][1].replace("&amp;", "&")[:600] if migliori else ""
+
+
+def _nome_file(a: dict, originale: str, i: int, quanti: int) -> str:
+    est = originale.rsplit(".", 1)[-1].lower() if "." in originale else "pdf"
+    data = a["data_documento"] or a["creato_il"].date()
+    pezzi = [f"{data:%Y-%m-%d}", re.sub(r"[\\/:*?\"<>|]+", " ", a["controparte"] or "").strip()[:60], a["tipo"].replace("_", " "), (a["numero"] or "").replace("/", "-")[:30]]
+    base = " - ".join(x for x in pezzi if x)
+    return f"{base}{f' ({i})' if quanti > 1 else ''}.{est}"
+
+
+def archivia_documento(conn, amm_id: int) -> str:
+    """Scarica gli allegati del documento e li mette su Drive in Controllo di gestione/<Passive|Attive>/<anno>/<mm - Mese>. Se non ci sono allegati ma un link,
+    segna che la ricevuta va presa dal sito. Le spese vanno in Passive, gli incassi in Attive. Restituisce lo stato: salvato, sito, nessun_allegato, drive_non_collegato, errore."""
+    a = conn.execute("""SELECT a.*, v.origine, v.casella_id, v.msg_id FROM posta_amministrazione a JOIN posta_vaglio v ON v.id = a.vaglio_id WHERE a.id=%s""", (amm_id,)).fetchone()
+    if not a:
+        return ""
+    try:
+        html, allegati = _contenuto(conn, a["origine"], a["casella_id"], a["msg_id"])
+    except Exception as e:  # noqa: BLE001
+        conn.rollback()
+        conn.execute("UPDATE posta_amministrazione SET drive_stato=%s WHERE id=%s", (("errore: " + str(e))[:200], amm_id))
+        conn.commit()
+        return "errore"
+    docs = _documenti_veri(allegati)
+    link = link_ricevuta(html) if not docs else ""
+    if not docs:
+        stato = "sito" if link else "nessun_allegato"
+        conn.execute("UPDATE posta_amministrazione SET drive_stato=%s, da_sito=%s, link_sito=%s, aggiornato_il=NOW() WHERE id=%s", (stato, bool(link), link, amm_id))
+        conn.commit()
+        return stato
+    from . import google, drive_ordine
+    account = int(google._leggi(conn, "drive_account_id") or 0)
+    if not account:
+        conn.execute("UPDATE posta_amministrazione SET drive_stato='drive_non_collegato' WHERE id=%s", (amm_id,))
+        conn.commit()
+        return "drive_non_collegato"
+    try:
+        tok = google.token_accesso(conn, account)
+        radice = google.radice_valida(conn, tok)
+        data = a["data_documento"] or a["creato_il"].date()
+        mese = drive_ordine.percorso(conn, tok, radice, "gestione", drive_ordine.GESTIONE[a["direzione"]], str(data.year), f"{data.month:02d} - {MESI[data.month - 1]}")
+        salvati = []
+        for i, (nome, mime, dati) in enumerate(docs, 1):
+            nome_drive = _nome_file(a, nome, i, len(docs))
+            gia = google._http("GET", google._DRIVE, headers={"Authorization": "Bearer " + tok},
+                               params={"q": f"name='{google._q(nome_drive)}' and '{mese}' in parents and trashed=false", "fields": "files(id,webViewLink)", "pageSize": 1}).get("files", [])
+            if gia:
+                salvati.append({"nome": nome_drive, "id": gia[0]["id"], "link": gia[0].get("webViewLink", "")})
+                continue
+            limite = "opifex-amm-5e1"
+            meta = json.dumps({"name": nome_drive, "parents": [mese], "description": f"Dall'email: {a['descrizione'] or ''}"[:500]})
+            corpo = (f"--{limite}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n--{limite}\r\nContent-Type: {mime}\r\n\r\n").encode() + dati + f"\r\n--{limite}--".encode()
+            f_ = google._http("POST", "https://www.googleapis.com/upload/drive/v3/files", params={"uploadType": "multipart", "fields": "id,webViewLink"},
+                              headers={"Authorization": "Bearer " + tok, "Content-Type": f"multipart/related; boundary={limite}"}, content=corpo)
+            salvati.append({"nome": nome_drive, "id": f_["id"], "link": f_.get("webViewLink", "")})
+        conn.execute("UPDATE posta_amministrazione SET drive_stato='salvato', file_drive=%s::jsonb, da_sito=FALSE, aggiornato_il=NOW() WHERE id=%s", (json.dumps(salvati), amm_id))
+        conn.commit()
+        return "salvato"
+    except Exception as e:  # noqa: BLE001 - Drive che non risponde: si riprova al giro dopo
+        conn.rollback()
+        conn.execute("UPDATE posta_amministrazione SET drive_stato=%s WHERE id=%s", (("errore: " + str(e))[:200], amm_id))
+        conn.commit()
+        return "errore"
+
+
+def archivia_in_sospeso(conn, limite: int = 10) -> int:
+    righe = conn.execute("""SELECT id FROM posta_amministrazione WHERE drive_stato = '' OR (drive_stato LIKE 'errore%%' AND aggiornato_il < NOW() - INTERVAL '1 hour')
+                               OR (drive_stato = 'drive_non_collegato' AND EXISTS (SELECT 1 FROM impostazioni_sistema WHERE chiave='drive_account_id' AND valore <> ''))
+                            ORDER BY id LIMIT %s""", (limite,)).fetchall()
+    for r in righe:
+        conn.execute("UPDATE posta_amministrazione SET aggiornato_il=NOW() WHERE id=%s", (r["id"],))
+        archivia_documento(conn, r["id"])
+    return len(righe)
 
 
 # ---------- cosa interessa a Lorenzo: si impara dal suo comportamento ----------

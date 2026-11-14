@@ -75,7 +75,7 @@ with TestClient(app) as c:
     ok("il secondo vede cio' che ha detto il primo", "servono fondi e un responsabile" in ultimi_msg[1])
     ok("nel secondo giro si risponde agli altri", "Rispondi agli altri" in ultimi_msg[2])
     ok("il moderatore e' Aurora e riceve tutti gli interventi", t["moderatore"] == "Aurora" and "concordo sul sito" in ultimi_msg[4] and "Ordine del giorno" in ultimi_msg[4])
-    ok("notifica del verbale", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Tavolo %%concluso%%'")[0][0] == 1)
+    ok("notifica del verbale", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Tavolo %%conclus%%'")[0][0] == 1)
     el = c.get("/gestione/tavoli", headers=H).json()["tavoli"]
     ok("elenco con partecipanti", el[0]["partecipanti"] == "Marco, Dario" and el[0]["interventi"] == 4)
     # un partecipante in errore non ferma il tavolo

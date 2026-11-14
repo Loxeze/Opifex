@@ -76,7 +76,7 @@ with TestClient(app) as c:
     ok("riordino: ogni cartella al suo posto, con lo stesso identificativo e lo stesso nome", all(dove(x) == "Agenti" for x in ("A0", "A1", "A2")) and dove("P0") == "Progetti" and dove("BK") == "Sistema" and dove("MK") == "Sistema"
        and r["spostati"] == 6 and not r["errori"], str(r)[:300])
     ok("riordino: il contenuto delle cartelle non viene toccato", figli("P0") == ["agent", "repository"] and figli("BK") == ["vecchio.enc"])
-    ok("riordino: cio' che non riconosce resta nella radice (anche un nome quasi uguale a un progetto)", figli("ROOT") == sorted(["Agenti", "Progetti", "Sistema", "Bandi", "PM " + pid[1], "Ricognizione.xlsx"]), str(figli("ROOT")))
+    ok("riordino: cio' che non riconosce resta nella radice (anche un nome quasi uguale a un progetto)", figli("ROOT") == sorted(["Agenti", "Progetti", "Sistema", "Imprese", "Controllo di gestione", "Bandi", "PM " + pid[1], "Ricognizione.xlsx"]), str(figli("ROOT")))
     ok("riordino registrato", sql("SELECT dettagli->>'spostati' FROM registro_azioni WHERE azione='drive_riordinato' ORDER BY id DESC LIMIT 1")[0][0] == "6")
     n = len(mosse); r2 = c.post("/gestione/google/ordine", headers=H).json()
     ok("ripetuto: non sposta piu' nulla", r2["spostati"] == 0 and len(mosse) == n)

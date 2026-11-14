@@ -26,7 +26,8 @@ def da_leggere(tutte: bool = False, _: dict = Depends(solo_titolare)):
         cat = ("importante", "normale") if tutte else ("importante",)
         righe = conn.execute("""SELECT v.id, v.origine, v.casella_id, v.msg_id, v.casella, v.data, v.mittente, v.oggetto, v.categoria, v.urgenza,
                                        v.riassunto, v.motivo, v.situazione_id, s.titolo AS situazione, v.interessa, v.task_id, v.imparata
-                                FROM posta_vaglio v LEFT JOIN posta_situazioni s ON s.id = v.situazione_id
+                                       , am.tipo AS documento, am.importo AS documento_importo, am.da_sito AS documento_sito
+                                FROM posta_vaglio v LEFT JOIN posta_situazioni s ON s.id = v.situazione_id LEFT JOIN posta_amministrazione am ON am.vaglio_id = v.id
                                 WHERE NOT v.letta AND v.categoria = ANY(%s) ORDER BY v.urgenza DESC, v.data DESC NULLS LAST LIMIT 80""", (list(cat),)).fetchall()
         conteggi = {r["categoria"]: r["n"] for r in conn.execute(
             "SELECT categoria, count(*) AS n FROM posta_vaglio WHERE NOT letta AND data > NOW() - INTERVAL '14 days' GROUP BY categoria").fetchall()}
@@ -40,7 +41,7 @@ def da_leggere(tutte: bool = False, _: dict = Depends(solo_titolare)):
         return {"email": [_riga(r) for r in righe], "conteggi": conteggi, "da_fare": fare, "situazioni_aperte": aperte, "stato": posta_vaglio.stato(conn), "quadro": q,
                 "caselle": len(posta_vaglio.caselle(conn)), "modello": posta_vaglio.modello_locale(conn),
                 "attivo": posta_vaglio.vaglio_attivo(conn), "in_corso": in_corso, "lavoro": dict(posta_vaglio.LAVORO) if in_corso else None, "solo_locale": posta_vaglio.solo_locale(conn), "regole": posta_vaglio.regole(conn),
-                "segna_casella": _segna_in_casella(conn)}
+                "segna_casella": _segna_in_casella(conn), "etichetta_casella": posta_vaglio._imp(conn, "posta_etichetta_casella", "1") == "1"}
 
 
 @router.post("/{vid}/letta")
@@ -325,6 +326,7 @@ class Impostazioni(BaseModel):
     attivo: bool | None = None
     solo_locale: bool | None = None
     segna_casella: bool | None = None
+    etichetta_casella: bool | None = None
     regole: str | None = Field(default=None, max_length=4000)
 
 
@@ -339,6 +341,110 @@ def imposta(d: Impostazioni, u: dict = Depends(solo_titolare)):
             posta_vaglio._scrivi(conn, "posta_regole", d.regole.strip())
         if d.segna_casella is not None:
             posta_vaglio._scrivi(conn, "posta_segna_casella", "1" if d.segna_casella else "0")
+        if d.etichetta_casella is not None:
+            posta_vaglio._scrivi(conn, "posta_etichetta_casella", "1" if d.etichetta_casella else "0")
         registro.registra(conn, u, "impostazione", "filtro della posta aggiornato", "", "posta", None, "",
                           {"attivo": d.attivo, "solo_locale": d.solo_locale, "regole_cambiate": d.regole is not None})
     return {"ok": True}
+
+
+# ---------- amministrazione: fatture, ricevute, avvisi di pagamento trovati nella posta ----------
+def _amm(r: dict) -> dict:
+    return {**r, "importo": float(r["importo"]) if r["importo"] is not None else None,
+            **{k: (r[k].isoformat() if r.get(k) else None) for k in ("data_documento", "scadenza", "creato_il", "aggiornato_il", "data") if k in r}}
+
+
+_SEL_AMM = """SELECT a.*, v.origine, v.casella_id, v.msg_id, v.casella, v.mittente, v.oggetto, v.data, v.allegati
+              FROM posta_amministrazione a JOIN posta_vaglio v ON v.id = a.vaglio_id"""
+
+
+@router.get("/amministrazione")
+def amministrazione(anno: int | None = None, mese: int | None = None, tipo: str = "", stato: str = "", _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        cond, par = ["TRUE"], []
+        if anno:
+            cond.append("EXTRACT(YEAR FROM COALESCE(a.data_documento, v.data::date)) = %s"); par.append(anno)
+        if mese:
+            cond.append("EXTRACT(MONTH FROM COALESCE(a.data_documento, v.data::date)) = %s"); par.append(mese)
+        if tipo:
+            cond.append("a.tipo = %s"); par.append(tipo[:20])
+        if stato:
+            cond.append("a.stato = %s"); par.append(stato[:20])
+        righe = conn.execute(_SEL_AMM + " WHERE " + " AND ".join(cond) + " ORDER BY COALESCE(a.data_documento, v.data::date) DESC NULLS LAST, a.id DESC LIMIT 500", par).fetchall()
+        tot = {}
+        for r in righe:
+            if r["importo"] is not None and r["tipo"] != "nota_credito":
+                k = f"{r['direzione']}_{r['stato']}"
+                tot[k] = round(tot.get(k, 0) + float(r["importo"]), 2)
+        scadono = conn.execute(_SEL_AMM + """ WHERE a.stato IN ('da_pagare','da_incassare') AND a.scadenza IS NOT NULL AND a.scadenza <= CURRENT_DATE + 14
+                                               ORDER BY a.scadenza LIMIT 20""").fetchall()
+        anni = [int(r["a"]) for r in conn.execute("""SELECT DISTINCT EXTRACT(YEAR FROM COALESCE(a.data_documento, v.data::date)) AS a FROM posta_amministrazione a
+                                                     JOIN posta_vaglio v ON v.id = a.vaglio_id WHERE COALESCE(a.data_documento, v.data::date) IS NOT NULL ORDER BY 1 DESC""").fetchall()]
+        return {"documenti": [_amm(r) for r in righe], "totali": tot, "scadono": [_amm(r) for r in scadono], "anni": anni,
+                "drive": bool(posta_vaglio._imp(conn, "drive_account_id", ""))}
+
+
+class ModificaDocumento(BaseModel):
+    tipo: str | None = Field(default=None, pattern="^(fattura|ricevuta|avviso_pagamento|sollecito|nota_credito|altro)$")
+    direzione: str | None = Field(default=None, pattern="^(uscita|entrata)$")
+    controparte: str | None = Field(default=None, max_length=200)
+    descrizione: str | None = Field(default=None, max_length=300)
+    importo: float | None = Field(default=None, ge=-1e9, le=1e9)
+    data_documento: date | None = None
+    scadenza: date | None = None
+    numero: str | None = Field(default=None, max_length=60)
+    stato: str | None = Field(default=None, pattern="^(da_verificare|da_pagare|pagato|da_incassare|incassato)$")
+    attivita: str | None = Field(default=None, max_length=80)
+    verificato: bool | None = None
+
+
+@router.put("/amministrazione/{aid}")
+def modifica_documento(aid: int, d: ModificaDocumento, _: dict = Depends(solo_titolare)):
+    campi = d.model_dump(exclude_unset=True)
+    if not campi:
+        return {"ok": True}
+    with connessione() as conn:
+        sets = ", ".join(f"{k}=%s" for k in campi) + ", aggiornato_il=NOW()"
+        if not conn.execute(f"UPDATE posta_amministrazione SET {sets} WHERE id=%s RETURNING id", [*campi.values(), aid]).fetchone():
+            raise HTTPException(404, "Documento non trovato")
+    return {"ok": True}
+
+
+@router.delete("/amministrazione/{aid}")
+def non_e_un_documento(aid: int, _: dict = Depends(solo_titolare)):
+    """«Non è un documento»: esce dall'elenco (i file gia' messi su Drive restano: li togli tu se vuoi)."""
+    with connessione() as conn:
+        if not conn.execute("DELETE FROM posta_amministrazione WHERE id=%s RETURNING id", (aid,)).fetchone():
+            raise HTTPException(404, "Documento non trovato")
+    return {"ok": True}
+
+
+@router.post("/amministrazione/{aid}/archivia")
+def riprova_drive(aid: int, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        esito = posta_vaglio.archivia_documento(conn, aid)
+        if not esito:
+            raise HTTPException(404, "Documento non trovato")
+        r = conn.execute(_SEL_AMM + " WHERE a.id=%s", (aid,)).fetchone()
+        return _amm(r)
+
+
+@router.get("/amministrazione.csv")
+def esporta_csv(anno: int | None = None, _: dict = Depends(solo_titolare)):
+    """L'elenco per la contabilita' (si apre con Excel): una riga per documento, importi con la virgola."""
+    import csv
+    import io
+    from fastapi.responses import Response
+    with connessione() as conn:
+        righe = conn.execute(_SEL_AMM + (" WHERE EXTRACT(YEAR FROM COALESCE(a.data_documento, v.data::date)) = %s" if anno else "")
+                             + " ORDER BY COALESCE(a.data_documento, v.data::date), a.id", ([anno] if anno else [])).fetchall()
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["Data", "Tipo", "Entrata/Uscita", "Controparte", "Descrizione", "Numero", "Importo", "Valuta", "Scadenza", "Stato", "Attivita'", "Verificato",
+                "File su Drive", "Da scaricare dal sito", "Casella", "Oggetto email"])
+    for r in righe:
+        w.writerow([r["data_documento"] or (r["data"].date() if r["data"] else ""), r["tipo"].replace("_", " "), r["direzione"], r["controparte"], r["descrizione"], r["numero"],
+                    f"{float(r['importo']):.2f}".replace(".", ",") if r["importo"] is not None else "", r["valuta"], r["scadenza"] or "", r["stato"].replace("_", " "),
+                    r["attivita"], "si" if r["verificato"] else "no", " | ".join(f.get("link", "") for f in (r["file_drive"] or [])), r["link_sito"], r["casella"], r["oggetto"]])
+    return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="opifex-amministrazione{"-" + str(anno) if anno else ""}.csv"'})

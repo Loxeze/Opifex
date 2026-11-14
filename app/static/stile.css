@@ -500,3 +500,8 @@ button.voto.scelto{background:var(--primario);color:#fff;border-color:var(--prim
 .posta-compito .azioni{position:sticky;bottom:0;background:var(--carta, #fffdf8);padding:10px 0;z-index:2}
 /* sul telefono la barra del menu in basso e' fissa: i pulsanti del modulo restano appena sopra */
 @media (max-width:820px){.posta-compito .azioni{bottom:calc(76px + env(safe-area-inset-bottom, 0px))}.posta-compito{margin-bottom:110px}}
+.posta-cifre{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0}
+.posta-cifre strong{font-size:20px}
+.posta-voce.doc{cursor:default}.posta-voce.doc.entrata{border-left:4px solid var(--ok, #1f6b44)}
+.doc-importo{font-variant-numeric:tabular-nums;white-space:nowrap}
+a.etichetta{text-decoration:none}

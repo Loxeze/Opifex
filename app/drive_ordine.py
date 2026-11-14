@@ -1,16 +1,24 @@
-"""Ordine della cartella «Opifex» su Drive. La regola:
-  Opifex/Agenti/<nome dell'agente>      le cartelle personali degli agenti
-  Opifex/Progetti/<nome del progetto>   le cartelle dei progetti (con dentro agent/ e repository/)
-  Opifex/Sistema/<...>                  cio' che scrive il sistema da solo (backup cifrati, backup dei siti)
+"""Ordine della cartella «Opifex» su Drive (nella 3.0: «Opifex/Opifex 3»). La regola:
+  Controllo di gestione/Passive/<anno>/<mm - Mese>   fatture e ricevute che Lorenzo paga (arrivate per posta)
+  Controllo di gestione/Attive/<anno>/<mm - Mese>    fatture e incassi a favore di Lorenzo
+  Imprese/<nome dell'impresa>                        una cartella per ogni attivita' (Logos, Renovatio...)
+  Progetti/<nome del progetto>                       le cartelle dei progetti (con dentro agent/ e repository/)
+  Agenti/<nome dell'agente>                          la cartella personale di ogni agente: memoria e documenti che produce
+  Agenti/Tavoli/<data - titolo>                      verbali e documenti dei tavoli di lavoro (fonti condivise)
+  Agenti/Riunioni/<data - titolo>                    verbali e documenti delle riunioni
+  Sistema/<...>                                      cio' che scrive il sistema da solo (backup cifrati, backup dei siti)
 Nella radice non nasce piu' niente. Lo spostamento lo fa il sistema, non un agente: riconosce le cartelle dall'identificativo salvato in Opifex,
 quindi non sbaglia per nomi simili; cio' che non riconosce resta dov'e' e viene segnalato. Spostare non cambia l'identificativo: nessun collegamento si rompe."""
 import json
+import re
 
 from . import google
 from .google import ErroreGoogle, _DRIVE, _q
 
 CARTELLA = "application/vnd.google-apps.folder"
-CONTENITORI = {"agenti": "Agenti", "progetti": "Progetti", "sistema": "Sistema"}
+CONTENITORI = {"gestione": "Controllo di gestione", "imprese": "Imprese", "progetti": "Progetti", "agenti": "Agenti", "sistema": "Sistema"}
+CONDIVISE = ("Tavoli", "Riunioni")              # dentro Agenti: le fonti condivise fra gli agenti
+GESTIONE = {"uscita": "Passive", "entrata": "Attive"}
 DI_SISTEMA = ("Backup", "Maestro di chiavi - backup siti")
 
 
@@ -93,6 +101,58 @@ def _adotta_contenitori(conn, tok: str, radice: str) -> None:
                 break
 
 
+def percorso(conn, tok: str, radice: str, quale: str, *nomi: str) -> str:
+    """Id di <contenitore>/<nome>/<nome>/... (crea cio' che manca, mai doppioni)."""
+    cid = contenitore(conn, tok, radice, quale)
+    for n in nomi:
+        cid = google.cartella(tok, n, cid)
+    return cid
+
+
+def _pulito(nome: str) -> str:
+    return re.sub(r"[\\/:*?\"<>|]+", " ", nome or "").strip()[:90] or "senza titolo"
+
+
+def struttura(conn, tok: str | None = None) -> dict:
+    """Prepara l'ossatura: i contenitori, Passive e Attive, Agenti/Tavoli e Agenti/Riunioni, una cartella per ogni impresa.
+    Restituisce cosa c'e'. Senza Drive collegato non fa nulla."""
+    account = int(google._leggi(conn, "drive_account_id") or 0)
+    if not account:
+        return {"drive": False}
+    tok = tok or google.token_accesso(conn, account)
+    radice = google.radice_valida(conn, tok)
+    for q in CONTENITORI:
+        contenitore(conn, tok, radice, q)
+    for v in GESTIONE.values():
+        percorso(conn, tok, radice, "gestione", v)
+    for c in CONDIVISE:
+        percorso(conn, tok, radice, "agenti", c)
+    imprese = [r["nome"] for r in conn.execute("SELECT nome FROM aziende ORDER BY id").fetchall()]
+    for nome in imprese:
+        percorso(conn, tok, radice, "imprese", _pulito(nome))
+    return {"drive": True, "imprese": imprese}
+
+
+def salva_testo(conn, quale: str, cartelle: list[str], nome: str, testo: str) -> str | None:
+    """Salva un testo (un verbale) come documento Google in <contenitore>/<cartelle...>. Restituisce il link, oppure None se Drive non c'e'.
+    Non fa fallire chi lo chiama: un verbale resta comunque in Opifex."""
+    try:
+        account = int(google._leggi(conn, "drive_account_id") or 0)
+        if not account:
+            return None
+        tok = google.token_accesso(conn, account)
+        dove = percorso(conn, tok, google.radice_valida(conn, tok), quale, *[_pulito(c) for c in cartelle])
+        limite = "opifex-testo-3a9"
+        meta = json.dumps({"name": _pulito(nome), "parents": [dove], "mimeType": "application/vnd.google-apps.document"})
+        corpo = (f"--{limite}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n--{limite}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n").encode() \
+            + (testo or "").encode() + f"\r\n--{limite}--".encode()
+        f = google._http("POST", "https://www.googleapis.com/upload/drive/v3/files", params={"uploadType": "multipart", "fields": "id,webViewLink"},
+                         headers={"Authorization": "Bearer " + tok, "Content-Type": f"multipart/related; boundary={limite}"}, content=corpo)
+        return f.get("webViewLink") or ""
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def cartella_ordinata(conn, tok: str, radice: str, quale: str, nome: str, esistente: str | None = None) -> str:
     """Come google.cartella, ma dentro il contenitore giusto. Una cartella senza identificativo salvato, nata nella radice prima della regola,
     viene ritrovata per nome e portata al suo posto (cosi' non nasce un doppione)."""
@@ -126,7 +186,7 @@ def riordina(conn, esegui: bool) -> dict:
         ids = {q: contenitore(conn, tok, radice, q) for q in CONTENITORI}
     else:
         ids = {q: (google._leggi(conn, "drive_contenitore_" + q) or None) for q in CONTENITORI}
-    piano = {"agenti": [], "progetti": [], "sistema": [], "da_chiarire": [], "spostati": 0, "errori": []}
+    piano = {"agenti": [], "progetti": [], "sistema": [], "imprese": [], "gestione": [], "da_chiarire": [], "spostati": 0, "errori": []}
     for f in _figli(tok, radice):
         if f["id"] in ids.values() or (f["mimeType"] == CARTELLA and f["name"] in CONTENITORI.values()):
             continue
@@ -147,14 +207,20 @@ def riordina(conn, esegui: bool) -> dict:
 
 def da_fare(conn) -> bool:
     import datetime
-    return bool(int(google._leggi(conn, "drive_account_id") or 0)) and google._leggi(conn, "drive_ordine_attivo") == "true" \
-        and google._leggi(conn, "drive_ordine_ultimo") != datetime.date.today().isoformat()
+    from . import edizione
+    attivo = google._leggi(conn, "drive_ordine_attivo")
+    attivo = attivo == "true" or (not attivo and edizione.tre())   # nella 3.0 il Drive nasce ordinato: la regola e' accesa di serie
+    return bool(int(google._leggi(conn, "drive_account_id") or 0)) and attivo and google._leggi(conn, "drive_ordine_ultimo") != datetime.date.today().isoformat()
 
 
 def giro(conn) -> None:
     """Una volta al giorno, se la regola e' attiva: rimette a posto cio' che e' finito nella radice e avvisa (una volta sola per elenco) di cio' che non riconosce."""
     import datetime
     google._scrivi(conn, "drive_ordine_ultimo", datetime.date.today().isoformat())
+    try:
+        struttura(conn)
+    except Exception:  # noqa: BLE001 - l'ossatura si riprova domani; il riordino va avanti
+        pass
     p = riordina(conn, True)
     nomi = sorted(x["nome"] for x in p["da_chiarire"])
     firma = json.dumps(nomi, ensure_ascii=False)
@@ -162,4 +228,4 @@ def giro(conn) -> None:
         google._scrivi(conn, "drive_ordine_segnalati", firma)
         conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
                      ("Drive, cartella Opifex: nella radice ci sono elementi che non so a chi appartengono e che ho lasciato dove sono: " + ", ".join(nomi[:12])
-                      + (" e altri" if len(nomi) > 12 else "") + ". Spostali tu in Agenti, Progetti o Sistema, oppure dimmi dove vanno.",))
+                      + (" e altri" if len(nomi) > 12 else "") + ". Spostali tu in Controllo di gestione, Imprese, Progetti, Agenti o Sistema, oppure dimmi dove vanno.",))

@@ -202,6 +202,13 @@ def elabora(conn, riunione_id: int, agente_id: int) -> int:
             continue
     conn.execute("UPDATE riunioni_importate SET stato = 'elaborata', riassunto = %s, errore = NULL WHERE id = %s",
                  (str(dati.get("riassunto") or "")[:1000] or None, riunione_id))
+    conn.commit()
+    from . import drive_ordine   # il verbale anche su Drive: Agenti/Riunioni/<data - titolo>
+    quando = r.get("data_email") or datetime.now()
+    link = drive_ordine.salva_testo(conn, "agenti", ["Riunioni", f"{quando:%Y-%m-%d} - {r['titolo']}"], f"Verbale - {r['titolo']}",
+                                    f"{r['titolo']}\n\nRiassunto:\n{dati.get('riassunto') or ''}\n\nTesto:\n{r['testo']}")
+    if link is not None:
+        conn.execute("UPDATE riunioni_importate SET drive_link = %s WHERE id = %s", (link, riunione_id))
     if n:
         conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"Riunione «{r['titolo'][:60]}»: {n} task proposti da approvare.",))
     conn.commit()

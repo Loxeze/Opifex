@@ -198,6 +198,7 @@ function _pannelloDaLeggere() {
           x.urgenza ? h("span", { class: "etichetta urg" + x.urgenza }, _URGENZA[x.urgenza]) : null,
           x.motivo ? h("span", { class: "sotto" }, x.motivo) : null,
           x.imparata ? h("span", { class: "etichetta imparata" }, "✦ " + x.imparata) : null,
+          x.documento ? h("span", { class: "etichetta doc" }, "💶 " + (_TIPI_DOC[x.documento] || "documento") + (x.documento_importo !== null && x.documento_importo !== undefined ? " " + _euro(x.documento_importo) : "") + (x.documento_sito ? " · 🔗 dal sito" : "")) : null,
           x.situazione ? h("button", { class: "collegamento", type: "button", onclick: (ev) => { ev.stopPropagation(); _apriConversazione(x.situazione_id); } }, "↳ " + x.situazione) : null),
         h("div", { class: "posta-etichette", onclick: (ev) => ev.stopPropagation() },
           _pulsantiInteresse({ ...x, vaglio_id: x.id }, (v) => { if (v === false) setTimeout(() => contenitore.parentNode && contenitore.parentNode.remove(), 400); }),
@@ -317,8 +318,96 @@ function _pannelloFiltro() {
   return box;
 }
 
+
+// Fatture e pagamenti: i documenti amministrativi trovati nella posta (base per il controllo di gestione)
+const _TIPI_DOC = { fattura: "Fattura", ricevuta: "Ricevuta", avviso_pagamento: "Avviso di pagamento", sollecito: "Sollecito", nota_credito: "Nota di credito", altro: "Altro" };
+const _STATI_DOC = { da_verificare: "da verificare", da_pagare: "da pagare", pagato: "pagato", da_incassare: "da incassare", incassato: "incassato" };
+function _euro(v, valuta) { return v === null || v === undefined ? "—" : Number(v).toLocaleString("it-IT", { style: "currency", currency: valuta || "EUR" }); }
+function _giorno(iso) { return iso ? new Date(iso + (iso.length === 10 ? "T12:00:00" : "")).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" }) : "—"; }
+
+function _pannelloPagamenti() {
+  const box = h("div"); const oggi = new Date();
+  let anno = oggi.getFullYear(), mese = 0, tipo = "", statoF = "";
+  const carica = async () => {
+    let d; try { d = await api("GET", "/gestione/posta-in/amministrazione?anno=" + anno + (mese ? "&mese=" + mese : "") + (tipo ? "&tipo=" + tipo : "") + (statoF ? "&stato=" + statoF : "")); }
+    catch (e) { riempi(box, avviso(e.message, "no")); return; }
+    const sel = (opz, val, cambia, stile) => h("select", { style: stile || "width:auto", onchange: (ev) => { cambia(ev.target.value); carica(); } }, opz.map(([v, t]) => h("option", { value: v, selected: String(v) === String(val) }, t)));
+    const anni = [...new Set([oggi.getFullYear(), ...d.anni])].sort((a, b) => b - a);
+    const filtri = h("div", { class: "azioni", style: "align-items:center" },
+      sel(anni.map(a => [a, String(a)]), anno, v => { anno = Number(v); }),
+      sel([[0, "tutto l'anno"], ...MESI_IT.map((m, i) => [i + 1, m])], mese, v => { mese = Number(v); }),
+      sel([["", "tutti i tipi"], ...Object.entries(_TIPI_DOC)], tipo, v => { tipo = v; }),
+      sel([["", "tutti gli stati"], ...Object.entries(_STATI_DOC)], statoF, v => { statoF = v; }),
+      h("button", { class: "s", type: "button", onclick: async () => {
+        try { const r = await fetch("/gestione/posta-in/amministrazione.csv?anno=" + anno, { headers: { Authorization: "Bearer " + token } });
+          if (!r.ok) throw new Error("Esportazione non riuscita (" + r.status + ")");
+          const l = h("a", { href: URL.createObjectURL(await r.blob()), download: "opifex-fatture-" + anno + ".csv" }); document.body.append(l); l.click(); l.remove(); }
+        catch (e) { box.prepend(avviso(e.message, "no")); } } }, "Scarica l'elenco (Excel)"));
+    const t = d.totali;
+    const somma = (...k) => k.reduce((a, x) => a + (t[x] || 0), 0);
+    const cifre = h("div", { class: "posta-cifre" },
+      h("div", { class: "carta" }, h("div", { class: "sotto" }, "Uscite pagate"), h("strong", {}, _euro(somma("uscita_pagato")))),
+      h("div", { class: "carta" }, h("div", { class: "sotto" }, "Da pagare"), h("strong", {}, _euro(somma("uscita_da_pagare")))),
+      h("div", { class: "carta" }, h("div", { class: "sotto" }, "Entrate incassate"), h("strong", {}, _euro(somma("entrata_incassato")))),
+      h("div", { class: "carta" }, h("div", { class: "sotto" }, "Da incassare"), h("strong", {}, _euro(somma("entrata_da_incassare")))));
+    const riga = (x) => {
+      const statoSel = h("select", { style: "width:auto", onchange: async (ev) => { await api("PUT", "/gestione/posta-in/amministrazione/" + x.id, { stato: ev.target.value }); carica(); } },
+        Object.entries(_STATI_DOC).map(([v, t_]) => h("option", { value: v, selected: v === x.stato }, t_)));
+      const file = (x.file_drive || []).map(f => h("a", { href: f.link, target: "_blank", rel: "noopener", class: "etichetta si", title: f.nome }, "📎 su Drive"));
+      const segni = [
+        ...file,
+        x.da_sito ? h("a", { href: x.link_sito, target: "_blank", rel: "noopener noreferrer", class: "etichetta urg2", title: "La ricevuta non è allegata: va scaricata dal sito (" + (x.link_sito.split("/")[2] || "") + ")" }, "🔗 da scaricare dal sito") : null,
+        x.drive_stato === "nessun_allegato" ? h("span", { class: "etichetta", title: "Nessun allegato e nessun link: guarda l'email" }, "nessun allegato") : null,
+        x.drive_stato === "drive_non_collegato" ? h("span", { class: "etichetta urg2" }, "Drive non collegato") : null,
+        x.drive_stato.startsWith("errore") ? h("button", { class: "etichetta urg3", type: "button", title: x.drive_stato, onclick: async () => { await api("POST", "/gestione/posta-in/amministrazione/" + x.id + "/archivia"); carica(); } }, "⚠ Drive: riprova") : null,
+        x.verificato ? h("span", { class: "etichetta si" }, "✓ verificato") : null];
+      const scheda = h("div", { class: "posta-voce doc" + (x.direzione === "entrata" ? " entrata" : "") },
+        h("div", { class: "posta-testa" }, h("strong", {}, x.controparte || "?"), h("strong", { class: "doc-importo" }, (x.direzione === "entrata" ? "+ " : "") + _euro(x.importo, x.valuta))),
+        h("div", { class: "posta-etichette" }, h("span", { class: "etichetta" }, _TIPI_DOC[x.tipo] || x.tipo), h("span", { class: "sotto" }, _giorno(x.data_documento) + (x.numero ? " · n. " + x.numero : "")),
+          x.scadenza ? h("span", { class: "sotto" }, "scadenza " + _giorno(x.scadenza)) : null),
+        x.descrizione ? h("div", {}, x.descrizione) : null,
+        h("div", { class: "posta-etichette" }, ...segni),
+        h("div", { class: "azioni", style: "align-items:center" }, statoSel,
+          h("button", { class: "s piccolo", type: "button", onclick: () => _apriEmail(x.origine + "-" + x.casella_id, x.msg_id, scheda, x) }, "Apri l'email"),
+          h("button", { class: "s piccolo", type: "button", onclick: () => modifica(x, scheda) }, "Correggi"),
+          x.verificato ? null : h("button", { class: "s piccolo", type: "button", onclick: async () => { await api("PUT", "/gestione/posta-in/amministrazione/" + x.id, { verificato: true }); carica(); } }, "✓ Dati giusti"),
+          h("button", { class: "collegamento", type: "button", onclick: async () => { await api("DELETE", "/gestione/posta-in/amministrazione/" + x.id); carica(); } }, "non è un documento")));
+      return scheda;
+    };
+    const modifica = (x, dove) => {
+      if (dove._modifica) { dove._modifica.remove(); dove._modifica = null; return; }
+      const c = {};
+      const campo = (k, etichetta, attr) => { c[k] = h("input", { value: x[k] ?? "", ...attr }); return h("label", {}, etichetta, c[k]); };
+      c.tipo = h("select", {}, Object.entries(_TIPI_DOC).map(([v, t_]) => h("option", { value: v, selected: v === x.tipo }, t_)));
+      c.direzione = h("select", {}, [["uscita", "Pago io (passiva)"], ["entrata", "Incasso io (attiva)"]].map(([v, t_]) => h("option", { value: v, selected: v === x.direzione }, t_)));
+      const f = h("div", { class: "carta posta-compito" }, h("h3", {}, "Correggi i dati"),
+        h("div", { class: "posta-campi" }, h("label", {}, "Tipo", c.tipo), h("label", {}, "Direzione", c.direzione), campo("controparte", "Controparte"), campo("importo", "Importo", { type: "number", step: "0.01" }),
+          campo("data_documento", "Data", { type: "date" }), campo("scadenza", "Scadenza", { type: "date" }), campo("numero", "Numero"), campo("attivita", "Attività (Logos, Renovatio…)")),
+        campo("descrizione", "Descrizione"),
+        h("div", { class: "azioni" }, h("button", { class: "p", type: "button", onclick: async () => {
+          const v = (k) => c[k].value.trim();
+          try { await api("PUT", "/gestione/posta-in/amministrazione/" + x.id, { tipo: v("tipo"), direzione: v("direzione"), controparte: v("controparte"), descrizione: v("descrizione"),
+              importo: v("importo") === "" ? null : Number(v("importo")), data_documento: v("data_documento") || null, scadenza: v("scadenza") || null, numero: v("numero"), attivita: v("attivita"), verificato: true });
+            carica(); } catch (e) { f.append(avviso(e.message, "no")); } } }, "Salva"),
+          h("button", { class: "s", type: "button", onclick: () => { f.remove(); dove._modifica = null; } }, "Annulla")));
+      dove._modifica = f; dove.after(f);
+    };
+    riempi(box, [
+      h("p", { class: "sotto" }, "Fatture, ricevute e avvisi di pagamento trovati nella posta dal modello locale. Gli allegati finiscono su Drive in Controllo di gestione → Passive (o Attive) → anno → mese; "
+        + "quando la ricevuta va presa da un sito compare 🔗." + (d.drive ? "" : " Drive non è collegato: i file restano nelle email finché non lo colleghi.")),
+      filtri,
+      d.scadono.length ? h("div", { class: "carta" }, h("h3", {}, "In scadenza nei prossimi 14 giorni"),
+        d.scadono.map(x => h("div", { class: "posta-imparato-riga" }, h("strong", {}, _giorno(x.scadenza)), h("span", {}, x.controparte), h("span", {}, _euro(x.importo, x.valuta)), h("span", { class: "sotto" }, _STATI_DOC[x.stato])))) : null,
+      cifre,
+      d.documenti.length ? d.documenti.map(riga) : h("p", { class: "sotto" }, "Nessun documento in questo periodo. Il filtro li cerca nella posta nuova; per quella passata usa «Analizza» nella scheda Il punto.")]);
+  };
+  carica();
+  return box;
+}
+const MESI_IT = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+
 function vistaPosta() {
-  const elenco = [["Il punto", _pannelloCosaFare()], ["Da leggere", _pannelloDaLeggere()], ["Conversazioni", _pannelloSituazioni()], ["Le caselle", _pannelloCaselle()],
+  const elenco = [["Il punto", _pannelloCosaFare()], ["Da leggere", _pannelloDaLeggere()], ["Conversazioni", _pannelloSituazioni()], ["Fatture e pagamenti", _pannelloPagamenti()], ["Le caselle", _pannelloCaselle()],
     ["Da approvare", [h("p", { class: "sotto" }, "Le email che gli agenti hanno preparato e aspettano il tuo via libera."), codaEmailUscita()]], ["Filtro", _pannelloFiltro()]];
   const s = schede(elenco, stato.postaScheda || 0);
   s.querySelectorAll(".scheda-tab").forEach((b, i) => b.addEventListener("click", () => { stato.postaScheda = i; }));

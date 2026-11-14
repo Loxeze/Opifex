@@ -58,6 +58,10 @@ def finto_richiesta(metodo, url, tok, **kw):
     gmail_modify.append((metodo, url, kw.get("json")))
     if permesso_gmail["manca"]:
         raise strumenti_gmail.ErroreGoogle("Gmail ha risposto 403: Request had insufficient authentication scopes.")
+    if url.endswith("/labels") and metodo == "POST":
+        return {"id": "Label_7", "name": (kw.get("json") or {}).get("name")}
+    if url.endswith("/labels"):
+        return {"labels": []}
     return {}
 permesso_gmail = {"manca": True}
 strumenti_gmail._richiesta = finto_richiesta
@@ -89,6 +93,18 @@ def finto_modello(fornitore, modello, istruzioni, messaggio, max_token=1500, web
                                         "prossimo_passo": "Dire ad Arianna se sollecitare il Comune", "tocca_a_lorenzo": True, "scadenza": None}), 1, 1)
         return Risposta("Ecco il JSON: " + json.dumps({"titolo": "Firma della convenzione", "riassunto": "Il Comune ha mandato la convenzione da firmare.",
                                                       "prossimo_passo": "Firmare e rimandare la convenzione", "tocca_a_lorenzo": True, "scadenza": "2026-11-14"}), 1, 1)
+    if "controllo di gestione" in istruzioni:
+        voci = []
+        for n, blocco in enumerate(messaggio.split("\n--- ")[1:], 1):
+            if "Aruba" in blocco:
+                voci.append({"n": n, "documento": True, "tipo": "fattura", "direzione": "uscita", "controparte": "Aruba S.p.A.", "descrizione": "Hosting castellodimontarrenti.it",
+                             "importo": "1.234,50", "valuta": "eur", "data_documento": "2026-11-05", "scadenza": "2026-11-30", "numero": "FT 2026/123"})
+            elif "Enel" in blocco:
+                voci.append({"n": n, "documento": True, "tipo": "avviso_pagamento", "direzione": "uscita", "controparte": "Enel Energia", "descrizione": "Bolletta luce",
+                             "importo": 87.4, "data_documento": "2026-11-10", "scadenza": "2026-12-01", "numero": None})
+            else:
+                voci.append({"n": n, "documento": False})
+        return Risposta(json.dumps(voci), 1, 1)
     if "proponi UN compito" in istruzioni:
         return Risposta(json.dumps({"titolo": "Mandare le foto della mostra a Giuseppe", "descrizione": "Girare le foto di Mario a Giuseppe per il montaggio.",
                                     "scadenza": "2026-11-20", "priorita": "alta", "per": "Giuseppe"}), 1, 1)
@@ -270,6 +286,79 @@ with TestClient(app) as c:
     # «Mi interessa» dalla scheda Le caselle, su un'email che il filtro non aveva visto
     r = c.post("/gestione/posta-in/interesse", headers=H, json={"chiave": f"imap-{iid}", "msg_id": "999", "da": "Nuovo Cliente <ciao@cliente.it>", "oggetto": "Preventivo", "interessa": True})
     ok("«Mi interessa» anche da Le caselle (email mai vista dal filtro)", r.status_code == 200 and sql("SELECT interessa, categoria FROM posta_vaglio WHERE msg_id='999'")[0] == (True, "importante"))
+    # ---- 2.57: fatture, ricevute, avvisi di pagamento → Controllo di gestione su Drive
+    from app import google as gg, drive_ordine as do
+    sql("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('drive_account_id', %s) ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore", (str(gid),))
+    percorsi, caricati, cartelle_create = [], [], []
+    do.percorso = lambda conn, tok, radice, quale, *nomi: (percorsi.append((quale,) + nomi), "cart-" + "/".join((quale,) + nomi))[1]
+    gg.token_accesso = lambda conn, a: "tok"
+    gg.radice_valida = lambda conn, tok: "radice"
+    def finto_http(metodo, url, **kw):
+        if metodo == "GET":
+            return {"files": []}
+        caricati.append((url, kw.get("params"), kw.get("content")))
+        return {"id": f"f{len(caricati)}", "webViewLink": f"https://drive.google.com/file/d/f{len(caricati)}"}
+    gg._http = finto_http
+    CONTENUTI = {"g9": ("<p>Fattura in allegato</p>", [("Fattura_123.pdf", "application/pdf", b"%PDF-1.4 fattura"), ("logo.png", "image/png", b"x" * 100)]),
+                 "15": ('<p>La tua bolletta</p><a href="https://www.enel.it/area-clienti/bollette?id=9&amp;t=1">Scarica la bolletta</a> <a href="https://enel.it/unsubscribe">Disiscriviti</a>', [])}
+    posta_vaglio._contenuto = lambda conn, o, cid, mid: CONTENUTI.get(mid, ("", []))
+    GMAIL.append({**em("g9", "Aruba <noreply@aruba.it>", "Emissione fattura n. FT 2026/123", 0.01, "Gentile cliente, in allegato la fattura per il rinnovo hosting.", "g:t9", massiva=True), "allegati": "Fattura_123.pdf, logo.png"})
+    IMAP.append(em("15", "Enel Energia <bollette@enel.it>", "La tua bolletta di novembre", 0.01, "E' disponibile la tua bolletta: importo 87,40 euro, scadenza 01/12/2026. Scaricala dall'area clienti.", "<e1@x>"))
+    IMAP.append(em("16", "Paola <paola@amici.it>", "Cena sabato", 0.01, "Ci vediamo sabato sera?", "<pa@x>"))
+    n = len(chiamate)
+    gmail_modify.clear()
+    r = vaglia(c, H)
+    amm_chiamate = [m for _, _, i, m in chiamate[n:] if "controllo di gestione" in i]
+    ok("le fatture si cercano anche fra gli invii automatici (la fattura di Aruba arriva da noreply)", any("Aruba" in m for m in amm_chiamate), r)
+    ok("il setaccio a parole tiene lontane dal modello le email normali (la cena con Paola)", amm_chiamate and not any("Cena sabato" in m for m in amm_chiamate))
+    docs = {x[0]: x[1:] for x in sql("SELECT v.msg_id, a.tipo, a.direzione, a.controparte, a.importo, a.valuta, a.data_documento, a.scadenza, a.numero, a.stato, a.drive_stato, a.da_sito, a.link_sito, a.file_drive FROM posta_amministrazione a JOIN posta_vaglio v ON v.id=a.vaglio_id")}
+    ok("riconosciute la fattura di Aruba e la bolletta Enel, non la cena", set(docs) == {"g9", "15"}, list(docs))
+    a_ = docs.get("g9", ())
+    ok("dati estratti dalla fattura: tipo, importo (anche scritto «1.234,50»), data, scadenza, numero, stato «da pagare»",
+       a_ and a_[0] == "fattura" and a_[1] == "uscita" and float(a_[3]) == 1234.5 and a_[4] == "EUR" and str(a_[5]) == "2026-11-05" and str(a_[6]) == "2026-11-30" and a_[7] == "FT 2026/123" and a_[8] == "da_pagare", a_)
+    ok("l'allegato PDF va su Drive in Controllo di gestione/Passive/2026/11 - Novembre (il logo no)", a_ and a_[9] == "salvato" and ("gestione", "Passive", "2026", "11 - Novembre") in percorsi
+       and len(a_[12]) == 1 and a_[12][0]["nome"] == "2026-11-05 - Aruba S.p.A. - fattura - FT 2026-123.pdf" and a_[12][0]["link"].startswith("https://drive.google.com"), (a_, percorsi))
+    ok("caricato davvero il contenuto del PDF, nella cartella del mese", caricati and b"%PDF-1.4 fattura" in caricati[0][2] and b'"parents": ["cart-gestione/Passive/2026/11 - Novembre"]' in caricati[0][2])
+    e_ = docs.get("15", ())
+    ok("bolletta senza allegato: segnata «da scaricare dal sito» con il link giusto (non quello per disiscriversi)",
+       e_ and e_[9] == "sito" and e_[10] is True and e_[11] == "https://www.enel.it/area-clienti/bollette?id=9&t=1", e_)
+    ok("in Gmail la fattura riceve l'etichetta «Opifex/Amministrazione» (con il permesso)", any(u.endswith("/labels") and m == "POST" for m, u, _ in gmail_modify)
+       and any(u.endswith("/messages/g9/modify") and (j or {}).get("addLabelIds") for m, u, j in gmail_modify), gmail_modify)
+    d = c.get("/gestione/posta-in/amministrazione?anno=2026", headers=H).json()
+    ok("la scheda «Fatture e pagamenti»: documenti, totali da pagare, in scadenza", len(d["documenti"]) == 2 and d["totali"].get("uscita_da_pagare") == round(1234.5 + 87.4, 2)
+       and {x["controparte"] for x in d["scadono"]} >= set() and d["drive"] is True, d["totali"])
+    ok("filtro per mese e per tipo", len(c.get("/gestione/posta-in/amministrazione?anno=2026&mese=11&tipo=fattura", headers=H).json()["documenti"]) == 1)
+    aid = next(x["id"] for x in d["documenti"] if x["tipo"] == "fattura")
+    ok("correggere i dati e segnarli giusti", c.put(f"/gestione/posta-in/amministrazione/{aid}", headers=H, json={"stato": "pagato", "attivita": "Renovatio", "importo": 1234.56, "verificato": True}).status_code == 200
+       and sql("SELECT stato, attivita, importo, verificato FROM posta_amministrazione WHERE id=%s", (aid,))[0] == ("pagato", "Renovatio", __import__("decimal").Decimal("1234.56"), True))
+    ok("valori inventati rifiutati", c.put(f"/gestione/posta-in/amministrazione/{aid}", headers=H, json={"stato": "boh"}).status_code == 422)
+    csv_ = c.get("/gestione/posta-in/amministrazione.csv?anno=2026", headers=H)
+    ok("elenco per la contabilita' (CSV per Excel, importi con la virgola, link a Drive e al sito)", csv_.status_code == 200 and "1234,56" in csv_.text and "Aruba S.p.A." in csv_.text
+       and "drive.google.com" in csv_.text and "area-clienti" in csv_.text and csv_.text.startswith("\ufeffData;Tipo"), csv_.text[:200])
+    d = c.get("/gestione/posta-in?tutte=1", headers=H).json()
+    ok("in «Da leggere» la bolletta porta il segno del documento", any(e["msg_id"] == "15" and e["documento"] == "avviso_pagamento" and e["documento_sito"] for e in d["email"]), [(e["msg_id"], e.get("documento")) for e in d["email"]])
+    eid = next(x["id"] for x in c.get("/gestione/posta-in/amministrazione", headers=H).json()["documenti"] if x["tipo"] == "avviso_pagamento")
+    ok("«non è un documento» lo toglie dall'elenco", c.delete(f"/gestione/posta-in/amministrazione/{eid}", headers=H).status_code == 200 and len(c.get("/gestione/posta-in/amministrazione", headers=H).json()["documenti"]) == 1)
+    # ossatura del Drive e verbali
+    creati = []
+    gg.cartella = lambda tok, nome, genitore, esistente=None: (creati.append((genitore, nome)), f"{genitore}/{nome}")[1]
+    do.percorso = do.__dict__["percorso"] if False else (lambda conn, tok, radice, quale, *nomi: "/".join(["radice", do.CONTENITORI[quale], *nomi]))
+    import importlib
+    importlib.reload(do)
+    do.google.cartella = gg.cartella
+    sql("INSERT INTO aziende (nome) VALUES ('Logos di Lorenzo Zeppa'), ('Associazione Renovatio')")
+    with psycopg.connect(DSN, autocommit=True, row_factory=psycopg.rows.dict_row) as k:
+        st = do.struttura(k, "tok")
+    nomi = {n for _, n in creati}
+    ok("Drive ordinato: Controllo di gestione (Passive, Attive), Imprese (una per impresa), Progetti, Agenti (con Tavoli e Riunioni), Sistema",
+       {"Controllo di gestione", "Imprese", "Progetti", "Agenti", "Sistema", "Passive", "Attive", "Tavoli", "Riunioni", "Logos di Lorenzo Zeppa", "Associazione Renovatio"} <= nomi
+       and any(g.endswith("/Controllo di gestione") and n == "Passive" for g, n in creati) and any(g.endswith("/Agenti") and n == "Riunioni" for g, n in creati)
+       and any(g.endswith("/Imprese") and n == "Logos di Lorenzo Zeppa" for g, n in creati), creati)
+    caricati.clear()
+    with psycopg.connect(DSN, autocommit=True, row_factory=psycopg.rows.dict_row) as k:
+        link = do.salva_testo(k, "agenti", ["Riunioni", "2026-11-14 - Convenzione: Castello"], "Verbale - Convenzione", "Decisioni: firmare entro venerdi'.")
+    ok("un verbale si salva come documento Google in Agenti/Riunioni/<data - titolo>", link and caricati and b"application/vnd.google-apps.document" in caricati[0][2]
+       and b"firmare entro venerdi'" in caricati[0][2] and any(n == "2026-11-14 - Convenzione  Castello" for _, n in creati), (link, creati[-3:]))
     # agenti: con «solo locale» un agente online non riceve la posta
     marco = sql("SELECT id FROM agenti WHERE attivo AND modello LIKE 'claude%%' ORDER BY id LIMIT 1")[0][0]
     sql("UPDATE agenti SET gmail_account_id=%s WHERE id=%s", (gid, marco))

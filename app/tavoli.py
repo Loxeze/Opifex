@@ -68,6 +68,13 @@ def verbale(tid: int):
     testo = esegui_agente(t["moderatore_id"], prompt, "interno", None, max_token=MAX_TOKEN_VERBALE)["risposta"]
     with connessione() as conn:
         conn.execute("UPDATE tavoli SET stato = 'conclusa', verbale = %s, concluso_il = NOW(), occupato = FALSE WHERE id = %s", (testo, tid))
+        conn.commit()
+        from . import drive_ordine   # anche su Drive, come fonte condivisa: Agenti/Riunioni o Agenti/Tavoli/<data - titolo>
+        cartella = f"{t['creato_il']:%Y-%m-%d} - {t['titolo']}"
+        link = drive_ordine.salva_testo(conn, "agenti", ["Riunioni" if t["tipo"] == "call" else "Tavoli", cartella], f"Verbale - {t['titolo']}",
+                                        f"{t['titolo']}\n\nOrdine del giorno:\n{t['ordine_del_giorno']}\n\n{testo}")
+        if link is not None:
+            conn.execute("UPDATE tavoli SET drive_link = %s WHERE id = %s", (link, tid))
         conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"{'Riunione' if t['tipo'] == 'call' else 'Tavolo'} «{t['titolo'][:80]}» conclusa: il verbale e' pronto.",))
 
 
