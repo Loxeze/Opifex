@@ -382,3 +382,23 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .mq-manuale{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:8px;margin-top:8px}
 .mq-manuale textarea{grid-column:1/-1}
 .mq-titolo h3{font-size:18px;text-transform:none;letter-spacing:0;color:var(--testo);font-weight:600}
+/* Il guardiano (2.62): il lavoro produce? */
+.gu-card{gap:10px;border-left:4px solid var(--ok,#1F6B52)!important}
+.gu-card.giallo{border-left-color:var(--avv,#B07A12)!important}
+.gu-card.rosso{border-left-color:var(--no,#9A3A1F)!important;background:var(--no-b,#F6E3DD)}
+.gu-sintesi{font-weight:600;font-size:13.5px}
+.gu-card.verde .gu-sintesi{color:var(--ok,#1F6B52)}.gu-card.giallo .gu-sintesi{color:var(--avv,#7A5200)}.gu-card.rosso .gu-sintesi{color:var(--no,#9A3A1F)}
+.gu-lista{display:flex;flex-direction:column;gap:6px}
+.gu-voce{all:unset;cursor:pointer;display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border-radius:10px;border:1px solid var(--bordo);background:var(--carta,#FBF9F4);min-width:0}
+.gu-voce:hover,.gu-voce:focus-visible{border-color:var(--testo)}
+.gu-testo{display:flex;flex-direction:column;gap:2px;min-width:0;font-size:13px;line-height:1.4}
+.gu-testo b{display:inline}
+.gu-cosa{color:var(--tenue);font-size:12px}
+.gu-msg{color:var(--testo)}
+.gu-fare{color:var(--tenue);font-size:12.5px}
+.gu-luce{flex:none;width:10px;height:10px;border-radius:50%;margin-top:4px;background:var(--ok,#1F6B52)}
+.gu-voce.fermo .gu-luce{background:var(--no,#9A3A1F);box-shadow:0 0 0 3px rgba(154,58,31,.18)}
+.gu-voce.attenzione .gu-luce{background:var(--avv,#B07A12)}
+.gu-ok{display:flex;flex-wrap:wrap;gap:6px}
+.gu-chip{all:unset;cursor:pointer;display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border-radius:999px;border:1px solid var(--bordo);font-size:12.5px;color:var(--tenue)}
+.gu-chip .gu-luce{margin-top:0;width:8px;height:8px}

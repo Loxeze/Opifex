@@ -131,6 +131,34 @@ function vistaOrganigrammaPagina() {
 
 
 const fa = (s) => s < 60 ? "da " + s + " s" : s < 3600 ? "da " + Math.floor(s / 60) + " min" : "da " + Math.floor(s / 3600) + " h " + Math.floor(s % 3600 / 60) + " min";
+// Il guardiano: il lavoro produce davvero? In cima alla Plancia, rosso se qualcosa e' fermo.
+const _vaiGu = (v) => { if (!v) return; const [a, b] = v.split(":"); vai(a, b); };
+function riquadroGuardiano() {
+  const el = h("article", { class: "bt-card gu-card" }, h("div", { class: "bt-cap" }, "Il lavoro produce?"), h("p", { class: "bt-sotto" }, "Controllo…"));
+  const ricarica = async () => {
+    if (inPausa(el)) return;
+    let d; try { d = await api("GET", "/gestione/guardiano"); } catch (e) { el.hidden = true; return; }
+    el.hidden = false;
+    const vecchio = !d.ultimo_giro || (Date.now() - new Date(d.ultimo_giro).getTime()) > 40 * 60 * 1000;
+    const problemi = d.esiti.filter(x => x.stato !== "va");
+    el.className = "bt-card gu-card " + (d.fermi || vecchio ? "rosso" : d.attenzione ? "giallo" : "verde");
+    const voce = (x) => h("button", { class: "gu-voce " + x.stato, type: "button", onclick: () => _vaiGu(x.vista), title: x.fare || x.messaggio },
+      h("span", { class: "gu-luce", "aria-hidden": "true" }),
+      h("span", { class: "gu-testo" }, h("span", {}, h("b", {}, x.chi), h("span", { class: "gu-cosa" }, " · " + x.cosa)),
+        h("span", { class: "gu-msg" }, (x.stato === "fermo" ? "Fermo" + (x.fermo_da ? " da " + x.fermo_da : "") + ": " : x.stato === "attenzione" ? "Attenzione: " : "") + x.messaggio),
+        x.fare && x.stato !== "va" ? h("span", { class: "gu-fare" }, "Cosa fare: " + x.fare) : null));
+    const ok = d.esiti.filter(x => x.stato === "va");
+    riempi(el, [
+      h("div", { class: "bt-testa" }, h("div", { class: "bt-cap" }, "Il lavoro produce?"),
+        h("span", { class: "gu-sintesi" }, vecchio ? "Il guardiano non gira da oltre 40 minuti" : d.fermi ? d.fermi + (d.fermi === 1 ? " lavoro fermo" : " lavori fermi") : d.attenzione ? d.attenzione + " da guardare" : "Tutto produce")),
+      vecchio ? h("p", { class: "gu-msg" }, "I lavori di fondo potrebbero essersi fermati: apri Impostazioni → Diagnostica e scarica il log.") : null,
+      problemi.length ? h("div", { class: "gu-lista" }, problemi.map(voce)) : null,
+      ok.length ? h("div", { class: "gu-ok" }, ok.map(x => h("button", { class: "gu-chip", type: "button", onclick: () => _vaiGu(x.vista), title: x.messaggio },
+        h("span", { class: "gu-luce", "aria-hidden": "true" }), x.chi))) : null]);
+  };
+  return { el, ricarica };
+}
+
 // «Al lavoro adesso»: cosa sta facendo ogni agente, passo per passo, come un «sto pensando» visibile. I secondi corrono anche fra un aggiornamento e l'altro.
 const _durata = (s) => s < 60 ? s + " s" : s < 3600 ? Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") + " min" : Math.floor(s / 3600) + " h " + Math.floor(s % 3600 / 60) + " min";
 const _faSec = (s) => s < 5 ? "adesso" : s < 60 ? s + " s fa" : Math.round(s / 60) + " min fa";
@@ -245,6 +273,7 @@ function vistaDashboard() {
         h("span", { class: "punto-col", style: "background:" + (p.colore || PB.ottone) }), h("b", {}, p.nome), h("span", { class: "bt-sotto" }, p.agenti.length + " agenti" + (p.drive_stato !== "ok" ? " · Drive: " + ({ da_sincronizzare: "da creare", errore: "errore" })[p.drive_stato] : "")))) : h("p", { class: "bt-sotto" }, "Nessun progetto."));
     } catch (e) { mostraErrore(boxPro, e, caricaProgetti, true); }
   };
+  const guardiano = riquadroGuardiano(); guardiano.ricarica();
   const lavoro = riquadroLavoro(); lavoro.ricarica();
   const marchiSoc = riquadroSocialPlancia(); marchiSoc.ricarica();
   const daFare = pannelloDaFare();
@@ -321,11 +350,11 @@ function vistaDashboard() {
   };
   carica(); caricaRichieste(); caricaIniziative(); caricaProgetti();
   const inVolo = {}, giro = (k, f) => { if (inVolo[k]) return; inVolo[k] = true; Promise.resolve(f()).finally(() => { inVolo[k] = false; }); };   // una richiesta alla volta per riquadro
-  stato.timer2 = setInterval(() => { if (document.hidden) return; attesa++; giro('l', lavoro.ricarica); giro('r', caricaRichieste); giro('i', caricaIniziative); if (attesa % 4 === 0) { giro('p', caricaProgetti); giro('d', daFare.ricarica); } if (attesa % 20 === 0) { giro('c', carica); giro("s", marchiSoc.ricarica); } }, 3000);
+  stato.timer2 = setInterval(() => { if (document.hidden) return; attesa++; giro('l', lavoro.ricarica); giro('r', caricaRichieste); giro('i', caricaIniziative); if (attesa % 4 === 0) { giro('p', caricaProgetti); giro('d', daFare.ricarica); } if (attesa % 20 === 0) { giro('c', carica); giro("s", marchiSoc.ricarica); giro("g", guardiano.ricarica); } }, 3000);
 
   return h("div", { class: "bt-plancia bt-fitta" },
     h("div", { class: "bt-intesta" }, h("div", {}, h("div", { class: "bt-cap" }, new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })), titolo),
       h("div", { class: "bt-azioni" }, h("button", { class: "s", onclick: apriOrganigramma }, "Organigramma 3D ↗"), bottoneAllinea(), h("button", { class: "s", onclick: () => vai("task") }, "Task"), h("button", { class: "p", onclick: () => vai("riunioni") }, "Avvia una riunione"))),
-    lavoro.el, marchiSoc.el, locale, kpi, riga1, riga2,
+    guardiano.el, lavoro.el, marchiSoc.el, locale, kpi, riga1, riga2,
     garanzie.length ? h("p", { class: "bt-nota" }, "Dati interni e riservati bloccati verso: " + garanzie.map(f => f.nome).join(", ") + ". ", h("a", { href: "#", onclick: (e) => { e.preventDefault(); vai("impostazioni", "sicurezza"); } }, "Dichiara le garanzie")) : null);
 }

@@ -30,6 +30,7 @@ from .giro_domande import router as router_giro
 from .formazione_auto import router as router_formauto
 from .rotte_scuola import router as router_scuola
 from .marchi import router as router_marchi
+from .guardiano import router as router_guardiano
 from .sfondo_arte import router as router_arte
 from .stili_montaggio import router as router_contenuti
 from .monitor_social import router as router_monsoc
@@ -183,6 +184,7 @@ async def _manutenzione():
             _passo("revisore qualita' e controllori", lambda c: qualita.applica(c))
         _passo("competenze di base degli agenti", lambda c: competenze_base.applica(c) if competenze_base.da_fare(c) else None)
         _passo("allarmi", allarmi.controlla)
+        _passo("guardiano del lavoro", lambda c: __import__("app.guardiano", fromlist=["x"]).giro(c))
         _passo("elenco agenti (Cerimoniere)", lambda c: cerimoniere.aggiorna_elenco(c) if cerimoniere.da_fare(c) else None)
         _passo("ronda di Aurora", aurora.ronda)
         _passo("sintesi memoria", lambda c: sintesi_memoria.genera(c) if sintesi_memoria.da_fare(c) else None)
@@ -394,6 +396,7 @@ app.include_router(router_giro)
 app.include_router(router_formauto)
 app.include_router(router_scuola)
 app.include_router(router_marchi)
+app.include_router(router_guardiano)
 app.include_router(router_arte)
 app.include_router(router_contenuti)
 app.include_router(router_monsoc)
