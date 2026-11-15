@@ -175,8 +175,47 @@ STRUMENTI = [
                                                        "motivo": {"type": "string"}, "canale": {"type": "string", "description": "facoltativo: link o nome del canale YouTube da studiare"}},
                       "required": ["tema"]}},
 ]
+STRUMENTI_CASATI = [
+    {"name": "stato_studio",
+     "description": "Il tuo motore di studio, adesso: cosa sta facendo, i canali in studio con i video elencati, studiati, saltati e gli errori, "
+                    "le proposte in attesa di Lorenzo. Usalo prima di rispondere su cosa stai studiando o se qualcosa non va.",
+     "input_schema": {"type": "object", "properties": {"canale": {"type": "string", "description": "facoltativo: solo questo canale"}}}},
+]
+
+
+def stato_studio(conn, canale: str = "") -> str:
+    q = (canale or "").strip().lstrip("@").lower()
+    righe = conn.execute("""SELECT t.*, c.nome AS competenza,
+                              (SELECT count(*) FROM competenze_fonti f WHERE f.target_id=t.id) AS elencati,
+                              (SELECT count(*) FROM competenze_fonti f WHERE f.target_id=t.id AND f.stato='integrata') AS studiati,
+                              (SELECT count(*) FROM competenze_fonti f WHERE f.target_id=t.id AND f.stato='saltata') AS saltati,
+                              (SELECT string_agg(DISTINCT left(f.errore, 120), ' | ') FROM competenze_fonti f WHERE f.target_id=t.id AND f.stato='saltata' AND f.errore <> '') AS errori_video
+                            FROM casati_target t JOIN competenze c ON c.id=t.competenza_id
+                            WHERE t.stato <> 'rifiutato' ORDER BY (t.stato='attivo') DESC, t.id""").fetchall()
+    if q:
+        righe = [r for r in righe if q in (r["nome"] or "").lower().replace(" ", "") or q in r["indirizzo"].lower()] or righe
+    adesso = STATO.get("fase") or STATO.get("pausa") or "nessun lavoro in corso"
+    out = [f"MOTORE DI STUDIO: {'acceso' if attiva(conn) else 'spento da Lorenzo'}. Adesso: {adesso}."]
+    for r in righe[:15]:
+        riga = (f"- {r['nome'] or r['indirizzo']} ({r['tipo']}, {r['stato']}) per «{r['competenza']}»: "
+                f"{r['elencati']} video elencati, {r['studiati']} studiati e nel manuale, {r['saltati']} saltati")
+        if r["ultimo_elenco"] is None and r["stato"] == "attivo":
+            riga += "; elenco dei video non ancora fatto (si fa al prossimo giro)"
+        if r["errore"]:
+            riga += f"; ERRORE nell'elencare i video: {r['errore']}"
+        if r["errori_video"]:
+            riga += f"; motivi dei video saltati: {r['errori_video']}"
+        out.append(riga)
+    if not righe:
+        out.append("Nessun canale in studio.")
+    if any(r["errore"] or r["errori_video"] for r in righe):
+        out.append("Se un errore parla di blocco, bot, «Sign in», 429 o RequestBlocked, e' YouTube che blocca le richieste dal server: "
+                   "dillo a Lorenzo cosi', senza chiedere chiavi API (serve passare dal suo PC, lo sistema Claude).")
+    return "\n".join(out)
+
+
 AVVISO = ("\nCOMPETENZE: prima di un compito che riguarda una tua competenza, aprila con apri_competenza e segui il manuale; se ti manca una competenza, chiedila con chiedi_competenza. "
-          "Canali YouTube da studiare: li passi a Padre Casati con chiedi_competenza (campo «canale»); li legge lui, senza chiavi API: non chiederle a Lorenzo.")
+          "Canali YouTube da studiare: li passi a Padre Casati con chiedi_competenza (campo «canale»); li legge lui, senza chiavi API: non chiederle mai a Lorenzo.")
 
 
 def usa(conn, agente_id: int, cid: int) -> str:
@@ -198,6 +237,8 @@ def gestore(connessione_, agente_id: int):
     def g(nome, dati):
         dati = dati or {}
         with connessione_() as conn:
+            if nome == "stato_studio":
+                return stato_studio(conn, str(dati.get("canale") or ""))
             if nome == "apri_competenza":
                 c = _per_nome(conn, str(dati.get("nome") or ""))
                 if not c:
@@ -786,17 +827,26 @@ def semina(conn):
 # ---------- Padre Casati come agente (per parlarci) ----------
 ISTR_CASATI = """Sei Padre Casati, il formatore della squadra di Lorenzo Zeppa. Studi canali YouTube e documenti e ne ricavi le competenze degli agenti:
 carta d'identita', manuale a sezioni e fonti. Interroghi gli agenti di notte e li fai salire di livello solo se superano l'esame e usano
-la competenza nel lavoro. Rispondi in modo diretto e concreto; per parlare di una competenza, aprila con apri_competenza."""
+la competenza nel lavoro. Rispondi in modo diretto e concreto; per parlare di una competenza, aprila con apri_competenza.
+
+IL TUO MOTORE DI STUDIO lavora da solo, in sottofondo, con il modello locale: elenca i video dei canali, scarica i sottotitoli,
+prende appunti e aggiorna i manuali. Non ti servono chiavi YouTube API, export del catalogo o altro da Lorenzo: NON chiederli mai.
+- Per sapere cosa stai studiando, a che punto sei e se ci sono errori: usa stato_studio, sempre, prima di rispondere.
+- Per mettere in studio un canale nuovo: chiedi_competenza con il campo «canale» (Lorenzo lo approva con un clic).
+- Se stato_studio mostra un errore, riferiscilo a Lorenzo con le parole dell'errore; non inventare cause e non chiedere chiavi."""
+_VECCHIE_CASATI = ("Sei Padre Casati, il formatore della squadra di Lorenzo Zeppa. Studi canali YouTube",)
 
 
 def assicura_agente(conn):
     """Nella 3.0 Padre Casati esiste sempre e lavora con il modello locale."""
     locale = conn.execute("SELECT 1 FROM modelli_ai WHERE nome='locale-auto'").fetchone()
     modello = "locale-auto" if locale else "claude-haiku-5-5"
-    r = conn.execute("SELECT id, modello FROM agenti WHERE ruolo_speciale='formatore' ORDER BY id LIMIT 1").fetchone()
+    r = conn.execute("SELECT id, modello, istruzioni FROM agenti WHERE ruolo_speciale='formatore' ORDER BY id LIMIT 1").fetchone()
     if r:
         if locale and r["modello"] != modello:
             conn.execute("UPDATE agenti SET modello=%s, istruzioni=%s WHERE id=%s", (modello, ISTR_CASATI, r["id"]))
+        elif (r["istruzioni"] or "").startswith(_VECCHIE_CASATI) and r["istruzioni"] != ISTR_CASATI:   # istruzioni nostre di una versione precedente
+            conn.execute("UPDATE agenti SET istruzioni=%s WHERE id=%s", (ISTR_CASATI, r["id"]))
         return r["id"]
     aurora = conn.execute("SELECT id FROM agenti WHERE nome='Aurora' ORDER BY id LIMIT 1").fetchone()
     return conn.execute("""INSERT INTO agenti (divisione_id, superiore_id, nome, ruolo, livello, tipo, modello, fascia_dati_max, ruolo_speciale,

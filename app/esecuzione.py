@@ -632,6 +632,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     avviso_extra += scuola.AVVISO
                     for s_ in scuola.STRUMENTI:
                         gestori[s_["name"]] = gsc
+                    if a["ruolo_speciale"] == "formatore":
+                        extra.extend(scuola.STRUMENTI_CASATI)
+                        for s_ in scuola.STRUMENTI_CASATI:
+                            gestori[s_["name"]] = gsc
                 if sq_pm or sq_val:
                     gsq = squadre.gestore(connessione, agente_id)
                     if sq_pm:
