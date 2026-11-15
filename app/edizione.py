@@ -70,6 +70,9 @@ def prepara(conn) -> bool:
         _scrivi(conn, "google_redirect", ind + "/gestione/google/callback")
     _scrivi(conn, "edizione3_preparata", "1")
     _scrivi(conn, "avvio_passi", "{}")
+    from . import scuola   # Padre Casati (modello locale) e i primi canali da studiare
+    scuola.assicura_agente(conn)
+    scuola.semina(conn)
     return True
 
 
@@ -78,7 +81,8 @@ CHIAVI_IA = ("chiave_anthropic_cifrata", "chiave_openai_cifrata", "chiave_xai_ci
 CHIAVI_GOOGLE = ("google_client_id", "google_client_secret_cifrato")
 CHIAVI_AGG = ("github_repo", "github_token", "aggiornamento_automatico")
 COSE = {"chiavi": "Chiavi API dei fornitori AI", "computer": "Computer locali (Ollama) e modelli locali", "garanzie": "Garanzie dei fornitori",
-        "google": "Collegamento Google (Gmail, Drive, Calendar)", "aggiornamenti": "Aggiornamenti automatici (da dove arrivano)"}
+        "google": "Collegamento Google (Gmail, Drive, Calendar)", "aggiornamenti": "Aggiornamenti automatici (da dove arrivano)",
+        "competenze": "Competenze e studi di Padre Casati"}
 
 
 def _sorgente():
@@ -106,12 +110,16 @@ def anteprima() -> dict:
             macchine = []
         gar = src.execute("SELECT nome, non_conservazione_attiva AS nc, dpa_firmato AS dpa, fascia_dati_max FROM fornitori_ai ORDER BY nome").fetchall()
         goo = src.execute("SELECT etichetta, email, servizi FROM account_google ORDER BY id").fetchall()
+        try:
+            n_comp = src.execute("SELECT count(*) AS n FROM competenze").fetchone()["n"]
+        except Exception:  # noqa: BLE001
+            src.rollback(); n_comp = 0
     return {"disponibile": True, "cose": COSE,
             "chiavi": [k.split("_")[1] for k in CHIAVI_IA[:3] if imp.get(k)],
             "computer": [{"nome": m.get("nome"), "modello": m.get("modello")} for m in macchine if isinstance(m, dict)],
             "garanzie": [{"nome": g["nome"], "complete": bool(g["nc"] and g["dpa"]), "fascia": g["fascia_dati_max"]} for g in gar],
             "google": [{"etichetta": g["etichetta"], "email": g["email"], "servizi": g["servizi"]} for g in goo],
-            "aggiornamenti": bool(imp.get("github_repo"))}
+            "aggiornamenti": bool(imp.get("github_repo")), "competenze": n_comp}
 
 
 def importa(conn, scelte: list[str]) -> dict:
@@ -159,6 +167,9 @@ def importa(conn, scelte: list[str]) -> dict:
                 conn.execute("UPDATE agenti SET gmail_account_id=%s WHERE nome IN ('Posta','Aurora') AND gmail_account_id IS NULL", (gm["id"],))
         if "aggiornamenti" in scelte:
             fatto["aggiornamenti"] = copia(CHIAVI_AGG)
+        if "competenze" in scelte:
+            from . import scuola
+            fatto["competenze"] = scuola.importa_dalla_2(conn, src)["competenze"]
     passi = stato_avvio(conn)
     passi["importato"] = sorted(set(passi.get("importato", [])) | set(fatto))
     _scrivi(conn, "avvio_passi", json.dumps(passi))

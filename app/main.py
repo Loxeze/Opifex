@@ -28,6 +28,7 @@ from .memoria_vettoriale import router as router_memvett
 from .documenti_blocco import router as router_blocco
 from .giro_domande import router as router_giro
 from .formazione_auto import router as router_formauto
+from .rotte_scuola import router as router_scuola
 from .sfondo_arte import router as router_arte
 from .stili_montaggio import router as router_contenuti
 from .monitor_social import router as router_monsoc
@@ -187,12 +188,14 @@ async def _manutenzione():
         _passo("posta PLAUD", plaud.controlla)
         _passo("prova ripristino", lambda c: prova_ripristino.prova(c) if prova_ripristino.da_fare(c) else None)
         _passo("studi", lambda c: studio.rileva_e_segna(c) if studio.da_fare(c) else None)
-        _passo("ginnasio", ginnasio.giro)
+        if not __import__("app.edizione", fromlist=["x"]).tre():   # nella 3.0 al posto del Ginnasio c'e' la scuola di Padre Casati
+            _passo("ginnasio", ginnasio.giro)
         _passo("memoria vettoriale", lambda c: __import__("app.memoria_vettoriale", fromlist=["x"]).indicizza(c))
         _passo("relazioni tra documenti", lambda c: __import__("app.memoria_vettoriale", fromlist=["x"]).relaziona(c))
         _passo("studi in coda", lambda c: __import__("app.studio", fromlist=["x"]).giro(c))
         _passo("verifica di preparazione", lambda c: __import__("app.preparazione", fromlist=["x"]).giro(c))
-        _passo("formazione automatica", lambda c: __import__("app.formazione_auto", fromlist=["x"]).giro(c))
+        if not __import__("app.edizione", fromlist=["x"]).tre():
+            _passo("formazione automatica", lambda c: __import__("app.formazione_auto", fromlist=["x"]).giro(c))
         _passo("risultati dei canali social", lambda c: __import__("app.social_nativo", fromlist=["x"]).giro_raccolta(c))
         _passo("monitoraggio dei profili social", lambda c: __import__("app.monitor_social", fromlist=["x"]).giro(c))
         _passo("archivio NAS", lambda c: __import__("app.archivio_nas", fromlist=["x"]).giro(c))
@@ -225,6 +228,26 @@ async def _filtro_posta():
         except Exception:  # noqa: BLE001
             pass
         await asyncio.sleep(300)
+
+
+async def _scuola():
+    """3.0: Padre Casati studia di continuo (solo modello locale, quando nessun altro lo usa) e di notte interroga gli agenti."""
+    import asyncio
+    from . import edizione, scuola
+    if not edizione.tre():
+        return
+    await asyncio.sleep(90)
+    while True:
+        esito = None
+        try:
+            def passo():
+                with connessione() as c:
+                    return scuola.giro(c)
+            esito = await asyncio.to_thread(passo)
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger("opifex").exception("scuola di Padre Casati")
+        await asyncio.sleep(5 if esito else 30)
 
 
 async def _trigger_orari():
@@ -274,6 +297,10 @@ async def ciclo_vita(app: FastAPI):
                     _ed.prepara(conn)
                 from . import chat_coda as _cc3
                 _cc3.riavvio(conn)
+                if conn.execute("SELECT 1 FROM impostazioni_sistema WHERE chiave='edizione3_preparata' AND valore='1'").fetchone():
+                    from . import scuola as _sc3
+                    _sc3.assicura_agente(conn)
+                    _sc3.semina(conn)
                 from . import prezzi as _pz3
                 _pz3.applica_listino(conn)
         except Exception:
@@ -301,7 +328,7 @@ async def ciclo_vita(app: FastAPI):
             _cc.riavvio(conn)
     except Exception:
         pass
-    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari()), asyncio.create_task(_filtro_posta())]
+    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari()), asyncio.create_task(_filtro_posta()), asyncio.create_task(_scuola())]
     yield
     for c in compiti:
         c.cancel()
@@ -361,6 +388,7 @@ app.include_router(router_memvett)
 app.include_router(router_blocco)
 app.include_router(router_giro)
 app.include_router(router_formauto)
+app.include_router(router_scuola)
 app.include_router(router_arte)
 app.include_router(router_contenuti)
 app.include_router(router_monsoc)

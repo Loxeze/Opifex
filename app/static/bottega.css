@@ -273,3 +273,37 @@ body.bottega .posta-voce.mia{background:#F5F2EB}
 body.bottega button.voto.scelto{background:#1F4D43;border-color:#1F4D43;color:#fff}
 body.bottega .posta-compito .azioni{background:#FFFDF8}
 body.bottega .storico-barra>div{background:#1F4D43}
+/* Padre Casati (3.0) */
+.casati-ora{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border:1px solid var(--bordo,#E3DED1);border-radius:14px;background:#FFFDF8;margin:10px 0}
+.casati-punto{width:10px;height:10px;border-radius:50%;background:#1F4D43;margin-top:6px;flex:none;animation:casati-respira 2s ease-in-out infinite}
+@keyframes casati-respira{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.casati-punto{animation:none}}
+.casati-numeri{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:12px 0}
+.casati-numero{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border:1px solid var(--bordo,#E3DED1);border-radius:14px;background:#FFFDF8}
+.casati-numero b{font-size:1.6rem;font-variant-numeric:tabular-nums;line-height:1.1}
+.casati-registro{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;max-width:80ch}
+.casati-registro li{line-height:1.45}
+.casati-modulo{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px}
+.casati-modulo input{flex:1 1 240px;min-width:0}
+.casati-target,.casati-comp,.casati-agente{margin:8px 0;padding:12px 16px;border-radius:14px}
+.casati-target.proposto{border-left:4px solid #B5862B}
+.casati-comp-testa{all:unset;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;width:100%;padding:2px 0}
+.casati-comp-testa:focus-visible{outline:2px solid #1F4D43;outline-offset:3px;border-radius:6px}
+.casati-comp-testa strong{font-size:1.05rem}
+.casati-comp-testa::before{content:"▸";color:var(--tenue,#5E6863)}
+.casati-comp-testa[aria-expanded="true"]::before{content:"▾"}
+.casati-dettaglio{margin-top:10px;border-top:1px solid var(--bordo,#E3DED1);padding-top:10px}
+.casati-dettaglio h4{margin:16px 0 6px}
+.casati-dettaglio select{max-width:320px}
+.casati-agente{display:flex;flex-direction:column;gap:6px;background:#FFFDF8;border:1px solid var(--bordo,#E3DED1)}
+.casati-barra{display:grid;grid-template-columns:70px minmax(80px,1fr) auto;gap:10px;align-items:center}
+.casati-traccia{height:6px;border-radius:3px;background:#ECE8DE;overflow:hidden}
+.casati-pieno{height:100%;background:#1F4D43;border-radius:3px}
+.casati-val{font-size:.85rem;color:var(--tenue,#5E6863);font-variant-numeric:tabular-nums}
+.casati-sezione{border:1px solid var(--bordo,#E3DED1);border-radius:10px;padding:8px 12px;margin:6px 0;background:#fff}
+.casati-sezione summary{cursor:pointer;font-weight:600}
+.casati-testo{white-space:pre-wrap;line-height:1.55;max-width:80ch;margin-top:8px}
+.casati-fonti{padding-left:18px;margin:4px 0;line-height:1.5}
+.riga-azioni{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+@media (max-width:600px){.casati-barra{grid-template-columns:60px 1fr}.casati-val{grid-column:1/-1}}
+.casati-agente>button{align-self:flex-start}

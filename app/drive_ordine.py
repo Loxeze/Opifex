@@ -153,6 +153,36 @@ def salva_testo(conn, quale: str, cartelle: list[str], nome: str, testo: str) ->
         return None
 
 
+def drive_pronto(conn) -> bool:
+    return bool(int(google._leggi(conn, "drive_account_id") or 0))
+
+
+def scrivi_documento(conn, quale: str, cartelle: list[str], nome: str, testo: str, file_id: str | None = None) -> str | None:
+    """Crea (o riscrive, se c'e' file_id) un documento Google con un testo. Restituisce l'id del file, None se Drive non c'e' o non risponde."""
+    try:
+        account = int(google._leggi(conn, "drive_account_id") or 0)
+        if not account:
+            return None
+        tok = google.token_accesso(conn, account)
+        if file_id:
+            try:
+                google._http("PATCH", f"https://www.googleapis.com/upload/drive/v3/files/{file_id}", params={"uploadType": "media", "fields": "id"},
+                             headers={"Authorization": "Bearer " + tok, "Content-Type": "text/plain; charset=UTF-8"}, content=(testo or "").encode())
+                return file_id
+            except Exception:  # noqa: BLE001 - documento cancellato a mano: se ne crea uno nuovo
+                pass
+        dove = percorso(conn, tok, google.radice_valida(conn, tok), quale, *[_pulito(c) for c in cartelle])
+        limite = "opifex-testo-3a9"
+        meta = json.dumps({"name": _pulito(nome), "parents": [dove], "mimeType": "application/vnd.google-apps.document"})
+        corpo = (f"--{limite}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n--{limite}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n").encode() \
+            + (testo or "").encode() + f"\r\n--{limite}--".encode()
+        f = google._http("POST", "https://www.googleapis.com/upload/drive/v3/files", params={"uploadType": "multipart", "fields": "id"},
+                         headers={"Authorization": "Bearer " + tok, "Content-Type": f"multipart/related; boundary={limite}"}, content=corpo)
+        return f.get("id")
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def cartella_ordinata(conn, tok: str, radice: str, quale: str, nome: str, esistente: str | None = None) -> str:
     """Come google.cartella, ma dentro il contenitore giusto. Una cartella senza identificativo salvato, nata nella radice prima della regola,
     viene ritrovata per nome e portata al suo posto (cosi' non nasce un doppione)."""

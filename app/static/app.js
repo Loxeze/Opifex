@@ -151,7 +151,7 @@ function mostraAccesso(errore) {
 // ---------- Struttura ----------
 // Tutte le pagine raggiungibili dal titolare (servono a ricordare l'ultima pagina aperta)
 const VISTE = [["dashboard", "Plancia"], ["briefing", "Briefing"], ["task", "Task"], ["riunioni", "Riunioni"], ["chat", "Chat"], ["posta", "Posta"], ["email", "Email marketing"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["crm", "Contatti"], ["social", "Social"],
-  ["finestre", "Finestre"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["computer", "Computer locali"], ["avvio", "Avvio guidato"], ["sez", "Sezione"], ["impostazioni", "Impostazioni"]];
+  ["finestre", "Finestre"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["scuola", "Padre Casati"], ["computer", "Computer locali"], ["avvio", "Avvio guidato"], ["sez", "Sezione"], ["impostazioni", "Impostazioni"]];
 // Il menu del titolare (2.52): poche voci, ognuna con le sue schede in alto. Ogni scheda: [etichetta, vista, sezione?].
 // Le sezioni con vista "sez" sono le stesse di prima, solo spostate fuori dalle Impostazioni.
 const MENU = [
@@ -238,7 +238,7 @@ function cornice(contenuto) {
   radice.replaceChildren(
     h("header", {}, h("h1", {}, stato.edizione === 3 ? "Opifex 3" : "Opifex", h("small", {}, "la bottega degli agenti")),
       h("nav", { "aria-label": "Menu principale" }, nav),
-      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.5" : "2.58"))),
+      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.6" : "2.59"))),
     h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "organigramma" ? "largo" : "" }, stato.ruolo === "titolare" ? schedeGruppo() : null, contenuto));
 }
 
@@ -248,6 +248,10 @@ async function avvia() {
     stato.ruolo = io.ruolo_globale; stato.nome = io.nome || "";
     try { stato.edizione = (await api("GET", "/avvio")).edizione; } catch (e) { stato.edizione = 2; }
     if (stato.edizione === 3 && !MENU[0][2].some(t => t[1] === "avvio")) MENU[0][2].push(["Avvio guidato", "avvio"]);
+    if (stato.edizione === 3) {   // 3.0: al posto del Ginnasio, la scuola di Padre Casati
+      const sq = MENU.find(m => m[0] === "squadra");
+      if (sq) { const i = sq[2].findIndex(t => t[1] === "ginnasio"); if (i >= 0) sq[2][i] = ["Padre Casati", "scuola"]; }
+    }
     await Vetro.carica();
     ripristinaVista();
     if (window.name === "opifex-organigramma" || location.hash === "#organigramma") stato.vista = "organigramma";
@@ -286,7 +290,7 @@ function disegna() {
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
   if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { chiudiVistaUso(stato.ultimaEtichetta); stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, avvio: vistaAvvio, posta: vistaPosta, computer: vistaComputer, sez: vistaSezione, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, scuola: vistaScuola, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, avvio: vistaAvvio, posta: vistaPosta, computer: vistaComputer, sez: vistaSezione, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
   let contenuto;
   try { contenuto = vista(); }
   catch (e) {   // una schermata che si rompe non deve bloccare il menu: si mostra l'errore e si puo' andare altrove

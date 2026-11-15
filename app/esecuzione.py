@@ -17,7 +17,7 @@ STRUMENTI_FORNITORI = ('anthropic', 'openai', 'xai', 'locale')   # chi sa usare 
 from . import memoria_pc
 from . import banco, creativi, best_practice, archivio_nas, eventi, ginnasio, squadre, scheda_progetto, misure, siti_hosting, canva, costi, casati, cerimoniere, spesa, consegne, sandbox, revisione, pm, pm_strumenti, prompting
 from . import progresso, n8n as n8n_mod, crm_contatti_agenti, ricerca_profonda, finestre, brevo as brevo_email, crm, iniziative, memoria_lavoro, agente_browser, cassaforte, dialoghi, memoria, richieste, strumenti_google, strumenti_gmail, strumenti_posta, invio_posta, posta_vaglio
-from . import strumenti_social, delega_online, budget_prompt, cantiere, scatola_nera
+from . import strumenti_social, delega_online, budget_prompt, cantiere, scatola_nera, edizione, scuola
 from . import vademecum, note_aurora, scheda_impresa
 from .navigatore import ErroreNavigazione, Navigatore
 from .riservatezza import anonimizza, puo_uscire
@@ -314,7 +314,13 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
         im_ctx = scheda_impresa.contesto(conn, a_f) if memoria._ok(a_f, "interno") else ""
         if im_ctx:
             prefisso.append(im_ctx); nomi_pref.append("scheda_impresa"); dim["scheda_impresa"] = len(im_ctx)
-        gi_ctx = ginnasio.contesto(conn, a_f, messaggio) if memoria._ok(a_f, "interno") else ""
+        if edizione.tre():   # 3.0: le competenze di Padre Casati (carta d'identita' nel prompt, manuale a richiesta)
+            try:
+                gi_ctx = scuola.contesto(conn, a_f, messaggio) if memoria._ok(a_f, "interno") else ""
+            except Exception:  # noqa: BLE001
+                conn.rollback(); gi_ctx = ""
+        else:
+            gi_ctx = ginnasio.contesto(conn, a_f, messaggio) if memoria._ok(a_f, "interno") else ""
         if gi_ctx:
             prefisso.append(gi_ctx); nomi_pref.append("competenze"); dim["competenze"] = len(gi_ctx)
         kp_ctx = squadre.contesto_kpi(conn, a_f) if (memoria._ok(a_f, "interno") and not VELOCE.get()) else ""
@@ -421,6 +427,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             creativi_tool = bool(ok_int and (drive_tool or prog_tool))
             banco_tool = bool(ok_int and prog_tool and banco.attivo(conn))   # PC di montaggio collegato: stessi strumenti a tutta la squadra del progetto
             form_tool = bool(scheda_progetto.strumenti_abilitati() and ok_int and (a["livello"] in ("manager", "referente") or pm_tool))
+            scuola_tool = bool(edizione.tre() and ok_int and a["ruolo_speciale"] != "formatore" and conn.execute("SELECT 1 FROM competenze LIMIT 1").fetchone()) \
+                or bool(edizione.tre() and ok_int and a["ruolo_speciale"] == "formatore")
+            if edizione.tre():
+                form_tool = False   # nella 3.0 il vecchio Ginnasio lascia il posto a Padre Casati
             prog_crea = bool(scheda_progetto.strumenti_abilitati() and ok_int and a["livello"] in ("manager", "referente") and not _sent)
             sq_pm = bool(form_tool and pm_tool)
             sq_val = bool(form_tool and not _sent)
@@ -432,7 +442,8 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 colleghi_ok, siti = [], []
                 ricerca_tool = finestre_tool = canva_tool = siti_tool = creativi_tool = banco_tool = social_tool = sb_tool = rev_tool = iniz_tool = email_tool = False
                 form_tool = prog_crea = sq_pm = sq_val = False
-            if ((a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get()) or creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val):
+                scuola_tool = False
+            if ((a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get()) or creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val or scuola_tool):
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 uscita_extra, uscita_gestori, uscita_avviso = [], {}, []
                 extra, gestori = [], {}
@@ -615,6 +626,12 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     avviso_extra += ginnasio.AVVISO
                     for s_ in ginnasio.STRUMENTI:
                         gestori[s_["name"]] = gfo
+                if scuola_tool:
+                    gsc = scuola.gestore(connessione, agente_id)
+                    extra.extend(scuola.STRUMENTI)
+                    avviso_extra += scuola.AVVISO
+                    for s_ in scuola.STRUMENTI:
+                        gestori[s_["name"]] = gsc
                 if sq_pm or sq_val:
                     gsq = squadre.gestore(connessione, agente_id)
                     if sq_pm:

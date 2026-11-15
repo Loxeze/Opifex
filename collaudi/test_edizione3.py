@@ -52,7 +52,7 @@ with TestClient(app) as c:
     ok("un secondo «primo accesso» non e' possibile", c.post("/avvio/primo-utente", json={**nuovo, "email": "x@p.it"}).status_code == 409)
     ok("la pagina d'accesso non offre piu' la creazione", c.get("/avvio").json()["primo_accesso"] is False)
     ag = {r[0]: r for r in sql("SELECT nome, modello, invio_posta, superiore_id, fascia_dati_max, email_attivo, archivio_attivo, divisione_id FROM agenti")}
-    ok("squadra iniziale: solo Aurora e Posta", sorted(ag) == ["Aurora", "Posta"], sorted(ag))
+    ok("squadra iniziale: Aurora, Posta e Padre Casati (formatore in locale)", sorted(ag) == ["Aurora", "Padre Casati", "Posta"] and ag["Padre Casati"][1] in ("locale-auto", "claude-haiku-5-5"), sorted(ag))
     aid = sql("SELECT id FROM agenti WHERE nome='Aurora'")[0][0]
     ok("Posta: locale, con approvazione, riferisce ad Aurora, dati riservati", ag["Posta"][1] == "locale-auto" and ag["Posta"][2] == "approvazione" and ag["Posta"][3] == aid and ag["Posta"][4] == "riservato", ag["Posta"])
     ok("un solo reparto, Posta, che gestisce la posta", sql("SELECT nome, gestisce_posta FROM divisioni") == [("Posta", True)])
@@ -119,13 +119,15 @@ with TestClient(app) as c:
     ok("la chat con Aurora risponde", rc.status_code == 200, rc.text[:200])
     nomi = [x.get("name") for corpo in visti for x in (corpo.get("tools") or [])]
     ok("Aurora riceve gli strumenti della memoria", "memoria_cerca" in nomi and "memoria_leggi" in nomi, sorted(set(nomi))[:30])
+    ok("3.0: Aurora ha gli strumenti di Padre Casati, non quelli del vecchio Ginnasio", "apri_competenza" in nomi and "chiedi_competenza" in nomi
+       and "competenza_leggi" not in nomi and "formazione_richiedi" not in nomi, sorted(set(nomi)))
     fermo.set(); t.join(3)
     # riavvio: gli agenti di serie non tornano (la parte d'avvio della 3.0 non li crea) e preparare di nuovo non cambia nulla
     from app.db import connessione
     with connessione() as k:
         ok("preparare due volte non cambia nulla", edizione.prepara(k) is False)
     nomi_ag = sorted(r[0] for r in sql("SELECT nome FROM agenti"))
-    ok("la squadra resta quella scelta", "Marco" not in nomi_ag and "Aurora" in nomi_ag and "Posta" in nomi_ag and len(nomi_ag) <= 3, nomi_ag)
+    ok("la squadra resta quella scelta", "Marco" not in nomi_ag and "Aurora" in nomi_ag and "Posta" in nomi_ag and len(nomi_ag) <= 4, nomi_ag)
     ok("Drive: nella 3.0 la cartella e' «Opifex/Opifex 3»", 'cartella(tok, "Opifex 3", nuova)' in open("app/google.py").read())
     ok("la 3.0 non copia la cartella Drive della 2", sql("SELECT count(*) FROM impostazioni_sistema WHERE chiave='drive_radice_id'")[0][0] == 0)
 

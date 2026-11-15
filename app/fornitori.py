@@ -341,6 +341,18 @@ def controlla_troncamento(modello: str, token_prompt: int) -> bool:
     return True
 
 
+# Padre Casati studia a bassa priorita': le sue chiamate non contano come «lavoro degli altri», e lui si ferma se altri stanno usando il modello locale
+BASSA_PRIORITA = __import__("contextvars").ContextVar("bassa_priorita", default=False)
+_ALTRI = {"in_corso": 0, "ultimo": 0.0}
+
+
+def locale_occupato(pausa: float = 20.0) -> bool:
+    """Qualcuno (un agente, la posta) sta usando il modello locale, o l'ha usato negli ultimi `pausa` secondi (spesso le chiamate arrivano a raffica)."""
+    import time as _t
+    with _BLOCCO_LOCALE:
+        return _ALTRI["in_corso"] > 0 or (_t.time() - _ALTRI["ultimo"]) < pausa
+
+
 def posta_locale(corpo: dict):
     """Chiamata a Ollama sul computer scelto, con il conteggio delle richieste in corso e la misura della velocita' (token generati al secondo, lettura del prompt compresa).
     Se quel computer cade proprio adesso, la richiesta passa una volta a un altro computer acceso."""
@@ -354,9 +366,12 @@ def posta_locale(corpo: dict):
                 raise ultimo from None
             raise
         url = m["url"]
+        bassa = BASSA_PRIORITA.get()
         with _BLOCCO_LOCALE:
             st = _LAVORO.setdefault(url, {"in_corso": 0, "modello": "", "da": 0.0, "misure": []})
             st["in_corso"] += 1
+            if not bassa:
+                _ALTRI["in_corso"] += 1
             st["modello"] = eff
             if st["in_corso"] == 1:
                 st["da"] = _t.time()
@@ -370,6 +385,9 @@ def posta_locale(corpo: dict):
         finally:
             with _BLOCCO_LOCALE:
                 st["in_corso"] = max(0, st["in_corso"] - 1)
+                if not bassa:
+                    _ALTRI["in_corso"] = max(0, _ALTRI["in_corso"] - 1)
+                    _ALTRI["ultimo"] = _t.time()
         _ULTIMA[chiesto] = (url, eff)
         try:
             if r.status_code == 200:
