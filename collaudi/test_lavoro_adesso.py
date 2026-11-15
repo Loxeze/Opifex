@@ -50,9 +50,21 @@ with TestClient(app) as c:
     ok("sta facendo: l'ultimo strumento usato", cl["sta_facendo"].startswith("cerca_documenti"), cl["sta_facendo"])
     er = [x for x in d["al_lavoro"] if x["nome"] == "Ermes"][0]
     ok("Ermes: senza passi mostra la richiesta; impresa Renovatio", er["sta_facendo"] == "Controlla il bando Arthur" and er["impresa"] == "Renovatio" and er["progetto"] is None, str(er))
+    ok("passi gia' fatti in italiano, con l'argomento", cl["passi"] and cl["passi"][-1]["cosa"] == "usa cerca documenti" and cl["passi"][-1]["su"] == "copione puntata 4" and 50 <= cl["passi"][-1]["fa_secondi"] <= 80, str(cl["passi"]))
+    ok("adesso: dopo uno strumento l'agente ragiona su cio' che ha trovato", cl["adesso"]["cosa"] == "ragiona su quello che ha trovato", str(cl["adesso"]))
+    ok("adesso: senza passi legge la richiesta e ragiona", er["adesso"]["cosa"] == "legge la richiesta e ragiona" and er["passi"] == [], str(er["adesso"]))
+    ok("dietro le quinte: elenco dei lavori di fondo (posta, Padre Casati)", isinstance(d["fondo"], list))
+    from app import plancia as _pl
+    ok("strumenti noti detti in italiano", _pl.frase("memoria_cerca: torri Montarrenti") == ("cerca nella tua memoria", "torri Montarrenti") and _pl.frase("apri_competenza: {\"nome\": \"x\"}")[0] == "apre il manuale di una competenza")
+    ok("una fase scritta a parole resta com'e'", _pl.frase("Studio le fonti: capitolo 2") == ("Studio le fonti: capitolo 2", ""))
+    from app import posta_vaglio as _pv
+    _pv.IN_CORSO.acquire(); _pv.LAVORO.update(fase="il modello locale legge le email: ne mancano 7", iniziato=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat())
+    df = c.get("/gestione/plancia/lavoro", headers=H).json()["fondo"]
+    _pv.IN_CORSO.release()
+    ok("dietro le quinte: il filtro della posta al lavoro, con la fase", any(f["nome"] == "Posta" and f["stato"] == "lavora" and "ne mancano 7" in f["sta_facendo"] and f["vista"] == "posta" for f in df), str(df))
     ok("tempo di lavoro in secondi", 100 <= er["da_secondi"] <= 260 and 100 <= cl["da_secondi"] <= 140 or cl["da_secondi"] >= 100, str((cl["da_secondi"], er["da_secondi"])))
     ok("riepilogo per impresa e per reparto", {x["nome"]: x["n"] for x in d["per_impresa"]} == {"Logos": 1, "Renovatio": 1} and {x["nome"]: x["n"] for x in d["per_reparto"]} == {"Contenuti": 1, "Bandi": 1}, str(d["per_impresa"]))
-    ok("agenti attivi contati (spento escluso)", d["agenti_attivi"] == sql("SELECT count(*) FROM agenti WHERE attivo AND tipo <> 'sistema'")[0][0] and d["agenti_attivi"] >= 4, str(d["agenti_attivi"]))
+    ok("agenti attivi contati (spento escluso)", d["agenti_attivi"] == sql("SELECT count(*) FROM agenti WHERE attivo AND NOT COALESCE(sentinella, FALSE)")[0][0] and d["agenti_attivi"] >= 4, str(d["agenti_attivi"]))
     ok("appena conclusi", any(x["nome"] == "Atena" and x["esito"] == "concluso" for x in d["conclusi"]), str(d["conclusi"]))
     ok("persone collegate", d["persone"] == [{"nome": "Lorenzo", "vista": "dashboard"}], str(d["persone"]))
     ev(a2, "errore", "boom", 0)
@@ -63,4 +75,5 @@ with TestClient(app) as c:
     ok("un lavoro lungo con passi recenti resta al lavoro", "Pigro" in [x["nome"] for x in d3["al_lavoro"]], str([x["nome"] for x in d3["al_lavoro"]]))
 js = open("app/static/plancia.js", encoding="utf-8").read()
 ok("la plancia mostra il riquadro e lo aggiorna da sola", "riquadroLavoro()" in js and "/gestione/plancia/lavoro" in js and "lavoro.ricarica()" in js)
+ok("il riquadro si aggiorna ogni 3 secondi e i tempi corrono ogni secondo", "giro('l', lavoro.ricarica)" in js and "attesa % 2 === 0) giro('l'" not in js and "scorri(); }, 1000)" in js)
 print(f"TOTALE: {sum(ris)}/{len(ris)}")

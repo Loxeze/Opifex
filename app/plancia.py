@@ -1,4 +1,7 @@
 """Dati della Plancia 2.0: imbuto e operazioni del CRM, token e costi, uso del sistema, social mese su mese. Solo numeri aggregati: nessun dato personale."""
+import re
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
 
 from .db import connessione
@@ -153,6 +156,62 @@ ATTIVO_MIN = 10          # un agente risulta al lavoro se ha iniziato da meno di
 TETTO_ORE = 3            # oltre, un «inizio» senza «fine» e' considerato rimasto appeso (processo interrotto)
 
 
+# come si legge un passo di lavoro: «memoria_cerca: torri» -> «cerca nella tua memoria» + «torri»
+FRASI = {"memoria_cerca": "cerca nella tua memoria", "memoria_leggi": "legge un tuo file", "web_search": "cerca sul web", "web_fetch": "legge una pagina web",
+         "apri_competenza": "apre il manuale di una competenza", "chiedi_competenza": "chiede una competenza a Padre Casati",
+         "chiedi_a_agente": "chiede a un collega", "formazione_richiedi": "chiede una formazione", "crm_proponi_contatto": "propone un contatto",
+         "prova_codice": "prova il codice", "revisione_incrociata": "chiede una revisione", "drive_cerca": "cerca su Drive", "drive_leggi": "legge un file su Drive",
+         "drive_salva": "salva su Drive", "gmail_cerca": "cerca nella posta", "gmail_leggi": "legge un'email", "posta_leggi": "legge un'email",
+         "bozza_email": "prepara una bozza di email", "task_crea": "crea un compito", "documento_leggi": "legge un documento", "documento_crea": "scrive un documento",
+         "calendario_cerca": "guarda il calendario", "memoria_lavoro_salva": "prende un appunto", "competenza_leggi": "legge una competenza"}
+
+
+def frase(dettaglio: str) -> tuple[str, str]:
+    """Un passo registrato, detto in italiano: (cosa fa, su che cosa)."""
+    d = (dettaglio or "").strip()
+    nome, _, arg = d.partition(":")
+    nome = nome.strip()
+    if re.fullmatch(r"[a-z0-9_]+", nome or "-"):
+        return FRASI.get(nome) or ("usa " + nome.replace("_", " ")), arg.strip()[:120]
+    return d[:160], ""
+
+
+def lavori_di_fondo() -> list[dict]:
+    """Chi lavora dietro le quinte, con il modello locale: il filtro della posta e Padre Casati (solo stato in memoria, nessuna query)."""
+    out = []
+    try:
+        from . import posta_vaglio as pv
+        if pv.IN_CORSO.locked():
+            secondi = None
+            if pv.LAVORO.get("iniziato"):
+                try:
+                    secondi = int((datetime.now(timezone.utc) - datetime.fromisoformat(pv.LAVORO["iniziato"])).total_seconds())
+                except ValueError:
+                    secondi = None
+            out.append({"nome": "Posta", "chi": "filtro della posta", "stato": "lavora", "sta_facendo": pv.LAVORO.get("fase") or "legge la posta nuova",
+                        "da_secondi": secondi, "vista": "posta"})
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from . import edizione, scuola
+        if edizione.tre():
+            st = scuola.STATO
+            secondi = None
+            if st.get("da"):
+                try:
+                    secondi = int((datetime.now(timezone.utc) - datetime.fromisoformat(st["da"])).total_seconds())
+                except ValueError:
+                    secondi = None
+            if st.get("fase") and (secondi is None or secondi < 1800):
+                out.append({"nome": "Padre Casati", "chi": "studio delle competenze", "stato": "lavora", "sta_facendo": st["fase"], "da_secondi": secondi, "vista": "scuola"})
+            elif st.get("pausa"):
+                out.append({"nome": "Padre Casati", "chi": "studio delle competenze", "stato": "in_pausa" if "pausa" in st["pausa"] or "attesa" in st["pausa"] else "fermo",
+                            "sta_facendo": re.sub(r"^(in pausa|in attesa)\s*:\s*", "", st["pausa"]), "da_secondi": None, "vista": "scuola"})
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 def lavoro_adesso(conn) -> dict:
     """Chi sta lavorando in questo momento, su che cosa, per quale impresa, reparto e progetto. Solo lettura del registro eventi: nessuna chiamata ai modelli, nessun costo."""
     righe = conn.execute(
@@ -170,7 +229,9 @@ def lavoro_adesso(conn) -> dict:
            ORDER BY i.creato_il""", (TETTO_ORE, ATTIVO_MIN, ATTIVO_MIN)).fetchall()
     al_lavoro = []
     for r in righe:
-        passo = conn.execute("""SELECT dettaglio FROM eventi_lavoro WHERE agente_id = %s AND id > %s AND tipo IN ('strumento','fase') ORDER BY id DESC LIMIT 1""", (r["agente_id"], r["eid"])).fetchone()
+        ultimi = conn.execute("""SELECT tipo, dettaglio, EXTRACT(EPOCH FROM (NOW() - creato_il))::int AS secondi FROM eventi_lavoro
+                                 WHERE agente_id = %s AND id > %s AND tipo IN ('strumento','fase','errore_strumento') ORDER BY id DESC LIMIT 6""", (r["agente_id"], r["eid"])).fetchall()
+        passo = ultimi[0] if ultimi else None
         t = conn.execute("""SELECT t.titolo, p.nome AS progetto FROM task t LEFT JOIN progetti p ON p.id = t.progetto_id
                             WHERE t.assegnato_agente_id = %s AND t.stato = 'in_corso' ORDER BY t.aggiornata_il DESC LIMIT 1""", (r["agente_id"],)).fetchone()
         progetto = t["progetto"] if t and t["progetto"] else None
@@ -179,8 +240,15 @@ def lavoro_adesso(conn) -> dict:
             progetto = ps[0]["nome"] if len(ps) == 1 else None
         al_lavoro.append({"agente_id": r["agente_id"], "nome": r["nome"], "ruolo": r["ruolo"], "livello": r["livello"], "reparto": r["reparto"], "impresa": r["impresa"], "colore": r["colore"],
                           "progetto": progetto, "compito": t["titolo"] if t else None, "sta_facendo": (passo["dettaglio"] if passo else r["richiesta"]) or "", "richiesta": r["richiesta"] or "",
-                          "da_secondi": int(r["secondi"] or 0)})
-    totale = conn.execute("SELECT count(*) AS n FROM agenti WHERE attivo AND tipo <> 'sistema'").fetchone()["n"]
+                          "da_secondi": int(r["secondi"] or 0),
+                          # gli strumenti si registrano a lavoro finito: dopo l'ultimo, l'agente sta ragionando su cio' che ha trovato
+                          "adesso": ({"cosa": frase(passo["dettaglio"])[0], "su": frase(passo["dettaglio"])[1], "da_secondi": int(passo["secondi"] or 0)}
+                                     if passo and passo["tipo"] == "fase" else
+                                     {"cosa": "ragiona su quello che ha trovato" if passo else "legge la richiesta e ragiona", "su": "",
+                                      "da_secondi": int((passo or r)["secondi"] or 0)}),
+                          "passi": [{"cosa": frase(u["dettaglio"])[0], "su": frase(u["dettaglio"])[1], "errore": u["tipo"] == "errore_strumento", "fa_secondi": int(u["secondi"] or 0)}
+                                    for u in reversed(ultimi) if not (u is passo and u["tipo"] == "fase")]})
+    totale = conn.execute("SELECT count(*) AS n FROM agenti WHERE attivo AND NOT COALESCE(sentinella, FALSE)").fetchone()["n"]
     per_impresa, per_reparto = {}, {}
     for x in al_lavoro:
         per_impresa[x["impresa"] or "Senza impresa"] = per_impresa.get(x["impresa"] or "Senza impresa", 0) + 1
@@ -193,7 +261,7 @@ def lavoro_adesso(conn) -> dict:
     return {"al_lavoro": al_lavoro, "n": len(al_lavoro), "agenti_attivi": int(totale), "per_impresa": [{"nome": k, "n": v} for k, v in sorted(per_impresa.items(), key=lambda kv: -kv[1])],
             "per_reparto": [{"nome": k, "n": v} for k, v in sorted(per_reparto.items(), key=lambda kv: -kv[1])],
             "conclusi": [{"nome": f["nome"], "esito": "errore" if f["tipo"] == "errore" else "concluso", "durata_s": round(f["durata_ms"] / 1000) if f["durata_ms"] else None, "fa_secondi": int(f["secondi"])} for f in finiti],
-            "persone": [{"nome": p["nome"], "vista": p["vista"]} for p in persone]}
+            "persone": [{"nome": p["nome"], "vista": p["vista"]} for p in persone], "fondo": lavori_di_fondo()}
 
 
 @router.get("/plancia/lavoro")

@@ -131,26 +131,50 @@ function vistaOrganigrammaPagina() {
 
 
 const fa = (s) => s < 60 ? "da " + s + " s" : s < 3600 ? "da " + Math.floor(s / 60) + " min" : "da " + Math.floor(s / 3600) + " h " + Math.floor(s % 3600 / 60) + " min";
+// «Al lavoro adesso»: cosa sta facendo ogni agente, passo per passo, come un «sto pensando» visibile. I secondi corrono anche fra un aggiornamento e l'altro.
+const _durata = (s) => s < 60 ? s + " s" : s < 3600 ? Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") + " min" : Math.floor(s / 3600) + " h " + Math.floor(s % 3600 / 60) + " min";
+const _faSec = (s) => s < 5 ? "adesso" : s < 60 ? s + " s fa" : Math.round(s / 60) + " min fa";
+const _maiuscola = (t) => t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
 function riquadroLavoro() {
-  const el = h("article", { class: "bt-card bt-lavoro" }, h("div", { class: "bt-cap" }, "Al lavoro adesso"), h("p", { class: "bt-sotto" }, "Carico…"));
+  const el = h("article", { class: "bt-card bt-lavoro", "aria-live": "polite" }, h("div", { class: "bt-cap" }, "Al lavoro adesso"), h("p", { class: "bt-sotto" }, "Carico…"));
+  let preso = Date.now(), contatori = [], orologio = null;
+  const scorri = () => { const extra = Math.floor((Date.now() - preso) / 1000); contatori.forEach(([nodo, base, f]) => { nodo.textContent = f(base + extra); }); };
+  const conta = (base, f) => { const n = h("span", {}, f(base)); contatori.push([n, base, f]); return n; };
   const disegna = (d) => {
+    preso = Date.now(); contatori = [];
     const chip = (arr) => arr.map(x => h("span", {}, x.colore ? h("i", { style: "background:" + x.colore }) : null, x.nome + " · " + x.n));
     const colImpresa = {}; d.al_lavoro.forEach(a => { if (a.impresa) colImpresa[a.impresa] = a.colore; });
-    const righe = d.al_lavoro.map(a => h("div", { class: "bt-lav", title: a.richiesta },
-      h("div", { class: "bt-lav-nome" }, h("span", { class: "bt-pulsa", "aria-hidden": "true" }), h("b", {}, a.nome), h("span", { class: "bt-sotto" }, fa(a.da_secondi))),
-      h("div", { class: "bt-lav-dove" },
-        a.impresa ? h("span", {}, h("i", { style: "background:" + (a.colore || PB.ottone) }), a.impresa) : null,
-        a.reparto ? h("span", {}, "· " + a.reparto) : null,
-        a.progetto ? h("span", {}, "· progetto " + a.progetto) : null),
-      h("div", { class: "bt-lav-fa" }, a.compito ? h("b", {}, a.compito + " — ") : null, a.sta_facendo || "Sta preparando la risposta")));
-    const quasi = d.conclusi.length ? h("p", { class: "bt-nota" }, "Appena finito: " + d.conclusi.map(c => c.nome + (c.esito === "errore" ? " (con un errore)" : "") + " " + (c.fa_secondi < 60 ? "adesso" : Math.round(c.fa_secondi / 60) + " min fa")).join(" · ")) : null;
+    const carta = (a) => {
+      const ad = a.adesso || { cosa: a.sta_facendo || "sta preparando la risposta", su: "", da_secondi: a.da_secondi };
+      const passi = (a.passi || []).slice(-5);
+      return h("div", { class: "bt-lav", title: a.richiesta },
+        h("div", { class: "bt-lav-nome" }, h("span", { class: "bt-pulsa", "aria-hidden": "true" }), h("b", {}, a.nome),
+          h("span", { class: "bt-lav-tempo", title: "Da quanto lavora a questa richiesta" }, conta(a.da_secondi, _durata))),
+        (a.impresa || a.reparto || a.progetto) ? h("div", { class: "bt-lav-dove" },
+          a.impresa ? h("span", {}, h("i", { style: "background:" + (a.colore || PB.ottone) }), a.impresa) : null,
+          h("span", {}, [a.impresa ? "" : null, a.reparto ? "reparto " + a.reparto : null, a.progetto ? "progetto " + a.progetto : null].filter(x => x !== null).join(" · "))) : null,
+        a.compito || a.richiesta ? h("div", { class: "bt-lav-chiesto" }, a.compito ? "Compito: " + a.compito : "Gli è stato chiesto: «" + a.richiesta + "»") : null,
+        passi.length ? h("ol", { class: "bt-lav-passi", "aria-label": "Passi già fatti" }, passi.map(p => h("li", { class: p.errore ? "errore" : "" },
+          h("span", { class: "bt-lav-segno", "aria-hidden": "true" }, p.errore ? "!" : "✓"), h("span", { class: "bt-lav-cosa" }, _maiuscola(p.cosa) + (p.su ? " · " + p.su : "")),
+          h("span", { class: "bt-lav-quando" }, conta(p.fa_secondi, _faSec))))) : null,
+        h("div", { class: "bt-lav-ora" }, h("span", { class: "bt-lav-rotella", "aria-hidden": "true" }),
+          h("span", {}, h("b", {}, _maiuscola(ad.cosa)), ad.su ? " · " + ad.su : "", h("span", { class: "bt-lav-puntini", "aria-hidden": "true" }, h("i"), h("i"), h("i"))),
+          h("span", { class: "bt-lav-quando" }, conta(ad.da_secondi, _durata))));
+    };
+    const fondo = (d.fondo || []).map(f => h("button", { class: "bt-fondo " + f.stato, type: "button", onclick: () => vai(f.vista), title: "Apri " + f.nome },
+      h("span", { class: "bt-fondo-punto", "aria-hidden": "true" }), h("b", {}, f.nome), h("span", { class: "bt-fondo-stato" }, f.stato === "lavora" ? "al lavoro" : f.stato === "in_pausa" ? "in pausa" : "fermo"),
+      h("span", { class: "bt-fondo-fa" }, _maiuscola(f.sta_facendo)), f.da_secondi != null && f.stato === "lavora" ? h("span", { class: "bt-lav-quando" }, conta(f.da_secondi, _durata)) : null));
+    const quasi = d.conclusi.length ? h("p", { class: "bt-nota" }, "Appena finito: " + d.conclusi.map(c => c.nome + (c.esito === "errore" ? " (con un errore)" : "") + (c.durata_s ? " in " + _durata(c.durata_s) : "") + ", " + (c.fa_secondi < 60 ? "adesso" : Math.round(c.fa_secondi / 60) + " min fa")).join(" · ")) : null;
     const pers = d.persone.length ? h("p", { class: "bt-nota" }, "Collegati ora: " + d.persone.map(p => p.nome).join(", ")) : null;
+    const quanti = d.n + (d.fondo || []).filter(f => f.stato === "lavora").length;
     riempi(el, [
-      h("div", { class: "bt-lavoro-testa" }, h("div", { class: "bt-cap" }, "Al lavoro adesso"),
-        h("div", { class: "bt-num" }, nIt(d.n)), h("span", { class: "bt-sotto" }, d.n === 1 ? "agente su " + nIt(d.agenti_attivi) : "agenti su " + nIt(d.agenti_attivi)),
+      h("div", { class: "bt-lavoro-testa" }, h("span", { class: "bt-pulsa grande" + (quanti ? "" : " fermo"), "aria-hidden": "true" }), h("div", { class: "bt-cap" }, "Al lavoro adesso"),
+        h("div", { class: "bt-num" }, nIt(d.n)), h("span", { class: "bt-sotto" }, (d.n === 1 ? "agente su " : "agenti su ") + nIt(d.agenti_attivi)),
         h("div", { class: "bt-lavoro-chip" }, chip(d.per_impresa.map(x => ({ ...x, colore: colImpresa[x.nome] }))), chip(d.per_reparto))),
-      d.n ? h("div", { class: "bt-lavoro-righe" }, righe) : h("p", { class: "bt-sotto" }, "Nessun agente sta lavorando in questo momento."),
+      d.n ? h("div", { class: "bt-lavoro-righe" }, d.al_lavoro.map(carta)) : h("p", { class: "bt-sotto" }, "Nessun agente sta rispondendo in questo momento."),
+      fondo.length ? h("div", { class: "bt-fondi" }, h("div", { class: "bt-cap" }, "Dietro le quinte · modello locale"), fondo) : null,
       quasi, pers]);
+    clearInterval(orologio); orologio = setInterval(() => { if (!el.isConnected) { clearInterval(orologio); return; } scorri(); }, 1000);
   };
   const ricarica = async () => { if (inPausa(el)) return; try { disegna(await api("GET", "/gestione/plancia/lavoro")); } catch (e) { mostraErrore(el, e, ricarica, true); } };
   return { el, ricarica };
@@ -296,7 +320,7 @@ function vistaDashboard() {
   };
   carica(); caricaRichieste(); caricaIniziative(); caricaProgetti();
   const inVolo = {}, giro = (k, f) => { if (inVolo[k]) return; inVolo[k] = true; Promise.resolve(f()).finally(() => { inVolo[k] = false; }); };   // una richiesta alla volta per riquadro
-  stato.timer2 = setInterval(() => { if (document.hidden) return; attesa++; if (attesa % 2 === 0) giro('l', lavoro.ricarica); giro('r', caricaRichieste); giro('i', caricaIniziative); if (attesa % 4 === 0) { giro('p', caricaProgetti); giro('d', daFare.ricarica); } if (attesa % 20 === 0) giro('c', carica); }, 3000);
+  stato.timer2 = setInterval(() => { if (document.hidden) return; attesa++; giro('l', lavoro.ricarica); giro('r', caricaRichieste); giro('i', caricaIniziative); if (attesa % 4 === 0) { giro('p', caricaProgetti); giro('d', daFare.ricarica); } if (attesa % 20 === 0) giro('c', carica); }, 3000);
 
   return h("div", { class: "bt-plancia bt-fitta" },
     h("div", { class: "bt-intesta" }, h("div", {}, h("div", { class: "bt-cap" }, new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })), titolo),

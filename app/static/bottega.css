@@ -274,36 +274,70 @@ body.bottega button.voto.scelto{background:#1F4D43;border-color:#1F4D43;color:#f
 body.bottega .posta-compito .azioni{background:#FFFDF8}
 body.bottega .storico-barra>div{background:#1F4D43}
 /* Padre Casati (3.0) */
-.casati-ora{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border:1px solid var(--bordo,#E3DED1);border-radius:14px;background:#FFFDF8;margin:10px 0}
-.casati-punto{width:10px;height:10px;border-radius:50%;background:#1F4D43;margin-top:6px;flex:none;animation:casati-respira 2s ease-in-out infinite}
+.casati-ora{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border:1px solid var(--bordo,#E3DED1);border-radius:14px;background:var(--carta,#FFFDF8);margin:10px 0}
+.casati-punto{width:10px;height:10px;border-radius:50%;background:var(--primario,#1F4D43);margin-top:6px;flex:none;animation:casati-respira 2s ease-in-out infinite}
 @keyframes casati-respira{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.casati-punto{animation:none}}
 .casati-numeri{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:12px 0}
-.casati-numero{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border:1px solid var(--bordo,#E3DED1);border-radius:14px;background:#FFFDF8}
+.casati-numero{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border:1px solid var(--bordo,#E3DED1);border-radius:14px;background:var(--carta,#FFFDF8)}
 .casati-numero b{font-size:1.6rem;font-variant-numeric:tabular-nums;line-height:1.1}
 .casati-registro{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;max-width:80ch}
 .casati-registro li{line-height:1.45}
 .casati-modulo{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px}
 .casati-modulo input{flex:1 1 240px;min-width:0}
 .casati-target,.casati-comp,.casati-agente{margin:8px 0;padding:12px 16px;border-radius:14px}
-.casati-target.proposto{border-left:4px solid #B5862B}
+.casati-target.proposto{border-left:4px solid var(--avv,#B5862B)}
 .casati-comp-testa{all:unset;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;width:100%;padding:2px 0}
-.casati-comp-testa:focus-visible{outline:2px solid #1F4D43;outline-offset:3px;border-radius:6px}
+.casati-comp-testa:focus-visible{outline:2px solid var(--primario,#1F4D43);outline-offset:3px;border-radius:6px}
 .casati-comp-testa strong{font-size:1.05rem}
 .casati-comp-testa::before{content:"▸";color:var(--tenue,#5E6863)}
 .casati-comp-testa[aria-expanded="true"]::before{content:"▾"}
 .casati-dettaglio{margin-top:10px;border-top:1px solid var(--bordo,#E3DED1);padding-top:10px}
 .casati-dettaglio h4{margin:16px 0 6px}
 .casati-dettaglio select{max-width:320px}
-.casati-agente{display:flex;flex-direction:column;gap:6px;background:#FFFDF8;border:1px solid var(--bordo,#E3DED1)}
+.casati-agente{display:flex;flex-direction:column;gap:6px;background:var(--carta,#FFFDF8);border:1px solid var(--bordo,#E3DED1)}
 .casati-barra{display:grid;grid-template-columns:70px minmax(80px,1fr) auto;gap:10px;align-items:center}
-.casati-traccia{height:6px;border-radius:3px;background:#ECE8DE;overflow:hidden}
-.casati-pieno{height:100%;background:#1F4D43;border-radius:3px}
+.casati-traccia{height:6px;border-radius:3px;background:var(--carta2,#ECE8DE);overflow:hidden}
+.casati-pieno{height:100%;background:var(--primario,#1F4D43);border-radius:3px}
 .casati-val{font-size:.85rem;color:var(--tenue,#5E6863);font-variant-numeric:tabular-nums}
-.casati-sezione{border:1px solid var(--bordo,#E3DED1);border-radius:10px;padding:8px 12px;margin:6px 0;background:#fff}
+.casati-sezione{border:1px solid var(--bordo,#E3DED1);border-radius:10px;padding:8px 12px;margin:6px 0;background:var(--carta,#fff)}
 .casati-sezione summary{cursor:pointer;font-weight:600}
 .casati-testo{white-space:pre-wrap;line-height:1.55;max-width:80ch;margin-top:8px}
 .casati-fonti{padding-left:18px;margin:4px 0;line-height:1.5}
 .riga-azioni{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
 @media (max-width:600px){.casati-barra{grid-template-columns:60px 1fr}.casati-val{grid-column:1/-1}}
 .casati-agente>button{align-self:flex-start}
+/* «Al lavoro adesso» (2.60): ben visibile, passo per passo */
+.bt-lavoro{border-left:4px solid var(--ok,#1F6B52)!important;gap:14px}
+.bt-lavoro-testa{align-items:center}
+.bt-pulsa.grande{width:12px;height:12px}
+.bt-pulsa.fermo{background:var(--tenue,#5E6863);animation:none}
+.bt-lavoro-righe{grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));gap:12px}
+.bt-lav{padding:12px 14px;gap:8px;background:var(--carta,#FBF9F4)}
+.bt-lav-tempo{margin-left:auto;font-size:12px;color:var(--tenue);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bt-lav-chiesto{font-size:12.5px;color:var(--tenue);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-lav-passi{list-style:none;margin:0;padding:0 0 0 4px;display:flex;flex-direction:column;gap:3px;border-left:2px solid var(--bordo);margin-left:4px}
+.bt-lav-passi li{display:flex;gap:8px;align-items:baseline;font-size:12.5px;color:var(--tenue);min-width:0;padding-left:6px}
+.bt-lav-passi li.errore{color:var(--no,#9A3A1F)}
+.bt-lav-segno{flex:none;width:12px;text-align:center;color:var(--ok,#1F6B52);font-weight:700}
+.bt-lav-passi li.errore .bt-lav-segno{color:var(--no,#9A3A1F)}
+.bt-lav-cosa{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-lav-quando{flex:none;margin-left:auto;font-size:11.5px;color:var(--tenue);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bt-lav-ora{display:flex;gap:10px;align-items:center;padding:9px 11px;border-radius:10px;background:var(--ok-b,#DCE8E2);color:var(--testo);font-size:13.5px;min-width:0}
+.bt-lav-ora>span:nth-child(2){flex:1;min-width:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
+.bt-lav-rotella{flex:none;width:14px;height:14px;border-radius:50%;border:2px solid var(--ok,#1F6B52);border-right-color:transparent;animation:btgira 1s linear infinite}
+@keyframes btgira{to{transform:rotate(360deg)}}
+.bt-lav-puntini{display:inline-flex;gap:3px;margin-left:5px;vertical-align:middle}
+.bt-lav-puntini i{width:4px;height:4px;border-radius:50%;background:currentColor;opacity:.25;animation:btpunto 1.2s infinite}
+.bt-lav-puntini i:nth-child(2){animation-delay:.2s}.bt-lav-puntini i:nth-child(3){animation-delay:.4s}
+@keyframes btpunto{30%{opacity:1}}
+.bt-fondi{display:flex;flex-direction:column;gap:6px}
+.bt-fondo{all:unset;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;padding:8px 12px;border:1px dashed var(--bordo);border-radius:10px;font-size:13px;min-width:0}
+.bt-fondo:hover,.bt-fondo:focus-visible{border-style:solid;border-color:var(--ok,#1F6B52)}
+.bt-fondo-punto{width:8px;height:8px;border-radius:50%;background:var(--tenue);flex:none}
+.bt-fondo.lavora .bt-fondo-punto{background:var(--ok,#1F6B52);animation:btpulsa 1.6s ease-out infinite}
+.bt-fondo.in_pausa .bt-fondo-punto{background:var(--avv,#7A5200)}
+.bt-fondo-stato{font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--carta2);color:var(--tenue)}
+.bt-fondo.lavora .bt-fondo-stato{background:var(--ok-b,#DCE8E2);color:var(--ok,#1F6B52)}
+.bt-fondo-fa{flex:1 1 220px;min-width:0;color:var(--tenue)}
+@media (prefers-reduced-motion:reduce){.bt-lav-rotella,.bt-lav-puntini i,.bt-fondo.lavora .bt-fondo-punto{animation:none}.bt-lav-puntini i{opacity:.6}}
