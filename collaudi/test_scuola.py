@@ -184,6 +184,14 @@ with TestClient(app) as c:
         ok("per il tema nuovo Padre Casati propone un canale da approvare (non lo studia da solo)", pr == [("https://www.youtube.com/watch?v=MONTAGGIO01", "proposto", "casati")]
            and sql("SELECT count(*) FROM competenze_fonti f JOIN competenze c ON c.id=f.competenza_id WHERE c.nome='Montaggio video'") == [(0,)], pr)
 
+        # ---- un agente passa un canale a Padre Casati (niente chiavi YouTube)
+        r3 = gp("chiedi_competenza", {"tema": "storie d'impresa", "canale": "Gurulandia", "motivo": "Lorenzo vuole che lo studi"})
+        ok("canale gia' in studio: lo dice, e niente chiavi API", "lo sta gia' studiando" in r3 and "chiave" in r3, r3)
+        r4 = gp("chiedi_competenza", {"tema": "Strategia e storie d'impresa", "canale": "https://www.youtube.com/@Lettera22", "motivo": "interviste a imprenditori"})
+        t4 = sql("SELECT t.tipo, t.stato, t.proposto_da, c.nome FROM casati_target t JOIN competenze c ON c.id=t.competenza_id WHERE t.indirizzo='https://www.youtube.com/@Lettera22'")
+        ok("canale nuovo: proposto a Lorenzo sulla competenza giusta", "Da studiare" in r4 and t4 == [("canale", "proposto", "casati", "Strategia e storie d'impresa")], (r4, t4))
+        ok("link non YouTube: spiegato", "solo da YouTube" in gp("chiedi_competenza", {"tema": "x", "canale": "https://vimeo.com/123"}))
+        ok("lo strumento dice chiaramente che non servono chiavi API", "NON serve nessuna chiave YouTube API" in json.dumps(scuola.STRUMENTI, ensure_ascii=False) and "senza chiavi API" in scuola.AVVISO)
         # ---- gli errori: un voto negativo porta la competenza che serviva
         sql("INSERT INTO valutazioni (agente_id, oggetto, voto, nota) VALUES (%s,'chat',-1,'ha sbagliato il posizionamento: ha puntato tutto sul prezzo')", (pid,))
         giri(k, 2)
@@ -193,8 +201,8 @@ with TestClient(app) as c:
     d = c.get("/gestione/scuola", headers=H).json()
     ok("schermata: conti, canali, competenze con tetto, esami, diario", d["conti"]["integrate"] == 4 and len(d["esami"]) >= 3 and d["registro"]
        and any(x["nome"] == "Strategia e storie d'impresa" and x["tetto"] == 2 for x in d["competenze"]) and d["importabile"], list(d))
-    tp = next(x for x in d["target"] if x["stato"] == "proposto")
-    ok("la proposta in cima, con il motivo", d["target"][0]["id"] == tp["id"] and "Montaggio video" in tp["motivo"])
+    tp = next(x for x in d["target"] if x["stato"] == "proposto" and "Montaggio video" in x["motivo"])
+    ok("le proposte in cima, con il motivo", d["target"][0]["stato"] == "proposto" and d["target"][1]["stato"] == "proposto")
     ok("approvare una proposta", c.post(f"/gestione/scuola/target/{tp['id']}", headers=H, json={"azione": "approva"}).status_code == 200
        and sql("SELECT stato FROM casati_target WHERE id=%s", (tp["id"],)) == [("attivo",)])
     ok("link non YouTube rifiutato", c.post("/gestione/scuola/target", headers=H, json={"indirizzo": "https://example.com/x", "competenza": "Marketing"}).status_code == 422)

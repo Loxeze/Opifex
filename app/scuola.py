@@ -168,10 +168,15 @@ STRUMENTI = [
      "input_schema": {"type": "object", "properties": {"nome": {"type": "string"}, "cerca": {"type": "string"}}, "required": ["nome"]}},
     {"name": "chiedi_competenza",
      "description": "Chiedi a Padre Casati una competenza che ti manca (quando un compito ti riesce male o non sai come farlo bene): "
-                    "se c'e' gia' te la da' subito, altrimenti la studia. Indica il tema e perche' ti serve.",
-     "input_schema": {"type": "object", "properties": {"tema": {"type": "string"}, "motivo": {"type": "string"}}, "required": ["tema"]}},
+                    "se c'e' gia' te la da' subito, altrimenti la studia. Indica il tema e perche' ti serve. "
+                    "Per far studiare un canale YouTube, una playlist o un video (anche quando Lorenzo te lo chiede) mettilo in «canale»: "
+                    "link o nome del canale. Padre Casati legge i canali da solo: NON serve nessuna chiave YouTube API ne' un export.",
+     "input_schema": {"type": "object", "properties": {"tema": {"type": "string", "description": "la competenza, per esempio «Strategia e storie d'impresa»"},
+                                                       "motivo": {"type": "string"}, "canale": {"type": "string", "description": "facoltativo: link o nome del canale YouTube da studiare"}},
+                      "required": ["tema"]}},
 ]
-AVVISO = "\nCOMPETENZE: prima di un compito che riguarda una tua competenza, aprila con apri_competenza e segui il manuale; se ti manca una competenza, chiedila con chiedi_competenza."
+AVVISO = ("\nCOMPETENZE: prima di un compito che riguarda una tua competenza, aprila con apri_competenza e segui il manuale; se ti manca una competenza, chiedila con chiedi_competenza. "
+          "Canali YouTube da studiare: li passi a Padre Casati con chiedi_competenza (campo «canale»); li legge lui, senza chiavi API: non chiederle a Lorenzo.")
 
 
 def usa(conn, agente_id: int, cid: int) -> str:
@@ -206,15 +211,53 @@ def gestore(connessione_, agente_id: int):
                     testo = "(Esame gia' superato e adesso anche messo in pratica: sei salito di livello.)\n\n" + testo
                 return testo
             if nome == "chiedi_competenza":
-                return richiesta(conn, agente_id, str(dati.get("tema") or ""), str(dati.get("motivo") or ""))
+                return richiesta(conn, agente_id, str(dati.get("tema") or ""), str(dati.get("motivo") or ""), str(dati.get("canale") or ""))
         return "Strumento sconosciuto"
     return g
 
 
-def richiesta(conn, agente_id: int | None, tema: str, motivo: str) -> str:
+def tipo_indirizzo(ind: str) -> str:
+    if not ind.lower().startswith("http"):
+        return "canale"
+    if "list=" in ind and "watch" not in ind:
+        return "playlist"
+    if re.search(r"(watch\?v=|youtu\.be/|/shorts/)", ind):
+        return "video"
+    return "canale"
+
+
+def proponi_canale(conn, agente_id: int | None, tema: str, canale: str, motivo: str) -> str:
+    """Un agente passa a Padre Casati un canale da studiare: se c'e' gia' lo dice, altrimenti lo propone a Lorenzo (un clic per approvarlo)."""
+    canale = canale.strip()[:500]
+    if canale.lower().startswith("http") and not re.match(r"https://(www\.|m\.)?(youtube\.com|youtu\.be)/", canale):
+        return "Padre Casati per ora studia solo da YouTube: serve il link (o il nome) di un canale, una playlist o un video YouTube."
+    gia = conn.execute("""SELECT t.stato, t.nome, t.indirizzo, c.nome AS competenza FROM casati_target t JOIN competenze c ON c.id = t.competenza_id
+                          WHERE lower(t.indirizzo) = lower(%s) OR lower(t.nome) = lower(%s) ORDER BY t.id LIMIT 1""", (canale, canale)).fetchone()
+    if gia and gia["stato"] in ("attivo", "proposto", "in_pausa"):
+        stato = {"attivo": "lo sta gia' studiando", "proposto": "e' gia' proposto a Lorenzo, in attesa di approvazione", "in_pausa": "e' in pausa"}[gia["stato"]]
+        return f"Padre Casati: «{gia['nome'] or gia['indirizzo']}» {stato}, per «{gia['competenza']}». Non serve nessuna chiave YouTube."
+    trovata = trova(conn, tema, 1, 4)
+    comp = conn.execute("SELECT * FROM competenze WHERE id=%s", (trovata[0]["id"],)).fetchone() if trovata else crea(conn, tema)
+    nome = "" if canale.lower().startswith("http") else canale
+    conn.execute("""INSERT INTO casati_target (tipo, indirizzo, nome, competenza_id, stato, proposto_da, motivo) VALUES (%s,%s,%s,%s,'proposto','casati',%s)
+                    ON CONFLICT DO NOTHING""", (tipo_indirizzo(canale), canale, nome, comp["id"], f"Chiesto da un agente: {motivo[:200]}" if motivo else "Chiesto da un agente"))
+    if agente_id:
+        conn.execute("INSERT INTO agenti_competenze3 (agente_id, competenza_id, assegnata_da) VALUES (%s,%s,'richiesta') ON CONFLICT DO NOTHING", (agente_id, comp["id"]))
+    conn.execute("INSERT INTO competenze_richieste (agente_id, tema, motivo, competenza_id, stato, risposta) VALUES (%s,%s,%s,%s,'in_studio',%s)",
+                 (agente_id, tema, motivo[:500], comp["id"], f"Canale proposto: {canale}"))
+    registra(conn, "proposta", f"Un agente propone da studiare {canale} per «{comp['nome']}»")
+    return (f"Padre Casati: ho messo «{canale}» fra le proposte per «{comp['nome']}». Lorenzo lo approva con un clic in Squadra → Padre Casati → Da studiare; "
+            "poi lo leggo io, video per video, dai sottotitoli. Non serve nessuna chiave YouTube API ne' un export.")
+
+
+def richiesta(conn, agente_id: int | None, tema: str, motivo: str, canale: str = "") -> str:
     tema = re.sub(r"\s+", " ", tema).strip()[:120]
+    if not tema and canale.strip():
+        tema = "Strategia e storie d'impresa" if not trova(conn, canale, 1, 2) else trova(conn, canale, 1, 2)[0]["nome"]
     if not tema:
         return "Indica il tema della competenza."
+    if canale.strip():
+        return proponi_canale(conn, agente_id, tema, canale, motivo)
     c = trova(conn, tema, 1, 4)
     if c:
         if agente_id:

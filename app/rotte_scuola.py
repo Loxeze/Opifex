@@ -64,14 +64,7 @@ class NuovoTarget(BaseModel):
     tipo: str = ""
 
 
-def _tipo(ind: str) -> str:
-    if not ind.lower().startswith("http"):
-        return "canale"
-    if "list=" in ind and "watch" not in ind:
-        return "playlist"
-    if re.search(r"(watch\?v=|youtu\.be/|/shorts/)", ind):
-        return "video"
-    return "canale"
+_tipo = sc.tipo_indirizzo
 
 
 @router.post("/target")
