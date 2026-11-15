@@ -341,3 +341,44 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .bt-fondo.lavora .bt-fondo-stato{background:var(--ok-b,#DCE8E2);color:var(--ok,#1F6B52)}
 .bt-fondo-fa{flex:1 1 220px;min-width:0;color:var(--tenue)}
 @media (prefers-reduced-motion:reduce){.bt-lav-rotella,.bt-lav-puntini i,.bt-fondo.lavora .bt-fondo-punto{animation:none}.bt-lav-puntini i{opacity:.6}}
+/* Social per marchio (2.61) */
+.mq-plancia{border-left:4px solid var(--avv,#8A6A2F)!important;gap:10px}
+.mq-totali{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--tenue)}
+.mq-totali b{color:var(--testo);font-size:15px;font-variant-numeric:tabular-nums}
+.mq-classifica{display:flex;flex-direction:column;gap:6px}
+.mq-riga{all:unset;cursor:pointer;display:grid;grid-template-columns:22px minmax(140px,1.2fr) minmax(80px,2fr) auto;grid-template-areas:"pos nome barra num" ". dett dett dett";gap:2px 12px;align-items:center;padding:8px 10px;border-radius:10px;border:1px solid var(--bordo);background:var(--carta,#FBF9F4);min-width:0}
+.mq-riga:hover,.mq-riga:focus-visible{border-color:var(--ok,#1F6B52)}
+.mq-pos{grid-area:pos;font-weight:700;color:var(--tenue);font-variant-numeric:tabular-nums}
+.mq-nome{grid-area:nome;display:flex;gap:7px;align-items:center;min-width:0}
+.mq-nome i,.mq-titolo i{width:10px;height:10px;border-radius:3px;flex:none}
+.mq-nome b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mq-lavora{display:inline-flex;gap:5px;align-items:center;font-size:11.5px;color:var(--ok,#1F6B52)}
+.mq-barra{grid-area:barra;height:8px;border-radius:4px;background:var(--carta2,#ECE8DE);overflow:hidden}
+.mq-barra span{display:block;height:100%;border-radius:4px;min-width:2px}
+.mq-num{grid-area:num;font-size:12.5px;color:var(--tenue);white-space:nowrap;font-variant-numeric:tabular-nums}
+.mq-num b{color:var(--testo);font-size:14px}
+.mq-var{margin-left:4px;font-size:11.5px}.mq-var.su{color:var(--ok,#1F6B52)}.mq-var.giu{color:var(--no,#9A3A1F)}
+.mq-dett{grid-area:dett;font-size:12px;color:var(--tenue);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:600px){.mq-riga{grid-template-columns:22px 1fr auto;grid-template-areas:"pos nome num" ". barra barra" ". dett dett"}.mq-dett{white-space:normal}}
+.mq-marchio{margin:12px 0;padding:14px 16px;border-radius:14px;display:flex;flex-direction:column;gap:8px}
+.mq-marchio.aperto{border-color:var(--ok,#1F6B52)}
+.mq-titolo{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;min-width:0}
+.mq-titolo h3{margin:0}
+.mq-numeri{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+.mq-scheda{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:10px 18px}
+.mq-voce{display:flex;flex-direction:column;gap:2px;line-height:1.45;min-width:0}
+.mq-colori{display:flex;flex-wrap:wrap;gap:8px;grid-column:1/-1}
+.mq-colore{display:inline-flex;gap:6px;align-items:center;font-size:12.5px;padding:3px 9px 3px 3px;border:1px solid var(--bordo);border-radius:999px}
+.mq-colore i{width:20px;height:20px;border-radius:50%;border:1px solid var(--bordo);flex:none}
+.mq-reti{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.mq-rete{display:grid;grid-template-columns:120px minmax(0,1fr) minmax(0,220px);gap:8px;align-items:center}
+.mq-rete input[type=text],.mq-rete select{min-width:0;width:100%}
+@media (max-width:600px){.mq-rete{grid-template-columns:1fr}}
+.mq-marchio textarea,.mq-commento textarea{width:100%;box-sizing:border-box}
+.mq-commento{margin:8px 0;padding:12px 14px;border-radius:12px;display:flex;flex-direction:column;gap:6px}
+.mq-pallino{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.mq-testo{margin:0;padding:6px 10px;border-left:3px solid var(--bordo);white-space:pre-wrap;word-break:break-word}
+.mq-post{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mq-manuale{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:8px;margin-top:8px}
+.mq-manuale textarea{grid-column:1/-1}
+.mq-titolo h3{font-size:18px;text-transform:none;letter-spacing:0;color:var(--testo);font-weight:600}

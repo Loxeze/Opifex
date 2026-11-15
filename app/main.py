@@ -29,6 +29,7 @@ from .documenti_blocco import router as router_blocco
 from .giro_domande import router as router_giro
 from .formazione_auto import router as router_formauto
 from .rotte_scuola import router as router_scuola
+from .marchi import router as router_marchi
 from .sfondo_arte import router as router_arte
 from .stili_montaggio import router as router_contenuti
 from .monitor_social import router as router_monsoc
@@ -198,6 +199,7 @@ async def _manutenzione():
             _passo("formazione automatica", lambda c: __import__("app.formazione_auto", fromlist=["x"]).giro(c))
         _passo("risultati dei canali social", lambda c: __import__("app.social_nativo", fromlist=["x"]).giro_raccolta(c))
         _passo("monitoraggio dei profili social", lambda c: __import__("app.monitor_social", fromlist=["x"]).giro(c))
+        _passo("commenti dei marchi social", lambda c: __import__("app.marchi", fromlist=["x"]).giro(c))
         _passo("archivio NAS", lambda c: __import__("app.archivio_nas", fromlist=["x"]).giro(c))
         _passo("giro di aggiornamento", lambda c: __import__("app.giro_domande", fromlist=["x"]).giro(c))
         _passo("miglioramento degli agenti (Padre Casati)", miglioramento.giro)
@@ -301,6 +303,7 @@ async def ciclo_vita(app: FastAPI):
                     from . import scuola as _sc3
                     _sc3.assicura_agente(conn)
                     _sc3.semina(conn)
+                    __import__("app.marchi", fromlist=["x"]).semina(conn)
                 from . import prezzi as _pz3
                 _pz3.applica_listino(conn)
         except Exception:
@@ -389,6 +392,7 @@ app.include_router(router_blocco)
 app.include_router(router_giro)
 app.include_router(router_formauto)
 app.include_router(router_scuola)
+app.include_router(router_marchi)
 app.include_router(router_arte)
 app.include_router(router_contenuti)
 app.include_router(router_monsoc)

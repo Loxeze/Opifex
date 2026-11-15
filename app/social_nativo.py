@@ -124,7 +124,7 @@ def _scarica(url: str, destinazione: str, massimo: int = MAX_VIDEO) -> int:
 def _scope(provider: str, opzioni: dict) -> str:
     if provider == "meta":
         return ("pages_show_list,pages_read_engagement,pages_manage_posts,read_insights,instagram_basic,instagram_content_publish,"
-                "instagram_manage_insights,business_management")
+                "instagram_manage_insights,business_management,instagram_manage_comments,pages_manage_engagement,pages_read_user_content")
     if provider == "linkedin":
         s = "openid profile w_member_social"
         return s + (" r_organization_social w_organization_social rw_organization_admin" if opzioni.get("pagine") else "")

@@ -10,14 +10,14 @@ let schedaSocial = null;
 // Pagina Social: il lavoro di ogni giorno (panoramica, calendario, post, risultati). Canali e collegamenti sono in Impostazioni > Social.
 function vistaSocial() {
   const corpo = h("div"); const barra = h("div", { class: "azioni", style: "margin:6px 0 14px" });
-  const SCHEDE = [["panoramica", "Panoramica"], ["pubblica", "Scrivi e pubblica"], ["post", "Post e approvazioni"], ["risultati", "Risultati"]];
+  const SCHEDE = [["panoramica", "Panoramica"], ["marchi", "Marchi"], ["pubblica", "Scrivi e pubblica"], ["post", "Post e approvazioni"], ["commenti", "Commenti"], ["risultati", "Risultati"]];
   const apri = async (k) => {
     if (!SCHEDE.some(([id]) => id === k)) k = "panoramica";
     schedaSocial = k;
     barra.replaceChildren(...SCHEDE.map(([id, et]) => h("button", { class: id === k ? "p" : "s", type: "button", onclick: () => apri(id) }, et)),
       h("button", { class: "s", type: "button", style: "margin-left:auto", onclick: () => { stato.sezione = "social"; vai("impostazioni", "social"); } }, "Canali e collegamenti"));
     corpo.replaceChildren(h("p", { class: "sotto" }, "Carico…"));
-    try { await ({ panoramica: schedaPanoramica, risultati: schedaRisultati, pubblica: schedaPubblica, post: schedaPost })[k](corpo, apri); }
+    try { await ({ panoramica: schedaPanoramica, marchi: schedaMarchi, commenti: schedaCommenti, risultati: schedaRisultati, pubblica: schedaPubblica, post: schedaPost })[k](corpo, apri); }
     catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   };
   apri(schedaSocial || "panoramica");
