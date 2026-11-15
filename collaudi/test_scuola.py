@@ -246,4 +246,50 @@ with TestClient(app) as c:
         ok("nessun computer acceso: attesa, nessun errore", scuola.giro(k, GIORNO) is None and "nessun computer" in scuola.STATO["pausa"], scuola.STATO)
     ok("la pagina del menu c'e'", "scuola.js" in c.get("/").text or "scuola.js" in open("app/static/index.html").read())
 
+# ---- 2.61.1: modelli che ragionano, carte che non riescono, YouTube che blocca, turni
+fornitori.chiama_modello = finto
+ok("il ragionamento <think> si toglie", scuola._pulisci("<think>lungo ragionamento</think>\n{\"carta\": \"x\"}") == '{"carta": "x"}' and scuola._pulisci("<think>tagliato a meta'") == "")
+LIM = []
+def ragiona(fornitore, modello, istr, msg, max_token=1500, **kw):
+    LIM.append(max_token)
+    return Risposta("<think>" + "penso " * 50, 10, max_token, {"stop": "length"}) if max_token < 3000 else Risposta('{"carta": "Serve per scrivere i bandi.", "parole": "bandi, progetti"}', 10, 10)
+fornitori.chiama_modello = ragiona
+def solo_bandi(k):
+    for r in k.execute("SELECT id, versione FROM competenze WHERE nome <> 'Scrittura dei bandi'").fetchall():
+        k.execute("UPDATE competenze SET carta=COALESCE(NULLIF(carta,''),'x'), parole=COALESCE(NULLIF(parole,''),'x') WHERE id=%s", (r["id"],))
+        k.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore", (f"casati3_carta_v_{r['id']}", str(r["versione"])))
+    k.commit()
+with psycopg.connect(DSN, row_factory=dict_row) as k:
+    k.execute("UPDATE competenze SET carta='', parole='' WHERE nome='Scrittura dei bandi'"); k.execute("DELETE FROM impostazioni_sistema WHERE chiave LIKE 'casati3_carta_%%'"); solo_bandi(k)
+    e = scuola._passo_carta(k)
+    ok("risposta consumata dal ragionamento: si riprova con il triplo dello spazio", LIM == [1500, 4500] and e == "carta"
+       and sql("SELECT carta FROM competenze WHERE nome='Scrittura dei bandi'") == [("Serve per scrivere i bandi.",)], (LIM, e))
+    def muto(fornitore, modello, istr, msg, max_token=1500, **kw): return Risposta("non so", 1, 1)
+    fornitori.chiama_modello = muto
+    k.execute("UPDATE competenze SET carta='', parole='' WHERE nome='Scrittura dei bandi'"); k.execute("DELETE FROM impostazioni_sistema WHERE chiave LIKE 'casati3_carta_%%'"); solo_bandi(k)
+    ok("carta non riuscita: si riprova piu' tardi, non si segna come fatta", scuola._passo_carta(k) == "carta da riprovare" and scuola._passo_carta(k) is None
+       and "riprovo fra 6 ore (1/3)" in sql("SELECT testo FROM casati_registro ORDER BY id DESC LIMIT 1")[0][0])
+    cid_b = sql("SELECT id FROM competenze WHERE nome='Scrittura dei bandi'")[0][0]
+    k.execute("UPDATE impostazioni_sistema SET valore='2|2020-01-01T00:00:00+00:00' WHERE chiave=%s", (f"casati3_carta_err_{cid_b}",)); k.commit()
+    ok("al terzo tentativo la carta si ricava dal manuale", scuola._passo_carta(k) == "carta" and sql("SELECT carta <> '', parole LIKE 'Scrittura dei bandi%%' FROM competenze WHERE id=%s", (cid_b,)) == [(True, True)]
+       and "ricavata dal manuale" in sql("SELECT testo FROM casati_registro ORDER BY id DESC LIMIT 1")[0][0])
+    fornitori.chiama_modello = finto
+    # YouTube che blocca
+    sql("INSERT INTO competenze_fonti (competenza_id, tipo, rif, titolo, autore) VALUES (%s,'video','BLOCCO00001','Video bloccato','X')", (cid_b,))
+    def blocca(vid): raise RuntimeError("RequestBlocked: YouTube is blocking requests from your IP")
+    scuola._trascrizione = blocca
+    sql("UPDATE competenze_fonti SET stato='integrata' WHERE stato='da_studiare' AND rif <> 'BLOCCO00001'")
+    e = scuola._passo_studio(k)
+    ok("YouTube blocca: il video resta da studiare, pausa di un'ora, detto nel diario", e is None and sql("SELECT stato, tentativi FROM competenze_fonti WHERE rif='BLOCCO00001'") == [("da_studiare", 0)]
+       and scuola.youtube_in_pausa(k) and "YouTube blocca" in sql("SELECT testo FROM casati_registro ORDER BY id DESC LIMIT 1")[0][0], e)
+    ok("durante la pausa niente studio e niente elenchi", scuola._passo_studio(k) is None and scuola._passo_elenchi(k) is None)
+    k.execute("UPDATE impostazioni_sistema SET valore='2020-01-01T00:00:00+00:00' WHERE chiave='casati3_youtube_bloccato_fino'"); k.commit()
+    ok("passata l'ora si riprova", not scuola.youtube_in_pausa(k))
+    sql("UPDATE competenze_fonti SET stato='saltata', errore='RequestBlocked: blocked' WHERE rif='BLOCCO00001'")
+    k.execute("DELETE FROM impostazioni_sistema WHERE chiave='casati3_riparato'"); scuola.ripara(k); k.commit()
+    ok("all'avvio i video saltati per il blocco tornano da studiare (una volta sola)", sql("SELECT stato FROM competenze_fonti WHERE rif='BLOCCO00001'") == [("da_studiare",)]
+       and sql("SELECT valore FROM impostazioni_sistema WHERE chiave='casati3_riparato'") == [("2.61.1",)])
+    # turni: lo studio non aspetta tutte le carte
+    ok("turni: lo studio ha due passi su sei, prima delle carte e delle assegnazioni", scuola.A_TURNO.count(scuola._passo_studio) == 2 and scuola.A_TURNO[0] is scuola._passo_studio)
+
 print(f"TOTALE: {sum(ris)}/{len(ris)}")

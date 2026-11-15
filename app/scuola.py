@@ -337,6 +337,10 @@ def _chiedi(conn, istr: str, msg: str, max_token: int = 1500) -> str:
     tok = fornitori.BASSA_PRIORITA.set(True)
     try:
         r = fornitori.chiama_modello("locale", modello, istr, msg, max_token)
+        # i modelli che «ragionano» (qwen3, deepseek-r1, gpt-oss) spendono token nel ragionamento: se la risposta resta vuota
+        # o tagliata, si riprova una volta con il triplo dello spazio
+        if (not _pulisci(r.testo) or ((r.diag or {}).get("stop") == "length" and not _pulisci(r.testo).rstrip().endswith(("}", "]", ".")))) and max_token < 6000:
+            r = fornitori.chiama_modello("locale", modello, istr, msg, max_token * 3)
     finally:
         fornitori.BASSA_PRIORITA.reset(tok)
     try:
@@ -346,7 +350,15 @@ def _chiedi(conn, istr: str, msg: str, max_token: int = 1500) -> str:
         conn.commit()
     except Exception:  # noqa: BLE001
         conn.rollback()
-    return r.testo or ""
+    return _pulisci(r.testo)
+
+
+def _pulisci(t: str | None) -> str:
+    """Toglie il ragionamento che alcuni modelli locali scrivono prima della risposta (<think>...</think>)."""
+    t = re.sub(r"(?s)<think>.*?</think>", "", t or "")
+    if "<think>" in t:          # ragionamento non chiuso: la risposta non c'e'
+        t = t.split("<think>")[0]
+    return t.strip()
 
 
 def _json(t: str):
@@ -445,8 +457,8 @@ Il manuale serve a un agente AI che deve LAVORARE con questa competenza: metodo 
 Niente doppioni, niente frasi vuote; tieni le fonti tra parentesi (canale, titolo, minuto). Al massimo {max} caratteri.
 Rispondi solo con il testo della sezione, senza titolo."""
 
-ISTR_CARTA = """Sei Padre Casati. Dal manuale della competenza «{nome}» scrivi la sua carta d'identita'.
-Rispondi SOLO con un oggetto JSON: {{"carta": "a cosa serve e quando usarla, al massimo 2 frasi brevi", "parole": "15-25 parole chiave separate da virgola: i compiti in cui serve"}}"""
+ISTR_CARTA = """Sei Padre Casati. Dal manuale della competenza «{nome}» scrivi la sua carta d'identita'. Niente ragionamenti, solo la risposta.
+Rispondi SOLO con un oggetto JSON su una riga: {{"carta": "a cosa serve e quando usarla, al massimo 2 frasi brevi", "parole": "15-25 parole chiave separate da virgola: i compiti in cui serve"}}"""
 
 ISTR_ASSEGNA = """Sei Padre Casati. Una competenza della biblioteca e' pronta:
 «{nome}»: {carta}
@@ -455,6 +467,8 @@ Rispondi SOLO con un array JSON dei numeri, per esempio [3, 7]."""
 
 
 def _passo_elenchi(conn) -> str | None:
+    if youtube_in_pausa(conn):
+        return None
     t = conn.execute("""SELECT * FROM casati_target WHERE stato='attivo' AND tipo IN ('canale','playlist','video')
                         AND (ultimo_elenco IS NULL OR (tipo <> 'video' AND ultimo_elenco < NOW() - INTERVAL '1 day'))
                         ORDER BY priorita DESC, id LIMIT 1""").fetchone()
@@ -463,9 +477,14 @@ def _passo_elenchi(conn) -> str | None:
     _fase(f"elenco i video di {t['nome'] or t['indirizzo']}")
     try:
         nome, video, risolto = _elenca(t["indirizzo"])
-    except Exception as e:  # noqa: BLE001 - canale che non si legge: si riprova domani
+    except Exception as e:  # noqa: BLE001 - canale che non si legge: si riprova domani (fra un'ora se e' YouTube che blocca)
         conn.rollback()
         conn.execute("UPDATE casati_target SET ultimo_elenco=NOW(), errore=%s WHERE id=%s", (f"{type(e).__name__}: {e}"[:300], t["id"]))
+        if bloccato(e):
+            conn.execute("UPDATE casati_target SET ultimo_elenco=NOW() - INTERVAL '23 hours' WHERE id=%s", (t["id"],))
+            _blocco_youtube(conn, None, e)
+        else:
+            registra(conn, "errore", f"Non riesco a elencare i video di {t['nome'] or t['indirizzo']}: {type(e).__name__}: {str(e)[:150]}")
         conn.commit()
         return f"elenco non riuscito: {t['indirizzo']}"
     nuovi = 0
@@ -507,7 +526,42 @@ def _passo_temi(conn) -> str | None:
     return f"proposti {len(canali)} canali"
 
 
+_PAROLE_BLOCCO = ("requestblocked", "ipblocked", "blocked", "429", "too many requests", "sign in to confirm", "not a bot", "captcha")
+
+
+def bloccato(e: Exception) -> bool:
+    t = f"{type(e).__name__} {e}".lower()
+    return any(p in t for p in _PAROLE_BLOCCO)
+
+
+def _blocco_youtube(conn, fonte_id: int | None, e: Exception):
+    """YouTube rifiuta le richieste del server: si riprova fra un'ora senza consumare i video, e lo si scrive nel diario (una volta)."""
+    if fonte_id:
+        conn.execute("UPDATE competenze_fonti SET tentativi=GREATEST(tentativi-1, 0) WHERE id=%s", (fonte_id,))
+    gia = _imp(conn, "casati3_youtube_bloccato_fino")
+    _scrivi(conn, "casati3_youtube_bloccato_fino", (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())
+    if not gia:
+        registra(conn, "errore", f"YouTube blocca le richieste dal server ({type(e).__name__}: {str(e)[:120]}). Riprovo ogni ora; i video restano da studiare.")
+    conn.commit()
+    _fase("", "in attesa: YouTube blocca le richieste dal server, riprovo fra un'ora")
+
+
+def youtube_in_pausa(conn) -> bool:
+    fino = _imp(conn, "casati3_youtube_bloccato_fino")
+    if not fino:
+        return False
+    try:
+        if datetime.now(timezone.utc) < datetime.fromisoformat(fino):
+            return True
+    except ValueError:
+        pass
+    _scrivi(conn, "casati3_youtube_bloccato_fino", "")
+    return False
+
+
 def _passo_studio(conn) -> str | None:
+    if youtube_in_pausa(conn):
+        return None
     f = conn.execute("""SELECT f.*, c.nome AS competenza, c.carta FROM competenze_fonti f JOIN competenze c ON c.id = f.competenza_id
                         LEFT JOIN casati_target t ON t.id = f.target_id
                         WHERE f.stato='da_studiare' AND f.tentativi < 3 AND (t.id IS NULL OR t.stato='attivo')
@@ -519,9 +573,13 @@ def _passo_studio(conn) -> str | None:
     conn.commit()
     try:
         testo = _trascrizione(f["rif"])
-    except Exception as e:  # noqa: BLE001 - senza sottotitoli (o YouTube che blocca): saltata, si vede nella schermata
+    except Exception as e:  # noqa: BLE001 - senza sottotitoli: saltata; YouTube che blocca: si aspetta, il video resta da studiare
         conn.rollback()
-        conn.execute("UPDATE competenze_fonti SET stato='saltata', errore=%s WHERE id=%s", (str(e)[:300], f["id"]))
+        if bloccato(e):
+            _blocco_youtube(conn, f["id"], e)
+            return None
+        conn.execute("UPDATE competenze_fonti SET stato='saltata', errore=%s WHERE id=%s", (f"{type(e).__name__}: {e}"[:300], f["id"]))
+        registra(conn, "saltato", f"Saltato «{f['titolo'][:80]}» ({f['autore']}): niente sottotitoli")
         conn.commit()
         return "video senza sottotitoli: saltato"
     if len(testo) < 200:
@@ -531,7 +589,7 @@ def _passo_studio(conn) -> str | None:
     istr = ISTR_APPUNTI.format(nome=f["competenza"], carta=f" ({f['carta']})" if f["carta"] else "")
     appunti = []
     for i in range(0, len(testo), PEZZO):
-        r = _chiedi(conn, istr, AVVERTENZA + f"\n\nVIDEO: «{f['titolo']}» — {f['autore']}\nPEZZO {i // PEZZO + 1}:\n" + testo[i:i + PEZZO], 900).strip()
+        r = _chiedi(conn, istr, AVVERTENZA + f"\n\nVIDEO: «{f['titolo']}» — {f['autore']}\nPEZZO {i // PEZZO + 1}:\n" + testo[i:i + PEZZO], 1500).strip()
         if r and not r.upper().startswith("NIENTE"):
             appunti.append(r)
     tutto = "\n".join(appunti)
@@ -583,21 +641,57 @@ def _passo_integra(conn) -> str | None:
     return "integrata"
 
 
+def _carta_dal_testo(t: str) -> tuple[str, str]:
+    """Carta e parole da una risposta che non e' JSON («Carta: ... / Parole: ...»)."""
+    d = _json(t)
+    if isinstance(d, dict) and (d.get("carta") or d.get("parole")):
+        return str(d.get("carta") or "").strip(), str(d.get("parole") or "").strip()
+    carta = re.search(r"(?im)^\W*carta[^:\n]*:\s*(.+)$", t)
+    parole = re.search(r"(?im)^\W*parole[^:\n]*:\s*(.+)$", t)
+    return (carta.group(1).strip().strip('"') if carta else ""), (parole.group(1).strip().strip('"') if parole else "")
+
+
+def _carta_senza_modello(conn, c: dict) -> tuple[str, str]:
+    """Ultimo ripiego: la prima frase del manuale e i titoli delle sezioni come parole chiave."""
+    secs = conn.execute("SELECT titolo, testo FROM competenze_sezioni WHERE competenza_id=%s ORDER BY ordine, id", (c["id"],)).fetchall()
+    testo = re.sub(r"[#*_>`-]+", " ", " ".join(s["testo"] for s in secs[:2]))
+    frase = re.split(r"(?<=[.!?])\s", re.sub(r"\s+", " ", testo).strip())[0][:240] if testo.strip() else ""
+    return frase, ", ".join([c["nome"]] + [s["titolo"] for s in secs[:12]])[:500]
+
+
 def _passo_carta(conn) -> str | None:
-    """Carta d'identita' e parole chiave: al primo manuale e poi ogni 5 aggiornamenti."""
+    """Carta d'identita' e parole chiave: al primo manuale e poi ogni 5 aggiornamenti. Se il modello non ci riesce si riprova
+    (fra 6 ore); al terzo tentativo la carta si ricava dal manuale, cosi' la competenza e' comunque riconoscibile."""
     for c in conn.execute("""SELECT * FROM competenze c WHERE EXISTS (SELECT 1 FROM competenze_sezioni s WHERE s.competenza_id=c.id) ORDER BY c.id""").fetchall():
         fatta = int(_imp(conn, f"casati3_carta_v_{c['id']}", "-1") or -1)
         if fatta >= 0 and c["versione"] < fatta + 5 and c["carta"] and c["parole"]:
             continue
+        falliti, _, quando = _imp(conn, f"casati3_carta_err_{c['id']}", "0|").partition("|")
+        if quando:
+            try:
+                if datetime.now(timezone.utc) - datetime.fromisoformat(quando) < timedelta(hours=6):
+                    continue
+            except ValueError:
+                pass
         _fase(f"scrivo la carta d'identita' di «{c['nome']}»")
-        d = _json(_chiedi(conn, ISTR_CARTA.format(nome=c["nome"]), AVVERTENZA + "\n\n" + manuale(conn, c["id"], "", 9000), 500))
-        carta = str(d.get("carta") or "").strip()[:300] if isinstance(d, dict) else ""
-        parole = str(d.get("parole") or "").strip()[:500] if isinstance(d, dict) else ""
+        carta, parole = _carta_dal_testo(_chiedi(conn, ISTR_CARTA.format(nome=c["nome"]), AVVERTENZA + "\n\n" + manuale(conn, c["id"], "", 7000), 1500))
+        come = ""
+        if not carta:
+            falliti = int(falliti or 0) + 1
+            if falliti < 3:
+                _scrivi(conn, f"casati3_carta_err_{c['id']}", f"{falliti}|{datetime.now(timezone.utc).isoformat()}")
+                registra(conn, "carta", f"Carta d'identita' di «{c['nome']}»: il modello locale non ha dato una risposta leggibile, riprovo fra 6 ore ({falliti}/3)")
+                conn.commit()
+                return "carta da riprovare"
+            carta, parole2 = _carta_senza_modello(conn, c)
+            parole = parole or parole2
+            come = " (ricavata dal manuale, senza modello)"
         conn.execute("""UPDATE competenze SET carta=CASE WHEN %s <> '' THEN %s ELSE carta END,
                         parole=CASE WHEN %s <> '' THEN %s ELSE COALESCE(NULLIF(parole,''), nome) END, da_drive=TRUE WHERE id=%s""",
-                     (carta, carta, parole, parole, c["id"]))
+                     (carta[:300], carta[:300], parole[:500], parole[:500], c["id"]))
         _scrivi(conn, f"casati3_carta_v_{c['id']}", str(c["versione"]))
-        registra(conn, "carta", f"Carta d'identita' di «{c['nome']}»: {carta or '(non riuscita)'}")
+        _scrivi(conn, f"casati3_carta_err_{c['id']}", "0|")
+        registra(conn, "carta", f"Carta d'identita' di «{c['nome']}»{come}: {carta[:200]}")
         conn.commit()
         return "carta"
     return None
@@ -616,7 +710,7 @@ def _passo_assegna(conn) -> str | None:
     if agenti:
         _fase(f"decido a chi dare «{c['nome']}»")
         scelti = _json(_chiedi(conn, ISTR_ASSEGNA.format(nome=c["nome"], carta=c["carta"]),
-                               "\n".join(f"{a['id']}: {a['nome']} — {a['ruolo'][:150]}" for a in agenti), 200))
+                               "\n".join(f"{a['id']}: {a['nome']} — {a['ruolo'][:150]}" for a in agenti), 800))
         ids = {a["id"] for a in agenti}
         for x in (scelti if isinstance(scelti, list) else []):
             try:
@@ -736,7 +830,9 @@ def _passo_esame(conn) -> str | None:
 
 
 # ---------- il giro ----------
-PASSI_GIORNO = (_passo_errori, _passo_elenchi, _passo_temi, _passo_drive, _passo_carta, _passo_assegna, _passo_integra, _passo_studio)
+PRIMA = (_passo_errori, _passo_elenchi, _passo_temi, _passo_drive)                 # veloci, senza modello
+A_TURNO = (_passo_studio, _passo_integra, _passo_carta, _passo_studio, _passo_integra, _passo_assegna)   # col modello: lo studio ha due turni su sei
+PASSI_GIORNO = PRIMA + A_TURNO
 SENZA_MODELLO = {_passo_errori, _passo_elenchi, _passo_temi, _passo_drive}
 
 
@@ -745,7 +841,9 @@ def giro(conn, ora: datetime | None = None) -> str | None:
     if not attiva(conn) or not BLOCCO.acquire(blocking=False):
         return None
     try:
-        passi = ((_passo_esame,) if in_notte(ora) else ()) + PASSI_GIORNO
+        STATO["turno"] = (STATO.get("turno", -1) + 1) % len(A_TURNO)
+        girati = A_TURNO[STATO["turno"]:] + A_TURNO[:STATO["turno"]]
+        passi = ((_passo_esame,) if in_notte(ora) else ()) + PRIMA + girati
         saltati = False
         for p in passi:
             if p not in SENZA_MODELLO and fornitori.locale_occupato():
@@ -807,6 +905,18 @@ def importa_dalla_2(conn, src) -> dict:
 
 SEME = ("Strategia e storie d'impresa", ["Gurulandia", "Starting Finance"],
         "Storie di aziende e imprenditori, interviste e casi: come nascono, crescono e sbagliano le imprese; per strategia, posizionamento e decisioni di business.")
+
+
+def ripara(conn):
+    """Una volta, all'avvio della 2.61.1: i video «saltati» perche' YouTube bloccava il server o perche' il modello locale
+    ha consumato la risposta nel ragionamento tornano da studiare; le carte non riuscite si riprovano subito."""
+    if _imp(conn, "casati3_riparato") == "2.61.1":
+        return
+    _scrivi(conn, "casati3_riparato", "2.61.1")
+    conn.execute("DELETE FROM impostazioni_sistema WHERE chiave LIKE 'casati3_carta_v_%%' AND chiave IN (SELECT 'casati3_carta_v_' || id FROM competenze WHERE carta = '')")
+    conn.execute("""UPDATE competenze_fonti SET stato='da_studiare', tentativi=0, errore='' WHERE stato='saltata'
+                    AND (errore ~* '(requestblocked|ipblocked|blocked|429|too many requests|sign in to confirm|not a bot|captcha)'
+                         OR errore = 'niente di utile per la competenza')""")
 
 
 def semina(conn):
