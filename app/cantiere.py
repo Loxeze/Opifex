@@ -72,9 +72,11 @@ def da_usare(agente_id: int, messaggio: str, fascia_dati: str, veloce: bool) -> 
         modo = _imp(conn, "cantiere_modo", "auto")   # auto | sempre | spento
         if modo == "spento" or (modo != "sempre" and (origine not in ORIGINI or not sembra_complesso(messaggio))):
             return None
-        a = conn.execute("""SELECT a.id, a.nome, a.ruolo, a.fascia_dati_max, a.attivo, a.max_token_risposta, f.nome AS fornitore
+        a = conn.execute("""SELECT a.id, a.nome, a.ruolo, a.fascia_dati_max, a.attivo, a.max_token_risposta, f.nome AS fornitore, a.ruolo_speciale
                             FROM agenti a JOIN modelli_ai m ON m.nome = a.modello JOIN fornitori_ai f ON f.id = m.fornitore_id WHERE a.id = %s""", (agente_id,)).fetchone()
         if a is None or not a["attivo"] or a["fornitore"] != "locale":
+            return None
+        if a["ruolo_speciale"] == "formatore":   # Padre Casati studia con il suo motore, non a mano per schede
             return None
         from .delega_online import _modello
         m = _modello(conn)

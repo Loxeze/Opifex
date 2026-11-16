@@ -306,6 +306,7 @@ async def ciclo_vita(app: FastAPI):
                     _sc3.assicura_agente(conn)
                     _sc3.semina(conn)
                     _sc3.ripara(conn)
+                    _sc3.ripara_note(conn)
                     __import__("app.marchi", fromlist=["x"]).semina(conn)
                 from . import prezzi as _pz3
                 _pz3.applica_listino(conn)

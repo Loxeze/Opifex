@@ -74,6 +74,10 @@ def _casati(conn, acceso) -> dict | None:
     if scuola.youtube_in_pausa(conn):
         return _esito("casati", "Padre Casati", "studia i canali", "fermo", "YouTube blocca le richieste dal server: nessun video si puo' studiare.",
                       "Serve far passare lo studio dal tuo PC: dillo a Claude.", "scuola", num)
+    rotture = conn.execute("SELECT count(*) AS n FROM casati_registro WHERE quando > NOW() - INTERVAL '6 hours' AND testo LIKE '%%chiuso la connessione%%'").fetchone()["n"]
+    if rotture >= 3 and not fatti["sei"]:
+        return _esito("casati", "Padre Casati", "studia i canali", "fermo", f"Il modello locale chiude la connessione a meta' risposta ({rotture} volte in 6 ore) e nessun video e' stato studiato.",
+                      "Tieni il portatile acceso e collegato (niente sospensione); se continua, scegli un modello locale piu' leggero in Computer locali.", "computer", num)
     if acceso is False:
         return _esito("casati", "Padre Casati", "studia i canali", "attenzione", f"Aspetta: nessun computer con il modello locale e' acceso. Ultimo video studiato: {ult}.",
                       "Accendi il portatile con Ollama.", "scuola", num)

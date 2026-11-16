@@ -22,7 +22,7 @@ from .fornitori import ErroreFornitore, ErroreLocale
 
 ROMA = ZoneInfo("Europe/Rome")
 NOTTE = (1, 6)                 # esami dall'1 alle 6
-PEZZO = 6500                   # caratteri di trascrizione per chiamata
+PEZZO = 4000                   # caratteri di trascrizione per chiamata
 MAX_SEZIONI = 24
 MAX_SEZIONE = 5000
 FONTI_PER_LIVELLO = 3          # ogni 3 fonti integrate si alza di uno il livello massimo raggiungibile
@@ -339,8 +339,8 @@ def _chiedi(conn, istr: str, msg: str, max_token: int = 1500) -> str:
         r = fornitori.chiama_modello("locale", modello, istr, msg, max_token)
         # i modelli che «ragionano» (qwen3, deepseek-r1, gpt-oss) spendono token nel ragionamento: se la risposta resta vuota
         # o tagliata, si riprova una volta con il triplo dello spazio
-        if (not _pulisci(r.testo) or ((r.diag or {}).get("stop") == "length" and not _pulisci(r.testo).rstrip().endswith(("}", "]", ".")))) and max_token < 6000:
-            r = fornitori.chiama_modello("locale", modello, istr, msg, max_token * 3)
+        if (not _pulisci(r.testo) or ((r.diag or {}).get("stop") == "length" and not _pulisci(r.testo).rstrip().endswith(("}", "]", ".")))) and max_token < 3000:
+            r = fornitori.chiama_modello("locale", modello, istr, msg, min(max_token * 3, 3000))
     finally:
         fornitori.BASSA_PRIORITA.reset(tok)
     try:
@@ -855,9 +855,17 @@ def giro(conn, ora: datetime | None = None) -> str | None:
                 conn.rollback()
                 _fase("", "in pausa: il modello locale serve agli agenti")
                 return None
-            except ErroreLocale:
+            except ErroreLocale as e:
                 conn.rollback()
-                _fase("", "in attesa: nessun computer con il modello locale acceso")
+                if any(x in str(e) for x in ("ReadError", "RemoteProtocolError", "ReadTimeout")):
+                    _fase("", f"il computer ha chiuso la connessione a meta' risposta ({str(e).split('(')[-1].split(')')[0]}): riprovo")
+                    if _imp(conn, "casati3_ultimo_readerror", "")[:13] != datetime.now(timezone.utc).isoformat()[:13]:
+                        _scrivi(conn, "casati3_ultimo_readerror", datetime.now(timezone.utc).isoformat())
+                        registra(conn, "errore", "Il modello locale ha chiuso la connessione a meta' risposta (il portatile e' andato in sospensione, "
+                                                 "ha cambiato rete o il modello e' troppo pesante). Riprovo da solo.")
+                        conn.commit()
+                else:
+                    _fase("", "in attesa: nessun computer con il modello locale acceso")
                 return None
             except ErroreFornitore as e:
                 conn.rollback()
@@ -919,6 +927,16 @@ def ripara(conn):
                          OR errore = 'niente di utile per la competenza')""")
 
 
+def ripara_note(conn):
+    """Una volta (2.62.1): le note di Padre Casati che dicono di procurarsi chiavi YouTube o export del catalogo sono superate."""
+    if _imp(conn, "casati3_note_riparate") == "1":
+        return
+    _scrivi(conn, "casati3_note_riparate", "1")
+    conn.execute("""UPDATE memorie_lavoro SET stato='superata' WHERE stato IN ('proposta','approvata')
+                    AND proposta_da_agente_id IN (SELECT id FROM agenti WHERE ruolo_speciale='formatore')
+                    AND testo ~* '(youtube data api|chiave youtube|export del catalogo|metadati del primo video)'""")
+
+
 def semina(conn):
     """Una volta sola: i primi canali da studiare scelti da Lorenzo."""
     if _imp(conn, "casati3_seminato") == "1":
@@ -943,7 +961,9 @@ IL TUO MOTORE DI STUDIO lavora da solo, in sottofondo, con il modello locale: el
 prende appunti e aggiorna i manuali. Non ti servono chiavi YouTube API, export del catalogo o altro da Lorenzo: NON chiederli mai.
 - Per sapere cosa stai studiando, a che punto sei e se ci sono errori: usa stato_studio, sempre, prima di rispondere.
 - Per mettere in studio un canale nuovo: chiedi_competenza con il campo «canale» (Lorenzo lo approva con un clic).
-- Se stato_studio mostra un errore, riferiscilo a Lorenzo con le parole dell'errore; non inventare cause e non chiedere chiavi."""
+- Se stato_studio mostra un errore, riferiscilo a Lorenzo con le parole dell'errore; non inventare cause e non chiedere chiavi.
+- Non studiare mai «a mano» (metadati dei video, primo video, elenchi, Social Blade, documenti di appunti): se un compito o una nota te lo chiede,
+  rispondi con cio' che dice stato_studio e spiega che lo studio lo fa il motore. Le tue note vecchie che parlano di chiavi API sono superate."""
 _VECCHIE_CASATI = ("Sei Padre Casati, il formatore della squadra di Lorenzo Zeppa. Studi canali YouTube",)
 
 

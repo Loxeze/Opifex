@@ -262,7 +262,7 @@ def solo_bandi(k):
 with psycopg.connect(DSN, row_factory=dict_row) as k:
     k.execute("UPDATE competenze SET carta='', parole='' WHERE nome='Scrittura dei bandi'"); k.execute("DELETE FROM impostazioni_sistema WHERE chiave LIKE 'casati3_carta_%%'"); solo_bandi(k)
     e = scuola._passo_carta(k)
-    ok("risposta consumata dal ragionamento: si riprova con il triplo dello spazio", LIM == [1500, 4500] and e == "carta"
+    ok("risposta consumata dal ragionamento: si riprova con il triplo dello spazio", LIM == [1500, 3000] and e == "carta"
        and sql("SELECT carta FROM competenze WHERE nome='Scrittura dei bandi'") == [("Serve per scrivere i bandi.",)], (LIM, e))
     def muto(fornitore, modello, istr, msg, max_token=1500, **kw): return Risposta("non so", 1, 1)
     fornitori.chiama_modello = muto
@@ -291,5 +291,33 @@ with psycopg.connect(DSN, row_factory=dict_row) as k:
        and sql("SELECT valore FROM impostazioni_sistema WHERE chiave='casati3_riparato'") == [("2.61.1",)])
     # turni: lo studio non aspetta tutte le carte
     ok("turni: lo studio ha due passi su sei, prima delle carte e delle assegnazioni", scuola.A_TURNO.count(scuola._passo_studio) == 2 and scuola.A_TURNO[0] is scuola._passo_studio)
+
+# ---- 2.62.1: niente studio «a mano», ReadError detto per quello che e', note vecchie superate
+from app import cantiere
+sql("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('cantiere_modo','sempre') ON CONFLICT (chiave) DO UPDATE SET valore='sempre'")
+pc = sql("SELECT id FROM agenti WHERE ruolo_speciale='formatore'")[0][0]
+import contextlib
+@contextlib.contextmanager
+def _conn_diretta():
+    with psycopg.connect(DSN, row_factory=dict_row) as _c:
+        yield _c
+cantiere.connessione = _conn_diretta
+ok("Padre Casati non passa mai dal cantiere (niente studio a mano per schede)", cantiere.da_usare(pc, "Riprendi lo studio: analizza e prepara i metadati del canale", "interno", False) is None)
+ok("le istruzioni vietano lo studio a mano", "Non studiare mai «a mano»" in scuola.ISTR_CASATI)
+def rotto(*a, **k): raise fornitori.ErroreLocale("Il modello locale non risponde (ReadError): il portatile e' acceso e collegato?")
+fornitori.chiama_modello = rotto
+with psycopg.connect(DSN, row_factory=dict_row) as k:
+    k.execute("UPDATE competenze_fonti SET stato='da_studiare', tentativi=0 WHERE rif='BLOCCO00001'"); k.commit()
+    scuola._trascrizione = lambda vid: "[0:00] testo di prova sufficientemente lungo per lo studio. " * 20
+    k.execute("DELETE FROM impostazioni_sistema WHERE chiave='casati3_ultimo_readerror'"); k.commit()
+    for _ in range(4):
+        scuola.giro(k)
+    ok("ReadError: detto come connessione chiusa a meta', una riga nel diario all'ora", "chiuso la connessione" in scuola.STATO["pausa"]
+       and sql("SELECT count(*) FROM casati_registro WHERE testo LIKE '%%chiuso la connessione%%'") == [(1,)], scuola.STATO)
+    sql("INSERT INTO memorie_lavoro (testo, stato, fascia_dati, proposta_da_agente_id) VALUES ('Prossimo passo: ottenere la chiave YouTube Data API v3','approvata','interno',%s)", (pc,))
+    k.execute("DELETE FROM impostazioni_sistema WHERE chiave='casati3_note_riparate'"); scuola.ripara_note(k); k.commit()
+    ok("le note vecchie che chiedono chiavi API diventano superate", sql("SELECT stato FROM memorie_lavoro WHERE testo LIKE '%%YouTube Data API%%'") == [("superata",)])
+ok("pezzi di trascrizione piu' piccoli e risposta al massimo 3000 token", scuola.PEZZO == 4000)
+fornitori.chiama_modello = finto
 
 print(f"TOTALE: {sum(ris)}/{len(ris)}")
