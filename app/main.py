@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -479,6 +479,28 @@ app.include_router(router_riepilogo)
 @app.get("/", include_in_schema=False)
 def inizio():
     return RedirectResponse("/app/")
+
+
+_PRIVACY = """<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Opifex · Informativa sulla privacy</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#222}h1{font-size:1.6rem}h2{font-size:1.15rem;margin-top:1.6rem}</style></head><body>
+<h1>Opifex · Informativa sulla privacy</h1>
+<p>Opifex è uno strumento di lavoro personale di Lorenzo Zeppa (Masone, Genova, Italia). Non è un servizio offerto al pubblico: lo usano solo il titolare e i suoi collaboratori, con account creati da lui.</p>
+<h2>Dati Google</h2>
+<p>Con l'autorizzazione del titolare dell'account, Opifex accede a Gmail (lettura, bozze e, se scelto, segnare come lette le email), Google Calendar e Google Drive, solo per gli account che il titolare collega di persona.
+I dati servono esclusivamente a far funzionare Opifex per il titolare: smistare e riassumere la posta, preparare bozze che partono solo dopo la sua approvazione, gestire agenda e documenti.
+Il testo delle email è elaborato da un modello di intelligenza artificiale sul computer del titolare e non viene conservato nel database.</p>
+<p>L'uso dei dati ricevuti dalle API di Google rispetta le <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, compresi i requisiti di Limited Use. I dati non vengono venduti, ceduti a terzi né usati per pubblicità o per addestrare modelli di intelligenza artificiale.</p>
+<h2>Conservazione e sicurezza</h2>
+<p>Le credenziali sono cifrate. I dati restano sul server del titolare (Italia/UE) e sui suoi computer. L'accesso si può revocare in ogni momento da <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a> o scollegando l'account in Opifex; con la revoca le credenziali vengono cancellate.</p>
+<h2>Contatti</h2>
+<p>Per qualsiasi richiesta sui dati: Lorenzo Zeppa, titolare di Opifex, tramite l'indirizzo email di assistenza indicato nella schermata di autorizzazione di Google.</p>
+<p><small>Ultimo aggiornamento: 18 novembre 2026.</small></p></body></html>"""
+
+
+@app.get("/privacy", include_in_schema=False)
+def privacy():
+    """Informativa sulla privacy (pubblica): la chiede Google per autorizzare l'app."""
+    return HTMLResponse(_PRIVACY)
 
 
 # Interfaccia web (pagine statiche): tutto il resto passa dall'API con il token di accesso
