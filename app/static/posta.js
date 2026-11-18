@@ -123,7 +123,8 @@ function _cartaStorico(d, ricarica) {
     return h("div", { class: "storico-riga" },
       h("div", { class: "posta-testa" }, h("strong", {}, c.email), h("span", { class: "sotto" }, s_.fatto ? "✓ completato" : fatti ? "fino a " + MESI_IT[(fino.getMonth() + 11) % 12].toLowerCase() : "da iniziare")),
       h("div", { class: "storico-barra" }, h("div", { style: "width:" + Math.round(100 * fatti / mesiTot) + "%" })),
-      h("div", { class: "sotto" }, (s_.email || 0) + " email lette · " + (s_.documenti || 0) + " fatture e ricevute trovate" + (s_.errore ? " · ⚠ " + s_.errore : "")));
+      h("div", { class: "sotto" }, (s_.email || 0) + " email lette · " + (c.documenti != null ? c.documenti : (s_.documenti || 0)) + " fatture e ricevute trovate"
+        + (c.da_esaminare ? " · " + c.da_esaminare + " ancora da esaminare (le controlla il modello locale quando il computer è acceso)" : "") + (s_.errore ? " · ⚠ " + s_.errore : "")));
   });
   const tutto = st.elenco.every(c => ((st.caselle || {})[c.chiave] || {}).fatto && ((st.caselle || {})[c.chiave] || {}).dal === st.dal);
   const data = h("input", { type: "date", value: st.dal, style: "width:auto" });

@@ -336,7 +336,24 @@ def _agente_posta(conn):
     return r["id"] if r else None
 
 
+def _pulisci(t: str | None) -> str:
+    """Toglie il ragionamento che alcuni modelli locali scrivono prima della risposta (<think>...</think>)."""
+    t = re.sub(r"(?s)<think>.*?</think>", "", t or "")
+    if "<think>" in t:          # ragionamento non chiuso: la risposta non c'e'
+        t = t.split("<think>")[0]
+    return t.strip()
+
+
 def _chiedi(conn, istruzioni: str, messaggio: str, max_token: int = 1500) -> str:
+    """Una domanda al modello locale. La risposta arriva senza il ragionamento; se e' vuota o tagliata prima del JSON si riprova una volta
+    con piu' spazio (i modelli che ragionano consumano gran parte dei token prima di rispondere)."""
+    testo = _chiedi_una(conn, istruzioni, messaggio, max_token)
+    if not testo or _json(testo) is None:
+        testo = _chiedi_una(conn, istruzioni, messaggio, min(max_token * 3, 4000)) or testo
+    return testo
+
+
+def _chiedi_una(conn, istruzioni: str, messaggio: str, max_token: int) -> str:
     modello = modello_locale(conn)
     conn.commit()   # la risposta del computer locale puo' durare minuti: nessuna transazione aperta nel frattempo
     r = fornitori.chiama_modello("locale", modello, istruzioni, messaggio, max_token)
@@ -348,12 +365,12 @@ def _chiedi(conn, istruzioni: str, messaggio: str, max_token: int = 1500) -> str
         conn.rollback()
     LAVORO["risposte"] += 1
     LAVORO["ultima_risposta"] = datetime.now(timezone.utc).isoformat()
-    return r.testo
+    return _pulisci(r.testo)
 
 
 def _json(testo: str):
-    t = re.sub(r"```(?:json)?", "", testo or "")
-    for a, b in (("[", "]"), ("{", "}")):
+    t = re.sub(r"```(?:json)?", "", _pulisci(testo))
+    for a, b in sorted((("[", "]"), ("{", "}")), key=lambda x: t.find(x[0]) if t.find(x[0]) >= 0 else 10 ** 9):
         i, j = t.find(a), t.rfind(b)
         if i >= 0 and j > i:
             try:
@@ -610,11 +627,12 @@ def vaglia(conn, forza: bool = False, giorni: int | None = None) -> dict:
                 (avanza if analisi else lambda **kw: LAVORO.update(kw))(fase=f"il modello locale legge le email: ne mancano {resto}")
             if not analisi or not fatte_ora:
                 break
-        fatte_amm = 0
+        fatte_amm, giri_amm = 0, 0
         while True:   # fatture, ricevute, avvisi di pagamento: prima un setaccio a parole, poi il modello locale estrae i dati
             n_amm = amministrazione(conn, AMM_PER_GIRO, (avanza if analisi else lambda **kw: LAVORO.update(kw)))
             fatte_amm += n_amm
-            if not analisi or not n_amm:
+            giri_amm += 1
+            if not n_amm or (not analisi and giri_amm >= 3):   # nel giro automatico al massimo 3 passate: smaltisce l'arretrato senza fermare il resto
                 break
         conto["documenti"] = fatte_amm
         if analisi:
@@ -658,7 +676,7 @@ def giro(conn):
         return {"saltato": "gia' in corso"}
     try:
         esito = vaglia(conn)
-        if storico_attivo(conn) and not esito.get("errore") and not esito.get("saltato"):
+        if storico_attivo(conn) and not esito.get("saltato"):   # anche col computer locale spento: scaricare la posta vecchia non chiede il modello
             try:   # poi un mese della posta passata (dal 1 gennaio), finche' non e' tutta recuperata
                 esito["storico"] = storico(conn, False, lambda **kw: LAVORO.update(kw))
             except ErroreFornitore as e:   # computer locale spento: il recupero riprende al giro dopo, dallo stesso punto
@@ -1024,6 +1042,16 @@ def storico_stato(conn) -> dict:
         return {}
 
 
+def storico_numeri(conn, c: dict) -> dict:
+    """Numeri dal vivo di una casella: fatture e ricevute trovate dal giorno di partenza, ed email ancora da esaminare
+    (scaricate ma non ancora passate dal setaccio e dal modello locale: si esaminano ai giri successivi)."""
+    r = conn.execute("""SELECT (SELECT count(*) FROM posta_amministrazione a JOIN posta_vaglio v ON v.id = a.vaglio_id
+                                WHERE v.origine=%(o)s AND v.casella_id=%(c)s AND v.data >= %(d)s) AS documenti,
+                               (SELECT count(*) FROM posta_vaglio WHERE origine=%(o)s AND casella_id=%(c)s AND NOT amm_controllata) AS da_esaminare""",
+                     {"o": c["origine"], "c": c["id"], "d": storico_dal(conn)}).fetchone()
+    return {"documenti": r["documenti"], "da_esaminare": r["da_esaminare"]}
+
+
 def storico_attivo(conn) -> bool:
     from . import edizione
     return _imp(conn, "posta_storico_attivo", "1" if edizione.tre() else "0") == "1"
@@ -1086,11 +1114,14 @@ def storico_passo(conn, avanzamento=None) -> dict | None:
                 nuove += 1 if r["nuova"] else 0
         conn.commit()
         documenti = 0
-        while True:   # le fatture e le ricevute di questo mese, subito (il testo e' ancora in memoria)
-            n = amministrazione(conn, AMM_PER_GIRO, avanzamento)
-            documenti += n
-            if not n:
-                break
+        try:
+            while True:   # le fatture e le ricevute di questo mese, subito (il testo e' ancora in memoria)
+                n = amministrazione(conn, AMM_PER_GIRO, avanzamento)
+                documenti += n
+                if not n:
+                    break
+        except ErroreFornitore:   # computer locale spento: le email restano da esaminare, se ne occupano i giri successivi
+            conn.rollback()
         archivia_in_sospeso(conn, 50)
         s_.update(fino_a=fine.isoformat(), email=s_.get("email", 0) + len(elenco), errore="",
                   documenti=conn.execute("""SELECT count(*) AS n FROM posta_amministrazione a JOIN posta_vaglio v ON v.id = a.vaglio_id

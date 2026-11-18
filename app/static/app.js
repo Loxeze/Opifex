@@ -238,7 +238,7 @@ function cornice(contenuto) {
   radice.replaceChildren(
     h("header", {}, h("h1", {}, stato.edizione === 3 ? "Opifex 3" : "Opifex", h("small", {}, "la bottega degli agenti")),
       h("nav", { "aria-label": "Menu principale" }, nav),
-      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.10.0" : "2.63.0"))),
+      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.10.1" : "2.63.1"))),
     h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "organigramma" ? "largo" : "" }, stato.ruolo === "titolare" ? schedeGruppo() : null, contenuto));
 }
 

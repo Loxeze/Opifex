@@ -39,7 +39,7 @@ def da_leggere(tutte: bool = False, _: dict = Depends(solo_titolare)):
                 for f in posta_vaglio.da_fare(conn)]
         aperte = conn.execute("SELECT count(*) AS n FROM posta_situazioni WHERE aperta").fetchone()["n"]
         storico = {"dal": posta_vaglio.storico_dal(conn).isoformat(), "attivo": posta_vaglio.storico_attivo(conn), "caselle": posta_vaglio.storico_stato(conn),
-                   "elenco": [{"chiave": c["chiave"], "email": c["email"]} for c in posta_vaglio.caselle(conn)]}
+                   "elenco": [dict({"chiave": c["chiave"], "email": c["email"]}, **posta_vaglio.storico_numeri(conn, c)) for c in posta_vaglio.caselle(conn)]}
         return {"email": [_riga(r) for r in righe], "conteggi": conteggi, "da_fare": fare, "situazioni_aperte": aperte, "storico": storico, "stato": posta_vaglio.stato(conn), "quadro": q,
                 "caselle": len(posta_vaglio.caselle(conn)), "modello": posta_vaglio.modello_locale(conn),
                 "attivo": posta_vaglio.vaglio_attivo(conn), "in_corso": in_corso, "lavoro": dict(posta_vaglio.LAVORO) if in_corso else None, "solo_locale": posta_vaglio.solo_locale(conn), "regole": posta_vaglio.regole(conn),
