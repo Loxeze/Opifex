@@ -16,7 +16,7 @@ def elenco(_: dict = Depends(solo_titolare)):
         return conn.execute(
             """SELECT e.id, e.canale, e.mittente, e.destinatari, e.oggetto, e.testo, e.diretta, e.stato, e.errore, e.creata_il, e.decisa_il, a.nome AS agente
                FROM email_in_uscita e LEFT JOIN agenti a ON a.id = e.agente_id
-               WHERE e.stato IN ('da_approvare', 'errore') OR e.decisa_il > NOW() - INTERVAL '7 days'
+               WHERE e.campagna_id IS NULL AND (e.stato IN ('da_approvare', 'errore') OR e.decisa_il > NOW() - INTERVAL '7 days')
                ORDER BY (e.stato = 'da_approvare') DESC, (e.stato = 'errore') DESC, e.creata_il DESC LIMIT 60""").fetchall()
 
 
@@ -59,6 +59,8 @@ def decisione(eid: int, d: Decisione, utente: dict = Depends(solo_titolare)):
                              (utente["id"], eid)).fetchone()
             if r is None:
                 raise HTTPException(status.HTTP_409_CONFLICT, "L'email non e' piu' in attesa")
+            from . import campagne
+            campagne.dopo_scarto(conn, eid)
             registro.registra(conn, utente, "email_uscita", "scartata", r["oggetto"][:200], "email_in_uscita", eid)
             return {"stato": "rifiutata"}
         try:

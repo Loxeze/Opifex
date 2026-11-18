@@ -2,7 +2,7 @@
 // Contatti (CRM): liste, importazione CSV, riepilogo aggregato e ricerca. I dati personali sono cifrati sul server; gli agenti vedono solo conteggi.
 
 function vistaCrm() {
-  const TAB = [["cruscotto", "Cruscotto"], ["schede", "Contatti"], ["ricontattare", "Da ricontattare"], ["pipeline", "Opportunità"], ["radar", "Radar"], ["ricerca", "Ricerca contatti"], ["campi", "Campi e categorie"], ["liste", "Liste"]];
+  const TAB = [["cruscotto", "Cruscotto"], ["schede", "Contatti"], ["ricontattare", "Da ricontattare"], ["pipeline", "Opportunità"], ["campagne", "Campagne email"], ["radar", "Radar"], ["ricerca", "Ricerca contatti"], ["campi", "Campi e categorie"], ["liste", "Liste"]];
   if (!stato.crmTab) stato.crmTab = "cruscotto";
   const corpo = h("div");
   const tabs = h("div", { class: "azioni", style: "margin-bottom:12px;align-items:center" }, TAB.map(([id, nome]) => h("button", { class: stato.crmTab === id ? "p" : "s", onclick: () => { stato.crmTab = id; disegna(); } }, nome)));
@@ -18,6 +18,7 @@ function vistaCrm() {
   else if (stato.crmTab === "schede") corpo.append(...[].concat(crmContatti()));
   else if (stato.crmTab === "ricontattare") corpo.append(...[].concat(crmSchede("da_ricontattare")));
   else if (stato.crmTab === "pipeline") corpo.append(...[].concat(crmBacheca()));
+  else if (stato.crmTab === "campagne") corpo.append(...[].concat(crmCampagne()));
   else if (stato.crmTab === "ricerca") corpo.append(...[].concat(crmRicerca()));
   else if (stato.crmTab === "radar") corpo.append(...[].concat(crmRadar(), crmRicerca(true)));
   else if (stato.crmTab === "campi") corpo.append(...[].concat(campiPersonalizzati()));

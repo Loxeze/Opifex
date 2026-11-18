@@ -85,7 +85,8 @@ CHIAVI_AGG = ("github_repo", "github_token", "aggiornamento_automatico")
 COSE = {"chiavi": "Chiavi API dei fornitori AI", "computer": "Computer locali (Ollama) e modelli locali", "garanzie": "Garanzie dei fornitori",
         "google": "Collegamento Google (Gmail, Drive, Calendar)", "aggiornamenti": "Aggiornamenti automatici (da dove arrivano)",
         "competenze": "Competenze e studi di Padre Casati",
-        "social": "Social: account Buffer e collegamenti diretti (Meta, LinkedIn, TikTok...)"}
+        "social": "Social: account Buffer e collegamenti diretti (Meta, LinkedIn, TikTok...)",
+        "crm": "Imprese del gruppo, contatti del CRM e affari (opportunita')"}
 
 
 def _sorgente():
@@ -121,12 +122,15 @@ def anteprima() -> dict:
             n_soc = src.execute("SELECT (SELECT count(*) FROM account_buffer) + (SELECT count(*) FROM account_social) AS n").fetchone()["n"]
         except Exception:  # noqa: BLE001
             src.rollback(); n_soc = 0
+        from . import importa2
+        n_crm = importa2.anteprima(src)
     return {"disponibile": True, "cose": COSE,
             "chiavi": [k.split("_")[1] for k in CHIAVI_IA[:3] if imp.get(k)],
             "computer": [{"nome": m.get("nome"), "modello": m.get("modello")} for m in macchine if isinstance(m, dict)],
             "garanzie": [{"nome": g["nome"], "complete": bool(g["nc"] and g["dpa"]), "fascia": g["fascia_dati_max"]} for g in gar],
             "google": [{"etichetta": g["etichetta"], "email": g["email"], "servizi": g["servizi"]} for g in goo],
-            "aggiornamenti": bool(imp.get("github_repo")), "competenze": n_comp, "social": n_soc}
+            "aggiornamenti": bool(imp.get("github_repo")), "competenze": n_comp, "social": n_soc,
+            "crm": {"imprese": n_crm.get("aziende", 0), "contatti": n_crm.get("crm_contatti", 0), "affari": n_crm.get("crm_opportunita", 0)}}
 
 
 def importa(conn, scelte: list[str]) -> dict:
@@ -177,6 +181,10 @@ def importa(conn, scelte: list[str]) -> dict:
         if "social" in scelte:
             from . import marchi
             fatto["social"] = marchi.importa_collegamenti(conn, src)
+        if "crm" in scelte:
+            from . import importa2
+            c = importa2.importa(conn, src)
+            fatto["crm"] = c.get("aziende", 0) + c.get("crm_contatti", 0) + c.get("crm_opportunita", 0)
         if "competenze" in scelte:
             from . import scuola
             fatto["competenze"] = scuola.importa_dalla_2(conn, src)["competenze"]

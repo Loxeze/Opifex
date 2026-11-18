@@ -69,7 +69,8 @@ function vistaAvvio() {
             google: a.google.length ? a.google.map(g => g.email).join(", ") : "nessun account",
             aggiornamenti: a.aggiornamenti ? "dalla stessa fonte della 2" : "non impostati",
             competenze: a.competenze ? a.competenze + " competenze, con i video già studiati" : "nessuna",
-            social: a.social ? a.social + " account (Buffer e collegamenti diretti)" : "nessuno" };
+            social: a.social ? a.social + " account (Buffer e collegamenti diretti)" : "nessuno",
+            crm: a.crm ? a.crm.imprese + " imprese, " + a.crm.contatti + " contatti, " + a.crm.affari + " affari (con schede, storia e recapiti)" : "nessuno" };
           const scelte = Object.keys(a.cose).map(k => { const c = h("input", { type: "checkbox", value: k }); c.checked = !(dati.importato || []).includes(k);
             return h("label", { class: "spunta" }, c, h("span", {}, h("b", {}, a.cose[k]), " — " + det[k] + ((dati.importato || []).includes(k) ? " (già copiato)" : ""))); });
           riempi(box, [h("h3", {}, "Copia dalla 2"), h("p", { class: "sotto" }, "Si copia e basta: nella 2 non cambia nulla. I segreti restano cifrati."), scelte,

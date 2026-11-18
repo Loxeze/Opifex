@@ -402,3 +402,16 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .gu-ok{display:flex;flex-wrap:wrap;gap:6px}
 .gu-chip{all:unset;cursor:pointer;display:inline-flex;gap:6px;align-items:center;padding:3px 10px;border-radius:999px;border:1px solid var(--bordo);font-size:12.5px;color:var(--tenue)}
 .gu-chip .gu-luce{margin-top:0;width:8px;height:8px}
+/* 2.63: traffico dei siti e campagne email */
+.si-pallino{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:middle}
+.si-andamento{display:flex;gap:10px;align-items:center}
+.cp-dest{margin:8px 0;padding:10px 14px;display:flex;flex-direction:column;gap:6px}
+.cp-dest details textarea,.cp-dest details input{width:100%}
+.cp-stato{font-size:12px;padding:1px 8px;border-radius:999px;border:1px solid var(--bordo);color:var(--tenue)}
+.cp-da_approvare,.cp-errore{border-color:var(--avv,#8A6A2F);color:var(--avv,#8A6A2F)}
+.cp-inviata,.cp-approvata{color:var(--ok,#1F6B52)}
+.cp-risposto,.cp-interessato{background:var(--ok,#1F6B52);color:#fff;border-color:transparent}
+.cp-rimosso,.cp-non_interessato,.cp-scartata{color:var(--no,#9A3A1F)}
+.carta.mq-marchio .mq-titolo h3,.carta .mq-titolo h3{font-size:18px;text-transform:none;letter-spacing:0;color:var(--testo);font-weight:600;margin:0}
+.si-periodo{width:auto!important;min-width:140px}
+.cp-nome{margin:6px 0 4px;font-size:22px}

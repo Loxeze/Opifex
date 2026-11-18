@@ -151,7 +151,7 @@ function mostraAccesso(errore) {
 // ---------- Struttura ----------
 // Tutte le pagine raggiungibili dal titolare (servono a ricordare l'ultima pagina aperta)
 const VISTE = [["dashboard", "Plancia"], ["briefing", "Briefing"], ["task", "Task"], ["riunioni", "Riunioni"], ["chat", "Chat"], ["posta", "Posta"], ["email", "Email marketing"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["crm", "Contatti"], ["social", "Social"],
-  ["finestre", "Finestre"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["scuola", "Padre Casati"], ["computer", "Computer locali"], ["avvio", "Avvio guidato"], ["sez", "Sezione"], ["impostazioni", "Impostazioni"]];
+  ["finestre", "Finestre"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["scuola", "Padre Casati"], ["traffico", "Traffico dei siti"], ["campagne", "Campagne email"], ["computer", "Computer locali"], ["avvio", "Avvio guidato"], ["sez", "Sezione"], ["impostazioni", "Impostazioni"]];
 // Il menu del titolare (2.52): poche voci, ognuna con le sue schede in alto. Ogni scheda: [etichetta, vista, sezione?].
 // Le sezioni con vista "sez" sono le stesse di prima, solo spostate fuori dalle Impostazioni.
 const MENU = [
@@ -161,7 +161,7 @@ const MENU = [
   ["task", "Task", [["Task", "task"]]],
   ["lavoro", "Lavoro", [["Progetti", "progetti"], ["Documenti", "documenti"], ["Tavoli di lavoro", "sez", "tavoli"], ["Schede d'impresa", "sez", "imprese"]]],
   ["contatti", "Contatti", [["Contatti e Radar", "crm"]]],
-  ["comunicazione", "Comunicazione", [["Social", "social"], ["Profili monitorati", "sez", "monitorsocial"], ["Email marketing", "email"], ["Contenuti e stili", "sez", "contenuti"]]],
+  ["comunicazione", "Comunicazione", [["Social", "social"], ["Traffico dei siti", "traffico"], ["Campagne email", "campagne"], ["Profili monitorati", "sez", "monitorsocial"], ["Email marketing", "email"], ["Contenuti e stili", "sez", "contenuti"]]],
   ["conoscenza", "Conoscenza", [["Memoria di lavoro", "sez", "memoria"], ["Memoria condivisa", "sez", "memoriavett"], ["Note di Aurora", "sez", "noteaurora"], ["Biblioteca", "sez", "biblioteca"], ["Studi", "sez", "studi"], ["Dossier e fiducia", "sez", "dossier"], ["Archivio NAS", "sez", "archivio"]]],
   ["officina", "Officina", [["Finestre", "finestre"], ["Sandbox del codice", "sez", "sandbox"], ["Impara da un esempio", "sez", "esempio"]]],
   ["squadra", "Squadra", [["Agenti", "agenti"], ["Ginnasio", "ginnasio"], ["Reparti pronti", "sez", "reparti"], ["Miglioramento", "sez", "miglioramenti"], ["Salute", "sez", "salute"], ["Sentinelle", "sez", "sentinelle"], ["Cerimoniere", "sez", "cerimoniere"], ["Quando lavora", "sez", "quando"], ["Smistamento", "sez", "smistamento"]]],
@@ -238,7 +238,7 @@ function cornice(contenuto) {
   radice.replaceChildren(
     h("header", {}, h("h1", {}, stato.edizione === 3 ? "Opifex 3" : "Opifex", h("small", {}, "la bottega degli agenti")),
       h("nav", { "aria-label": "Menu principale" }, nav),
-      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.9.2" : "2.62.2"))),
+      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.10.0" : "2.63.0"))),
     h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "organigramma" ? "largo" : "" }, stato.ruolo === "titolare" ? schedeGruppo() : null, contenuto));
 }
 
@@ -290,7 +290,7 @@ function disegna() {
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
   if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { chiudiVistaUso(stato.ultimaEtichetta); stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, scuola: vistaScuola, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, avvio: vistaAvvio, posta: vistaPosta, computer: vistaComputer, sez: vistaSezione, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, scuola: vistaScuola, traffico: vistaTraffico, campagne: vistaCampagne, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, avvio: vistaAvvio, posta: vistaPosta, computer: vistaComputer, sez: vistaSezione, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
   let contenuto;
   try { contenuto = vista(); }
   catch (e) {   // una schermata che si rompe non deve bloccare il menu: si mostra l'errore e si puo' andare altrove

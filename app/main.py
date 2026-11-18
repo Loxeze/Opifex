@@ -31,6 +31,8 @@ from .formazione_auto import router as router_formauto
 from .rotte_scuola import router as router_scuola
 from .marchi import router as router_marchi
 from .guardiano import router as router_guardiano
+from .analytics import router as router_analytics
+from .campagne import router as router_campagne
 from .sfondo_arte import router as router_arte
 from .stili_montaggio import router as router_contenuti
 from .monitor_social import router as router_monsoc
@@ -202,6 +204,8 @@ async def _manutenzione():
         _passo("risultati dei canali social", lambda c: __import__("app.social_nativo", fromlist=["x"]).giro_raccolta(c))
         _passo("monitoraggio dei profili social", lambda c: __import__("app.monitor_social", fromlist=["x"]).giro(c))
         _passo("commenti dei marchi social", lambda c: __import__("app.marchi", fromlist=["x"]).giro(c))
+        _passo("traffico dei siti (Google Analytics)", lambda c: __import__("app.analytics", fromlist=["x"]).giro(c))
+        _passo("campagne email: risposte", lambda c: __import__("app.campagne", fromlist=["x"]).risposte(c))
         _passo("archivio NAS", lambda c: __import__("app.archivio_nas", fromlist=["x"]).giro(c))
         _passo("giro di aggiornamento", lambda c: __import__("app.giro_domande", fromlist=["x"]).giro(c))
         _passo("miglioramento degli agenti (Padre Casati)", miglioramento.giro)
@@ -232,6 +236,19 @@ async def _filtro_posta():
         except Exception:  # noqa: BLE001
             pass
         await asyncio.sleep(300)
+
+
+async def _campagne():
+    """Ogni minuto: le email di campagna gia' approvate da Lorenzo partono piano (una alla volta per campagna, al ritmo scelto)."""
+    import asyncio
+    from . import campagne
+    await asyncio.sleep(150)
+    while True:
+        try:
+            await asyncio.to_thread(_passo, "invio delle campagne email", campagne.invia_in_coda)
+        except Exception:  # noqa: BLE001
+            pass
+        await asyncio.sleep(60)
 
 
 async def _scuola():
@@ -335,7 +352,7 @@ async def ciclo_vita(app: FastAPI):
             _cc.riavvio(conn)
     except Exception:
         pass
-    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari()), asyncio.create_task(_filtro_posta()), asyncio.create_task(_scuola())]
+    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari()), asyncio.create_task(_filtro_posta()), asyncio.create_task(_scuola()), asyncio.create_task(_campagne())]
     yield
     for c in compiti:
         c.cancel()
@@ -398,6 +415,8 @@ app.include_router(router_formauto)
 app.include_router(router_scuola)
 app.include_router(router_marchi)
 app.include_router(router_guardiano)
+app.include_router(router_analytics)
+app.include_router(router_campagne)
 app.include_router(router_arte)
 app.include_router(router_contenuti)
 app.include_router(router_monsoc)

@@ -276,6 +276,7 @@ function vistaDashboard() {
   const guardiano = riquadroGuardiano(); guardiano.ricarica();
   const lavoro = riquadroLavoro(); lavoro.ricarica();
   const marchiSoc = riquadroSocialPlancia(); marchiSoc.ricarica();
+  const sitiPl = riquadroSitiPlancia(); sitiPl.ricarica();
   const daFare = pannelloDaFare();
   const garanzie = ((stato.opzioni && stato.opzioni.fornitori) || []).filter(f => !(f.non_conservazione_attiva && f.dpa_firmato));
 
@@ -350,11 +351,11 @@ function vistaDashboard() {
   };
   carica(); caricaRichieste(); caricaIniziative(); caricaProgetti();
   const inVolo = {}, giro = (k, f) => { if (inVolo[k]) return; inVolo[k] = true; Promise.resolve(f()).finally(() => { inVolo[k] = false; }); };   // una richiesta alla volta per riquadro
-  stato.timer2 = setInterval(() => { if (document.hidden) return; attesa++; giro('l', lavoro.ricarica); giro('r', caricaRichieste); giro('i', caricaIniziative); if (attesa % 4 === 0) { giro('p', caricaProgetti); giro('d', daFare.ricarica); } if (attesa % 20 === 0) { giro('c', carica); giro("s", marchiSoc.ricarica); giro("g", guardiano.ricarica); } }, 3000);
+  stato.timer2 = setInterval(() => { if (document.hidden) return; attesa++; giro('l', lavoro.ricarica); giro('r', caricaRichieste); giro('i', caricaIniziative); if (attesa % 4 === 0) { giro('p', caricaProgetti); giro('d', daFare.ricarica); } if (attesa % 20 === 0) { giro('c', carica); giro("s", marchiSoc.ricarica); giro("w", sitiPl.ricarica); giro("g", guardiano.ricarica); } }, 3000);
 
   return h("div", { class: "bt-plancia bt-fitta" },
     h("div", { class: "bt-intesta" }, h("div", {}, h("div", { class: "bt-cap" }, new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })), titolo),
       h("div", { class: "bt-azioni" }, h("button", { class: "s", onclick: apriOrganigramma }, "Organigramma 3D ↗"), bottoneAllinea(), h("button", { class: "s", onclick: () => vai("task") }, "Task"), h("button", { class: "p", onclick: () => vai("riunioni") }, "Avvia una riunione"))),
-    guardiano.el, lavoro.el, marchiSoc.el, locale, kpi, riga1, riga2,
+    guardiano.el, lavoro.el, marchiSoc.el, sitiPl.el, locale, kpi, riga1, riga2,
     garanzie.length ? h("p", { class: "bt-nota" }, "Dati interni e riservati bloccati verso: " + garanzie.map(f => f.nome).join(", ") + ". ", h("a", { href: "#", onclick: (e) => { e.preventDefault(); vai("impostazioni", "sicurezza"); } }, "Dichiara le garanzie")) : null);
 }

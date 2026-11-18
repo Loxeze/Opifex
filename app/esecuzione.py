@@ -431,6 +431,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 or bool(edizione.tre() and ok_int and a["ruolo_speciale"] == "formatore")
             if edizione.tre():
                 form_tool = False   # nella 3.0 il vecchio Ginnasio lascia il posto a Padre Casati
+            traffico_tool = bool(ok_int and a["fornitore"] != "locale" and conn.execute("SELECT 1 FROM siti_analytics WHERE attivo LIMIT 1").fetchone())
             prog_crea = bool(scheda_progetto.strumenti_abilitati() and ok_int and a["livello"] in ("manager", "referente") and not _sent)
             sq_pm = bool(form_tool and pm_tool)
             sq_val = bool(form_tool and not _sent)
@@ -443,7 +444,8 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 ricerca_tool = finestre_tool = canva_tool = siti_tool = creativi_tool = banco_tool = social_tool = sb_tool = rev_tool = iniz_tool = email_tool = False
                 form_tool = prog_crea = sq_pm = sq_val = False
                 scuola_tool = False
-            if ((a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get()) or creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val or scuola_tool):
+                traffico_tool = False
+            if ((a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get()) or creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val or scuola_tool or traffico_tool):
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 uscita_extra, uscita_gestori, uscita_avviso = [], {}, []
                 extra, gestori = [], {}
@@ -636,6 +638,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                         extra.extend(scuola.STRUMENTI_CASATI)
                         for s_ in scuola.STRUMENTI_CASATI:
                             gestori[s_["name"]] = gsc
+                if traffico_tool:
+                    from . import analytics as _an
+                    extra.append(_an.STRUMENTO)
+                    gestori[_an.STRUMENTO["name"]] = _an.gestore(connessione)
                 if sq_pm or sq_val:
                     gsq = squadre.gestore(connessione, agente_id)
                     if sq_pm:

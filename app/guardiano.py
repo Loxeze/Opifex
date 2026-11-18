@@ -172,10 +172,40 @@ def _locale(conn, acceso) -> dict | None:
                   "Accendi il portatile e apri Ollama.", "computer")
 
 
+def _siti(conn) -> dict | None:
+    if not conn.execute("SELECT 1 FROM siti_analytics WHERE attivo LIMIT 1").fetchone():
+        return None
+    err = conn.execute("SELECT nome, errore FROM siti_analytics WHERE attivo AND errore <> '' ORDER BY nome LIMIT 3").fetchall()
+    vecchi = conn.execute("SELECT count(*) AS n FROM siti_analytics WHERE attivo AND (scaricato_il IS NULL OR scaricato_il < NOW() - INTERVAL '36 hours')").fetchone()["n"]
+    if err:
+        return _esito("siti", "Traffico dei siti", "scarica i numeri da Google Analytics", "attenzione", f"«{err[0]['nome']}»: {err[0]['errore'][:140]}",
+                      "Apri Comunicazione → Traffico dei siti.", "traffico", {"siti con errore": len(err)})
+    if vecchi:
+        return _esito("siti", "Traffico dei siti", "scarica i numeri da Google Analytics", "attenzione", f"{vecchi} siti non si aggiornano da piu' di un giorno e mezzo.",
+                      "Apri Comunicazione → Traffico dei siti e premi «Aggiorna ora».", "traffico", {"siti fermi": vecchi})
+    return _esito("siti", "Traffico dei siti", "scarica i numeri da Google Analytics", "va", "Numeri aggiornati.", "", "traffico")
+
+
+def _campagne(conn) -> dict | None:
+    c = conn.execute("""SELECT count(*) FILTER (WHERE e.stato='errore') AS errori,
+                               count(*) FILTER (WHERE e.stato='approvata' AND e.decisa_il < NOW() - INTERVAL '2 hours') AS ferme
+                        FROM email_in_uscita e JOIN campagne_posta c ON c.id = e.campagna_id WHERE c.stato = 'in_corso'""").fetchone()
+    if not conn.execute("SELECT 1 FROM campagne_posta WHERE stato='in_corso' LIMIT 1").fetchone():
+        return None
+    ultimo = conn.execute("SELECT max(inviata_il) AS t FROM campagne_posta_dest").fetchone()["t"]
+    if c["ferme"] and (not ultimo or ultimo < datetime.now(timezone.utc) - timedelta(hours=2)):
+        return _esito("campagne", "Campagne email", "invia le email approvate", "fermo", f"{c['ferme']} email approvate aspettano da piu' di 2 ore e non ne parte nessuna.",
+                      "Apri Comunicazione → Campagne email: guarda gli errori e prova la casella da cui partono.", "campagne", {"ferme": c["ferme"]})
+    if c["errori"]:
+        return _esito("campagne", "Campagne email", "invia le email approvate", "attenzione", f"{c['errori']} email non sono partite per un errore.",
+                      "Apri Comunicazione → Campagne email: correggi e riapprova.", "campagne", {"errori": c["errori"]})
+    return _esito("campagne", "Campagne email", "invia le email approvate", "va", "Gli invii procedono.", "", "campagne")
+
+
 def controlla(conn) -> list[dict]:
     acceso = computer_acceso()
     out = []
-    for f in (lambda: _casati(conn, acceso), lambda: _posta(conn, acceso), lambda: _social(conn), lambda: _locale(conn, acceso)):
+    for f in (lambda: _casati(conn, acceso), lambda: _posta(conn, acceso), lambda: _social(conn), lambda: _siti(conn), lambda: _campagne(conn), lambda: _locale(conn, acceso)):
         try:
             x = f()
         except Exception as e:  # noqa: BLE001 - un controllo che si rompe non deve fermare gli altri: lo si dice

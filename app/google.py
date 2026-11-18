@@ -16,9 +16,11 @@ SCOPE = {
     # facoltativo: serve solo a segnare come lette in Gmail le email aperte in Opifex. Google lo chiama «leggere, scrivere e inviare»:
     # Opifex non invia mai da qui (l'invio passa sempre dall'approvazione), ma il permesso e' piu' ampio e lo si sceglie apposta.
     "gmail_letto": ["https://www.googleapis.com/auth/gmail.modify"],
+    "analytics": ["https://www.googleapis.com/auth/analytics.readonly"],
 }
 ETICHETTE_SERVIZI = {"drive": "Drive", "gmail": "Gmail (lettura e bozze)", "calendar": "Calendar",
-                     "gmail_letto": "Gmail: segna come lette le email aperte in Opifex (permesso più ampio)"}
+                     "gmail_letto": "Gmail: segna come lette le email aperte in Opifex (permesso più ampio)",
+                     "analytics": "Google Analytics: traffico dei siti (sola lettura)"}
 _AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN = "https://oauth2.googleapis.com/token"
 _USERINFO = "https://openidconnect.googleapis.com/v1/userinfo"
@@ -153,6 +155,10 @@ def prova(conn, account_id: int) -> str:
         _http("GET", "https://gmail.googleapis.com/gmail/v1/users/me/profile", headers=h); esiti.append("Gmail")
     if "calendar" in a["servizi"]:
         _http("GET", "https://www.googleapis.com/calendar/v3/users/me/calendarList", params={"maxResults": 1}, headers=h); esiti.append("Calendar")
+    if "analytics" in a["servizi"]:
+        d = _http("GET", "https://analyticsadmin.googleapis.com/v1beta/accountSummaries", params={"pageSize": 50}, headers=h)
+        n = sum(len(x.get("propertySummaries") or []) for x in d.get("accountSummaries") or [])
+        esiti.append(f"Analytics ({n} siti)")
     return a["email"] + ": funziona " + ", ".join(esiti)
 
 

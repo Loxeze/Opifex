@@ -118,16 +118,22 @@ def _canale(conn, agente_id: int, gmail_account_id, caselle: list[dict], nome_ca
 
 def invia_riga(conn, email_id: int, utente_id: int | None) -> dict:
     """Invia una email in coda (approvata) o in errore (nuovo tentativo). Aggiornamento condizionato: non parte mai due volte."""
-    r = conn.execute("SELECT * FROM email_in_uscita WHERE id = %s AND stato IN ('da_approvare', 'errore') FOR UPDATE", (email_id,)).fetchone()
+    r = conn.execute("SELECT * FROM email_in_uscita WHERE id = %s AND stato IN ('da_approvare', 'approvata', 'errore') FOR UPDATE", (email_id,)).fetchone()
     if r is None:
         raise LookupError("L'email non e' piu' in attesa")
     try:
         _spedisci(conn, r)
     except (ErroreGoogle, strumenti_posta.ErrorePosta, ValueError) as e:
-        conn.execute("UPDATE email_in_uscita SET stato='errore', errore=%s, decisa_il=NOW(), decisa_da=%s WHERE id=%s", (str(e)[:300], utente_id, email_id))
+        conn.execute("UPDATE email_in_uscita SET stato='errore', errore=%s, decisa_il=NOW(), decisa_da=COALESCE(%s, decisa_da) WHERE id=%s", (str(e)[:300], utente_id, email_id))
+        if r.get("campagna_id"):
+            from . import campagne
+            campagne.dopo_invio(conn, r, False, str(e))
         conn.commit()
         raise
-    conn.execute("UPDATE email_in_uscita SET stato='inviata', errore=NULL, decisa_il=NOW(), decisa_da=%s WHERE id=%s", (utente_id, email_id))
+    conn.execute("UPDATE email_in_uscita SET stato='inviata', errore=NULL, decisa_il=NOW(), decisa_da=COALESCE(%s, decisa_da) WHERE id=%s", (utente_id, email_id))
+    if r.get("campagna_id"):
+        from . import campagne
+        campagne.dopo_invio(conn, r, True)
     conn.execute("INSERT INTO registro_azioni (agente_id, azione, dettagli, utente_id) VALUES (%s,'email_inviata',%s::jsonb,%s)",
                  (r["agente_id"], json.dumps({"email": email_id, "a": r["destinatari"][:200], "oggetto": r["oggetto"][:200], "diretta": r["diretta"]}), utente_id))
     conn.commit()
