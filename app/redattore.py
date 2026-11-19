@@ -268,11 +268,15 @@ def chiedi(conn, modello: str, compito: str, max_token: int = 1500) -> tuple[dic
     return _json(r.testo), c
 
 
-def testo_brief(c: dict) -> str:
+def testo_brief(c: dict, conn=None) -> str:
     b = c.get("brief") or {}
     voci = [("Destinatari", b.get("destinatari")), ("Occasione", b.get("occasione")), ("Cosa offriamo", b.get("offerta")),
             ("Cosa cercare sui siti", b.get("cercare")), ("Angoli preferiti", b.get("angoli")), ("Da evitare", b.get("evitare")), ("Tono", b.get("tono"))]
     t = "\n".join(f"{k}: {v}" for k, v in voci if v)
     if c.get("obiettivo"):
         t = f"Obiettivo: {c['obiettivo']}\n" + t
+    if conn is not None and (c.get("categoria") or "").strip():   # cosa abbiamo imparato dalle call con questa categoria
+        q = conn.execute("SELECT testo FROM quadri_settore WHERE categoria=%s", (c["categoria"].strip().lower(),)).fetchone()
+        if q and q["testo"]:
+            t += f"\n\nQUADRO DI SETTORE ({c['categoria']}), da quello che ci hanno detto i clienti nelle call:\n{q['testo'][:2500]}"
     return t or "(brief non compilato)"

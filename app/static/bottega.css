@@ -431,3 +431,12 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .cp-avviso{color:var(--avv,#8A6A2F)}
 .cp-nome .cp-stato{margin-left:10px;vertical-align:middle;font-size:13px}
 @media (max-width:560px){.fl-blocco{grid-template-columns:1fr auto}.fl-tipo{grid-column:1/-1}.fl-freccia{padding-left:0}}
+/* 2.65: imbuto e quadri di settore */
+.im-imbuto{display:flex;flex-direction:column;gap:6px}
+.im-riga{display:grid;grid-template-columns:minmax(110px,150px) 1fr minmax(70px,auto);gap:10px;align-items:center}
+.im-nome{font-size:13px;color:var(--tenue)}
+.im-barra{height:16px;background:var(--bordo);border-radius:4px;overflow:hidden}
+.im-barra>span{display:block;height:100%;background:var(--ok,#1F6B52);border-radius:4px}
+.im-num{font-size:14px;white-space:nowrap}
+.im-quadro{white-space:pre-wrap;line-height:1.55;max-width:75ch;margin-top:6px}
+.cp-richiamo{font-size:14px;color:var(--avv,#8A6A2F)}

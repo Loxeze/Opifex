@@ -37,10 +37,32 @@ function crmCampagne() {
     riempi(corpo, [
       h("p", { class: "aiuto" }, "Ogni campagna è un flusso a blocchi: i contatti arrivano dal tuo foglio Google o dal CRM, il Redattore delle campagne legge il sito di ciascuno e scrive un'email personale, tu la leggi e la approvi, e dopo l'invio la Posta smista le risposte: gli interessati diventano opportunità, a chi non risponde parte un sollecito. Nulla parte senza il tuo sì, finché non decidi tu di accendere l'invio automatico."),
       h("div", { class: "azioni" }, bNuova), nuova,
-      d.campagne.length ? h("div", { class: "mq-classifica" }, d.campagne.map(riga)) : h("p", { class: "sotto" }, "Nessuna campagna ancora.")]);
+      d.campagne.length ? h("div", { class: "mq-classifica" }, d.campagne.map(riga)) : h("p", { class: "sotto" }, "Nessuna campagna ancora."),
+      d.imbuto && d.imbuto[0].n ? h("div", { class: "carta" }, graficoImbutoCp(d.imbuto, "L'imbuto di tutte le campagne")) : null,
+      _quadri(d.quadri)]);
   };
   carica();
   return corpo;
+}
+
+// L'imbuto: un gradino per riga, la barra in proporzione ai contatti, e quanti passano dal gradino prima
+function graficoImbutoCp(gradini, titolo) {
+  const max = Math.max(1, ...gradini.map(g => g.n));
+  return h("div", { class: "im-imbuto", role: "table", "aria-label": titolo || "Imbuto" },
+    titolo ? h("div", { class: "bt-cap" }, titolo) : null,
+    gradini.map((g, i) => h("div", { class: "im-riga", role: "row" },
+      h("span", { class: "im-nome", role: "cell" }, g.gradino),
+      h("span", { class: "im-barra", role: "cell", title: g.gradino + ": " + g.n }, h("span", { style: "width:" + Math.max(g.n ? 2 : 0, Math.round(100 * g.n / max)) + "%;opacity:" + (1 - i * 0.07) })),
+      h("span", { class: "im-num", role: "cell" }, h("b", {}, String(g.n)), g.passaggio != null && i ? h("span", { class: "sotto" }, " " + g.passaggio + "%") : null))));
+}
+
+function _quadri(quadri) {
+  if (!quadri || !quadri.length) return null;
+  return h("div", { class: "carta" }, h("h3", {}, "Quadri di settore"),
+    h("p", { class: "sotto" }, "Cosa chiedono i clienti, categoria per categoria, ricavato dalle call registrate. Il Redattore lo legge prima di scrivere."),
+    quadri.map(q => h("details", {}, h("summary", {}, h("b", {}, q.categoria), h("span", { class: "sotto" }, " — " + q.n_call + (q.n_call === 1 ? " call" : " call") + ", aggiornato " + new Date(q.aggiornato_il).toLocaleDateString("it-IT"))),
+      h("div", { class: "im-quadro" }, q.testo))),
+    _btnCp("Aggiorna i quadri adesso", async () => { try { const r = await api("POST", "/gestione/campagne/quadri/aggiorna"); alert(r.aggiornati + " quadri aggiornati."); } catch (e) { alert(e.message); } }, "s piccolo"));
 }
 
 function _opz(lista, vuota, cosa, scelto) {
@@ -193,6 +215,7 @@ async function apriCampagna(corpo, cid, torna) {
     if (x.angolo) box.append(h("div", { class: "cp-angolo" }, h("b", {}, "Angolo: "), x.angolo, x.angolo_motivo ? h("span", { class: "sotto" }, " — " + x.angolo_motivo) : null));
     if (x.zona) box.append(h("div", { class: "sotto" + (/Attenzione|controllalo/.test(x.zona) ? " cp-avviso" : "") }, x.zona));
     if (x.nota) box.append(h("div", { class: "sotto" }, x.nota));
+    if (x.richiamo_il) box.append(h("div", { class: "cp-richiamo" }, (x.richiamo_fatto ? "✓ Ricontattato: " : "⏰ Da ricontattare il ") + new Date(x.richiamo_il + "T12:00:00").toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" }) + (x.richiamo_nota ? " — «" + x.richiamo_nota + "»" : "")));
     if (x.risposta_oggetto || x.risposta_sintesi) box.append(h("div", { class: "sotto" }, "Risposta" + (x.risposta_oggetto ? ": «" + x.risposta_oggetto + "»" : "") + (x.risposta_sintesi ? " — " + x.risposta_sintesi : "")));
     if (x.errore && x.email_id) box.append(avviso(x.errore, "no"));
     const editor = (email_id, ogg, tes, titolo, aperto) => {
@@ -203,8 +226,8 @@ async function apriCampagna(corpo, cid, torna) {
           _btnCp("Scarta", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/scarta", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s")));
     };
     if (x.email_id && (x.stato === "da_approvare" || x.stato === "errore")) box.append(editor(x.email_id, x.oggetto, x.testo, x.tipo === "sollecito" ? "Leggi e correggi il sollecito" : "Leggi e correggi", false));
-    if (x.risposta && (x.risposta.stato === "da_approvare" || x.risposta.stato === "errore")) box.append(editor(x.risposta.email_id, x.risposta.oggetto, x.risposta.testo, "La risposta per fissare la call (da approvare)", true));
-    else if (x.risposta) box.append(h("div", { class: "sotto" }, "Risposta per la call: " + ({ approvata: "in partenza", inviata: "inviata", rifiutata: "scartata" })[x.risposta.stato]));
+    if (x.risposta && (x.risposta.stato === "da_approvare" || x.risposta.stato === "errore")) box.append(editor(x.risposta.email_id, x.risposta.oggetto, x.risposta.testo, x.risposta.tipo === "ripresa" ? "L'email per riprendere il discorso (da approvare)" : "La risposta per fissare la call (da approvare)", true));
+    else if (x.risposta) box.append(h("div", { class: "sotto" }, (x.risposta.tipo === "ripresa" ? "Email di ripresa: " : "Risposta per la call: ") + ({ approvata: "in partenza", inviata: "inviata", rifiutata: "scartata" })[x.risposta.stato]));
     if (["inviata", "risposto", "interessato", "non_interessato", "nessuna_risposta"].includes(x.stato)) {
       const es = (st, et, affare) => h("button", { class: "s piccolo", type: "button", onclick: async () => { try { const r = await api("POST", "/gestione/campagne/destinatari/" + x.id + "/esito", { stato: st, crea_affare: !!affare }); if (r.affare) msg.replaceChildren(avviso("Aperta l'opportunità nel CRM e preparata la risposta con il link per la call.", "ok")); ricarica(); } catch (e) { err(e); } } }, et);
       box.append(h("div", { class: "azioni" }, x.contatto_id ? h("button", { class: "s piccolo", type: "button", onclick: () => apriContatto(x.contatto_id) }, "Scheda nel CRM") : null,
@@ -220,9 +243,16 @@ async function apriCampagna(corpo, cid, torna) {
     riempi(lista, sel.length ? sel.slice(0, 200).map(dest) : h("p", { class: "sotto" }, c.destinatari.length ? "Nessuno in questo gruppo." : "Nessun destinatario ancora: aggiungi righe al foglio o scegli i contatti dal CRM."));
   };
   filtro.onchange = mostra; mostra();
+  const quadro = c.quadro ? h("details", { class: "carta" }, h("summary", {}, h("b", {}, "Quadro di settore: " + c.categoria), h("span", { class: "sotto" }, " — da " + c.quadro.n_call + " call; il Redattore lo usa")), h("div", { class: "im-quadro" }, c.quadro.testo)) : null;
+  const abbinare = c.da_abbinare.length && c.interessati.length ? h("div", { class: "carta" }, h("h3", {}, "Resoconti delle call da abbinare"),
+    h("p", { class: "sotto" }, "Resoconti PLAUD arrivati che Opifex non ha saputo abbinare da solo. Scegli con chi era la call: l'opportunità passa a «call fatta» e il modello del portatile ne fa l'analisi."),
+    c.da_abbinare.map(r => { const sel = _opz(c.interessati.map(x => ({ id: x.contatto_id, nome: x.ente })), "— con chi era? —", x => x.nome);
+      return h("div", { class: "azioni", style: "align-items:center" }, h("span", {}, (r.data ? new Date(r.data).toLocaleDateString("it-IT") + " · " : "") + r.titolo), sel,
+        _btnCp("Abbina", async () => { if (!sel.value) return; try { const x = await api("POST", "/gestione/campagne/riunioni/" + r.id + "/abbina", { contatto_id: Number(sel.value) }); if (x.messaggio) alert(x.messaggio); ricarica(); } catch (e) { err(e); } }, "s piccolo")); })) : null;
   riempi(corpo, [h("div", { class: "azioni" }, indietro), h("h2", { class: "cp-nome" }, c.nome, h("span", { class: "cp-stato" }, STATI_CP[c.stato])),
     h("div", { class: "azioni" }, avvia, approvaTutte, statoBtn, duplica, chiudi), conferma, msg,
-    bloccoBrief, bloccoTesto,
+    c.imbuto && c.imbuto[0].n ? h("div", { class: "carta" }, graficoImbutoCp(c.imbuto, "L'imbuto della campagna")) : null,
+    abbinare, bloccoBrief, quadro, bloccoTesto,
     h("details", { class: "carta", open: true }, h("summary", {}, h("b", {}, "Il flusso")), _blocchiFlusso(c, salva)),
     correzioni,
     h("div", { class: "azioni", style: "align-items:center" }, h("h3", { style: "margin:0" }, "Destinatari"), filtro), lista]);

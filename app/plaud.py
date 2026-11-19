@@ -218,6 +218,9 @@ def elabora(conn, riunione_id: int, agente_id: int) -> int:
 def controlla(conn) -> int:
     """Giro periodico: importa le nuove email e fa elaborare quelle ancora da elaborare. Ritorna le riunioni elaborate."""
     cfg = configurazione(conn)
+    if not cfg["agente_id"]:   # senza un elaboratore scelto: la Posta, che lavora in locale (i resoconti delle call restano in casa)
+        r = conn.execute("SELECT id FROM agenti WHERE nome='Posta' AND attivo ORDER BY id LIMIT 1").fetchone()
+        cfg["agente_id"] = r["id"] if r else None
     if not cfg["attivo"] or not cfg["casella_id"] or not cfg["agente_id"]:
         return 0
     c = conn.execute("SELECT * FROM caselle_posta WHERE id = %s", (cfg["casella_id"],)).fetchone()

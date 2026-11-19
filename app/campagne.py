@@ -202,10 +202,10 @@ def approva(conn, cid: int, ids: list[int] | None, utente_id: int) -> int:
     if ids is not None:
         extra = " AND id = ANY(%s)"; par.append(ids)
     if ids is None:
-        extra = " AND tipo_campagna <> 'risposta'"   # le risposte a chi e' interessato si approvano una per una
+        extra = " AND tipo_campagna NOT IN ('risposta','ripresa')"   # risposte e riprese con gli interessati si approvano una per una
     r = conn.execute(f"""UPDATE email_in_uscita SET stato='approvata', decisa_il=NOW(), decisa_da=%s
                          WHERE campagna_id=%s AND stato IN ('da_approvare','errore'){extra} RETURNING destinatario_id, tipo_campagna""", [utente_id] + par).fetchall()
-    dest = [x["destinatario_id"] for x in r if x["destinatario_id"] and x["tipo_campagna"] != "risposta"]
+    dest = [x["destinatario_id"] for x in r if x["destinatario_id"] and x["tipo_campagna"] not in ("risposta", "ripresa")]
     if dest:
         conn.execute("UPDATE campagne_posta_dest SET stato='approvata', aggiornato_il=NOW() WHERE id = ANY(%s)", (dest,))
     conn.execute("UPDATE campagne_posta SET stato='in_corso' WHERE id=%s AND stato='bozza'", (cid,))
@@ -216,7 +216,7 @@ def approva(conn, cid: int, ids: list[int] | None, utente_id: int) -> int:
 def scarta(conn, cid: int, ids: list[int], utente_id: int) -> int:
     r = conn.execute("""UPDATE email_in_uscita SET stato='rifiutata', decisa_il=NOW(), decisa_da=%s
                         WHERE campagna_id=%s AND id = ANY(%s) AND stato IN ('da_approvare','approvata','errore') RETURNING destinatario_id, tipo_campagna""", (utente_id, cid, ids)).fetchall()
-    dest = [x["destinatario_id"] for x in r if x["destinatario_id"] and x["tipo_campagna"] != "risposta"]
+    dest = [x["destinatario_id"] for x in r if x["destinatario_id"] and x["tipo_campagna"] not in ("risposta", "ripresa")]
     if dest:
         conn.execute("UPDATE campagne_posta_dest SET stato='scartata', aggiornato_il=NOW() WHERE id = ANY(%s)", (dest,))
     conn.commit()
@@ -226,7 +226,7 @@ def scarta(conn, cid: int, ids: list[int], utente_id: int) -> int:
 def dopo_scarto(conn, email_id: int):
     """Chiamata quando un'email di campagna e' scartata dalla coda generale."""
     conn.execute("""UPDATE campagne_posta_dest SET stato='scartata', aggiornato_il=NOW()
-                    WHERE id = (SELECT destinatario_id FROM email_in_uscita WHERE id=%s AND tipo_campagna <> 'risposta')""", (email_id,))
+                    WHERE id = (SELECT destinatario_id FROM email_in_uscita WHERE id=%s AND tipo_campagna NOT IN ('risposta','ripresa'))""", (email_id,))
 
 
 def dopo_invio(conn, riga: dict, ok: bool, errore: str = ""):
@@ -234,10 +234,10 @@ def dopo_invio(conn, riga: dict, ok: bool, errore: str = ""):
     if not riga.get("destinatario_id"):
         return
     if not ok:
-        if riga.get("tipo_campagna") != "risposta":
+        if riga.get("tipo_campagna") not in ("risposta", "ripresa"):
             conn.execute("UPDATE campagne_posta_dest SET stato='errore', aggiornato_il=NOW() WHERE id=%s", (riga["destinatario_id"],))
         return
-    if riga.get("tipo_campagna") == "risposta":   # la risposta a chi e' interessato: il destinatario resta «interessato»
+    if riga.get("tipo_campagna") in ("risposta", "ripresa"):   # risposte e riprese con chi e' interessato: il destinatario resta com'e'
         d = conn.execute("SELECT contatto_id, campagna_id FROM campagne_posta_dest WHERE id=%s", (riga["destinatario_id"],)).fetchone()
     else:
         d = conn.execute("""UPDATE campagne_posta_dest d SET stato='inviata', inviata_il=NOW(), aggiornato_il=NOW(),
@@ -365,7 +365,8 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
                             ORDER BY (d.stato='da_approvare') DESC, (d.stato='interessato') DESC, (d.stato IN ('risposto','errore')) DESC, d.aggiornato_il DESC, d.id
                             LIMIT 1000""", (cid,)).fetchall()
     risposte = {r["destinatario_id"]: r for r in conn.execute(
-        """SELECT id, destinatario_id, oggetto, testo, stato, errore FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna='risposta' ORDER BY id""", (cid,)).fetchall()}
+        """SELECT id, destinatario_id, oggetto, testo, stato, errore, tipo_campagna FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna IN ('risposta','ripresa')
+           ORDER BY id""", (cid,)).fetchall()}
     note = {r["contatto_id"]: r for r in conn.execute(
         "SELECT contatto_id, aggiornato_il FROM crm_note_web WHERE contatto_id = ANY(%s)", ([r["contatto_id"] for r in righe if r["contatto_id"]],)).fetchall()}
     aperta = ("da_approvare", "approvata", "errore")
@@ -380,7 +381,8 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
             "nota": r["nota"], "opportunita_id": r["opportunita_id"], "note_del": note[r["contatto_id"]]["aggiornato_il"] if r["contatto_id"] in note else None,
             "email_id": r["e_id"] if r["e_stato"] in aperta else None, "tipo": r["e_tipo"],
             "oggetto": r["e_oggetto"] if r["e_stato"] in aperta else None, "testo": r["e_testo"] if r["e_stato"] in aperta else None, "errore": r["e_errore"],
-            "risposta": {"email_id": rs["id"], "oggetto": rs["oggetto"], "testo": rs["testo"], "stato": rs["stato"], "errore": rs["errore"]} if rs else None})
+            "risposta": {"email_id": rs["id"], "oggetto": rs["oggetto"], "testo": rs["testo"], "stato": rs["stato"], "errore": rs["errore"], "tipo": rs["tipo_campagna"]} if rs else None,
+            "richiamo_il": r["richiamo_il"], "richiamo_nota": r["richiamo_nota"], "richiamo_fatto": r["richiamo_fatto"]})
     c["numeri"] = _conta(conn, cid)
     c["mittente_email"] = next((m["email"] for m in mittenti(conn) if m["id"] == c["mittente"]), "")
     c["autonomia"] = flusso.autonomia(conn, cid)
@@ -392,6 +394,12 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
     c["opportunita"] = conn.execute("SELECT stato, count(*) AS n FROM crm_opportunita WHERE campagna_id=%s GROUP BY stato", (cid,)).fetchall()
     c["spesa"] = float(c["spesa"]); c["tetto_spesa"] = float(c["tetto_spesa"])
     c["account_drive"] = conn.execute("SELECT id, email FROM account_google WHERE 'drive' = ANY(servizi) ORDER BY id").fetchall()
+    from . import imbuto
+    c["imbuto"] = imbuto.numeri(conn, cid)
+    c["quadro"] = imbuto.quadro(conn, c["categoria"]) if c["categoria"] else None
+    c["da_abbinare"] = imbuto.da_abbinare(conn)
+    c["interessati"] = [{"contatto_id": x["contatto_id"], "ente": x["ente"] or x["nome"] or x["email"]} for x in c["destinatari"]
+                        if x["stato"] == "interessato" and x["contatto_id"]]
     crm._registra(conn, None, utente_id, "campagna_dettaglio", {"campagna": cid}, len(righe))
     return c
 
@@ -415,8 +423,10 @@ def _errore(e: Exception):
 
 @router.get("")
 def vedi(u: dict = Depends(solo_titolare)):
+    from . import imbuto
     with connessione() as conn:
-        return {"campagne": elenco(conn), "mittenti": mittenti(conn), "aziende": conn.execute("SELECT id, nome FROM aziende WHERE attiva ORDER BY nome").fetchall(),
+        return {"imbuto": imbuto.numeri(conn), "quadri": conn.execute("SELECT categoria, n_call, testo, aggiornato_il FROM quadri_settore ORDER BY categoria").fetchall(),
+                "campagne": elenco(conn), "mittenti": mittenti(conn), "aziende": conn.execute("SELECT id, nome FROM aziende WHERE attiva ORDER BY nome").fetchall(),
                 "segmenti": conn.execute("SELECT id, nome FROM crm_segmenti ORDER BY nome").fetchall(), "max_giorno": MAX_GIORNO}
 
 
@@ -626,3 +636,31 @@ def decidi_correzione(xid: int, d: Correzione, u: dict = Depends(solo_titolare))
             conn.execute(f"UPDATE crm_contatti SET {x['campo']}=%s WHERE id=%s", (x["valore"], x["contatto_id"]))
         conn.execute("UPDATE crm_correzioni SET stato=%s WHERE id=%s", ("accettata" if d.accetta else "rifiutata", xid))
     return {"ok": True}
+
+
+class Abbina(BaseModel):
+    contatto_id: int
+
+
+@router.post("/riunioni/{rid}/abbina")
+def abbina_riunione(rid: int, d: Abbina, u: dict = Depends(solo_titolare)):
+    """Lorenzo abbina un resoconto PLAUD a un interessato: call fatta e analisi (modello locale)."""
+    from . import imbuto
+    with connessione() as conn:
+        try:
+            r = imbuto.analizza(conn, rid, d.contatto_id)
+        except LookupError as e:
+            _errore(e)
+        except fornitori.ErroreFornitore:
+            return {"analisi": False, "messaggio": "Abbinata. L'analisi la fa il modello del portatile appena è acceso."}
+        return {"analisi": bool(r)}
+
+
+@router.post("/quadri/aggiorna")
+def aggiorna_quadri(u: dict = Depends(solo_titolare)):
+    from . import imbuto
+    with connessione() as conn:
+        try:
+            return {"aggiornati": imbuto.aggiorna_quadri(conn, forza=True)}
+        except Exception as e:  # noqa: BLE001
+            _errore(e)

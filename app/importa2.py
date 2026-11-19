@@ -139,7 +139,29 @@ def importa(conn, src) -> dict:
     for t in ("crm_contatti", "crm_opportunita", "crm_interazioni", "crm_liste", "aziende", "crm_relazioni", "crm_recapiti", "crm_storico"):
         if _esiste(conn, t):   # i contatori delle chiavi devono superare gli id copiati
             conn.execute(f"SELECT setval(pg_get_serial_sequence('{t}', 'id'), GREATEST((SELECT COALESCE(max(id), 1) FROM {t}), 1))")
+    _plaud(conn, src)
     return conteggi
+
+
+def _plaud(conn, src):
+    """Il canale dei resoconti PLAUD: stesse impostazioni della 2, con la casella ritrovata dal suo indirizzo (va gia' collegata nella 3)."""
+    try:
+        cfg = {r["chiave"]: r["valore"] for r in src.execute("SELECT chiave, valore FROM impostazioni_sistema WHERE chiave IN ('plaud_attivo','plaud_mittente','plaud_casella_id')").fetchall()}
+        email = None
+        if (cfg.get("plaud_casella_id") or "").isdigit():
+            r = src.execute("SELECT email FROM caselle_posta WHERE id=%s", (int(cfg["plaud_casella_id"]),)).fetchone()
+            email = r["email"] if r else None
+    except Exception:  # noqa: BLE001
+        src.rollback(); return
+    if not cfg:
+        return
+    gia = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave='plaud_casella_id'").fetchone()
+    if gia and gia["valore"]:
+        return   # nella 3 e' gia' impostato: non si tocca
+    casella = conn.execute("SELECT id FROM caselle_posta WHERE lower(email)=lower(%s)", (email,)).fetchone() if email else None
+    for k, v in (("plaud_mittente", cfg.get("plaud_mittente") or "plaud"), ("plaud_casella_id", str(casella["id"]) if casella else ""),
+                 ("plaud_attivo", "1" if casella and cfg.get("plaud_attivo") == "1" else "0")):
+        conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s,%s) ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore", (k, v))
 
 
 def riassunto(conteggi: dict) -> str:

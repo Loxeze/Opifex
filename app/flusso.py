@@ -36,7 +36,9 @@ ISTR_ESITO = """Leggi la risposta ricevuta a un'email di Lorenzo Zeppa e classif
 - "non_interessato": dice di no, non e' interessato, non ha budget;
 - "rimuovi": chiede di non ricevere piu' email;
 - "automatica": risposta automatica (fuori sede, ferie, conferma di ricezione).
-Rispondi SOLO con JSON: {"esito": "...", "sintesi": "una frase in italiano su cosa dice"}"""
+Se il contatto indica QUANDO risentirsi («tra un mese», «a marzo», «dopo l'estate», «tra 2 giorni»), calcola la data a partire da oggi
+e mettila in "richiamo" (AAAA-MM-GG; per un mese usa il primo giorno), con le sue parole in "quando". Altrimenti null.
+Rispondi SOLO con JSON: {"esito": "...", "sintesi": "una frase in italiano su cosa dice", "richiamo": "AAAA-MM-GG o null", "quando": "le sue parole o vuoto"}"""
 
 ISTR_RISPOSTA = """Scrivi per Lorenzo Zeppa una risposta breve (40-90 parole) a chi si e' detto interessato alla sua email. Tono personale e cordiale,
 prima persona. Ringrazia, rispondi in una frase a quello che chiede se puoi farlo senza inventare, e proponi una chiamata di 20 minuti
@@ -290,7 +292,7 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
         if sito_testo or redattore.note_fresche(n):
             firma = f"\n{c['impresa']}" if c.get("impresa") else ""
             j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_PRIMA.format(
-                brief=redattore.testo_brief(c), ente=k["ente"] or "(senza nome)", localita=_localita(k),
+                brief=redattore.testo_brief(c, conn), ente=k["ente"] or "(senza nome)", localita=_localita(k),
                 note=n["sintesi"] if n else "(nessuna)", sito=k["sito"], testo=sito_testo or "(non riletto: valgono le note qui sopra)",
                 firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 1600)
             _spendi(conn, c, spesa)
@@ -359,7 +361,7 @@ def sollecito(conn, c: dict, d: dict) -> str:
         if x:
             testo_prima = testo_prima.replace(x, "{nome}" if x == k["nome"] else "")
     j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_SOLLECITO.format(
-        brief=redattore.testo_brief(c), ente=k["ente"] or "(senza nome)", note=(n["sintesi"] if n else "(nessuna)"),
+        brief=redattore.testo_brief(c, conn), ente=k["ente"] or "(senza nome)", note=(n["sintesi"] if n else "(nessuna)"),
         quando=prima["decisa_il"].strftime("il %d/%m") if prima["decisa_il"] else "", oggetto=prima["oggetto"], testo_prima=testo_prima[:2500],
         compito=compito, firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 1200)
     _spendi(conn, c, spesa)
@@ -393,7 +395,7 @@ def chiudi_nessuna_risposta(conn, d: dict) -> str:
 
 
 # ---------- uscite: le risposte ----------
-def segna_interessato(conn, d: dict, sintesi: str = "", utente_id: int | None = None, automatico: bool = True) -> int | None:
+def segna_interessato(conn, d: dict, sintesi: str = "", utente_id: int | None = None, automatico: bool = True, richiamo=None, quando: str = "") -> int | None:
     """Interessato: opportunita' al primo gradino dell'imbuto, notifica, e la bozza di risposta con il link per prenotare la call."""
     c = conn.execute("SELECT c.*, z.nome AS impresa FROM campagne_posta c LEFT JOIN aziende z ON z.id=c.azienda_id WHERE c.id=%s", (d["campagna_id"],)).fetchone()
     conn.execute("UPDATE campagne_posta_dest SET stato='interessato', risposta_sintesi=COALESCE(NULLIF(%s,''), risposta_sintesi), risposta_il=COALESCE(risposta_il, NOW()), aggiornato_il=NOW() WHERE id=%s",
@@ -411,15 +413,24 @@ def segna_interessato(conn, d: dict, sintesi: str = "", utente_id: int | None = 
                                   VALUES (%s,%s,'cliente','interessato',%s,%s,'Fissare la call di presentazione',%s) RETURNING id""",
                                (d["contatto_id"], titolo, c["azienda_id"], utente_id, c["id"])).fetchone()["id"]
             conn.execute("UPDATE campagne_posta_dest SET opportunita_id=%s WHERE id=%s", (opp, d["id"]))
+        if richiamo:   # «ci sentiamo a marzo»: promemoria nel CRM e sull'opportunita'
+            from . import imbuto
+            imbuto.segna_richiamo(conn, dict(d, opportunita_id=opp), richiamo, quando or sintesi)
         conn.commit()   # prima di leggere la loro email (la lettura puo' annullare la transazione se la casella non risponde)
         if "@" in k["email"] and not conn.execute("SELECT 1 FROM email_in_uscita WHERE destinatario_id=%s AND tipo_campagna='risposta'", (d["id"],)).fetchone():
-            testo = _bozza_risposta(conn, c, d)
+            if richiamo:
+                testo = _riempi(conn, d, "{saluto}\n\nperfetto, grazie della risposta: la ricontatto " + (quando or f"il {richiamo:%d/%m}")
+                                + ", come mi ha chiesto.\n\nA presto,\nLorenzo")
+            else:
+                testo = _bozza_risposta(conn, c, d)
             v = conn.execute("SELECT origine, casella_id, msg_id FROM posta_vaglio WHERE id=%s", (d["risposta_vaglio_id"],)).fetchone() if d.get("risposta_vaglio_id") else None
             rif = v["msg_id"] if v and v["origine"] == "gmail" and c["mittente"] == f"gmail:{v['casella_id']}" else None
             _crea_email(conn, dict(c), d["id"], k["email"], ("Re: " + (d.get("risposta_oggetto") or c["oggetto"] or "")).replace("Re: Re: ", "Re: ")[:200],
                         testo, "risposta", automatica=False, rispondi_a=rif)
     conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, TRUE)",
-                 (f"Interessato alla campagna «{c['nome']}»" + (f": {sintesi}" if sintesi else "") + ". Ti ho preparato la risposta con il link per la call (Campagne email).",))
+                 (f"Interessato alla campagna «{c['nome']}»" + (f": {sintesi}" if sintesi else "") +
+                  (f". Ha chiesto di risentirsi {quando or ''} ({richiamo:%d/%m/%Y}): promemoria nel CRM, e quel giorno ti preparo l'email." if richiamo
+                   else ". Ti ho preparato la risposta con il link per la call (Campagne email)."),))
     conn.commit()
     return opp
 
@@ -462,15 +473,18 @@ def classifica_risposte(conn, limite: int = 10) -> int:
         v = conn.execute("SELECT * FROM posta_vaglio WHERE id=%s", (d["risposta_vaglio_id"],)).fetchone() if d["risposta_vaglio_id"] else None
         try:
             testo = (posta_vaglio._anteprima(conn, v) if v else "") or (d["risposta_oggetto"] or "")
-            j = redattore._json(posta_vaglio._chiedi(conn, ISTR_ESITO, f"Oggetto: {d['risposta_oggetto'] or ''}\n\n{testo[:2500]}", 400))
+            j = redattore._json(posta_vaglio._chiedi(conn, ISTR_ESITO, f"Oggi e' il {datetime.now():%d/%m/%Y}.\nOggetto: {d['risposta_oggetto'] or ''}\n\n{testo[:2500]}", 400))
         except ErroreFornitore:
             _avvisa_se_ferma(conn, d)
             break
         if not isinstance(j, dict) or j.get("esito") not in ("interessato", "dubbio", "non_interessato", "rimuovi", "automatica"):
             continue
         sintesi = str(j.get("sintesi") or "")[:400]
-        if j["esito"] in ("interessato", "dubbio"):
-            segna_interessato(conn, dict(d), sintesi)
+        from . import imbuto
+        richiamo = imbuto.valida_richiamo(j.get("richiamo")) or imbuto.data_richiamo(f"{j.get('quando') or ''} {testo[:1500]}")
+        quando = str(j.get("quando") or "")[:120]
+        if j["esito"] in ("interessato", "dubbio") or (richiamo and j["esito"] not in ("rimuovi", "automatica")):
+            segna_interessato(conn, dict(d), sintesi, richiamo=richiamo, quando=quando)
         elif j["esito"] == "non_interessato":
             conn.execute("UPDATE campagne_posta_dest SET stato='non_interessato', risposta_sintesi=%s, prossimo_il=NULL, aggiornato_il=NOW() WHERE id=%s", (sintesi or "non interessato", d["id"]))
             if d["contatto_id"]:
@@ -545,6 +559,16 @@ def giro(conn) -> dict:
     conn.execute("UPDATE campagne_posta_dest SET stato='in_attesa' WHERE stato='in_studio' AND aggiornato_il < NOW() - INTERVAL '30 minutes'")
     conn.commit()
     fatto["risposte"] = classifica_risposte(conn)
+    from . import imbuto
+    fatto["richiami"] = imbuto.richiami(conn)
+    ultimo = conn.execute("SELECT valore FROM impostazioni_sistema WHERE chiave='imbuto_calendario_il'").fetchone()
+    if not ultimo or ultimo["valore"] < (_ora() - timedelta(minutes=30)).isoformat():   # il calendario ogni mezz'ora
+        conn.execute("""INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('imbuto_calendario_il', %s)
+                        ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore""", (_ora().isoformat(),))
+        conn.commit()
+        fatto["call_fissate"] = imbuto.call_fissate(conn)
+    fatto["call_fatte"] = imbuto.call_fatte(conn)
+    fatto["quadri"] = imbuto.aggiorna_quadri(conn)
     nuove = conn.execute("""SELECT c.nome, count(*) AS n FROM email_in_uscita e JOIN campagne_posta c ON c.id=e.campagna_id
                             WHERE e.stato='da_approvare' AND e.creata_il > NOW() - INTERVAL '5 minutes' GROUP BY c.nome""").fetchall() if fatto["bozze"] or fatto["solleciti"] else []
     for x in nuove:
