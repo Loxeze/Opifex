@@ -316,6 +316,25 @@ def _crea_email(conn, c: dict, d_id: int, email: str, oggetto: str, testo: str, 
     return eid
 
 
+def _riempi_quadre(conn, c: dict, k: dict, oggetto: str, testo: str, zona: str) -> tuple[str, str, str]:
+    """Le parti tra [ ] del testo standard: il Redattore le riempie con i dati pubblici del contatto (ente, localita', note del sito)."""
+    if tetto_ok(conn, c["id"]):
+        n = redattore.note(conn, k["id"])
+        try:
+            j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_RIEMPI.format(
+                oggetto=oggetto, testo=testo, ente=k["ente"] or "(senza nome)", categoria=c.get("categoria") or "(non indicata)",
+                localita=_localita(k), note=(n["sintesi"] if n else "(nessuna)")), 1200)
+            _spendi(conn, c, spesa)
+            if isinstance(j, dict) and str(j.get("testo") or "").strip() and str(j.get("oggetto") or "").strip():
+                o2, t2 = str(j["oggetto"]).strip(), str(j["testo"]).strip()
+                if not redattore.QUADRE.search(o2 + t2):
+                    return o2, t2, zona + " Parti tra [ ] personalizzate dal Redattore: controllale."
+        except ErroreFornitore:
+            conn.rollback()
+    return (redattore.riempi_quadre_semplice(oggetto, k), redattore.riempi_quadre_semplice(testo, k),
+            zona + " Parti tra [ ] riempite con i dati del CRM: controllale.")
+
+
 def prepara_uno(conn, c: dict, d: dict) -> str:
     """Studio + bozza per un destinatario. Restituisce lo stato finale."""
     from .campagne import PIEDE, _componi
@@ -371,13 +390,19 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
         oggetto, testo = c["oggetto"], c["testo"]
         if not zona:
             zona = "Senza sito: testo standard." if not k["sito"] else "Personalizzazione spenta: testo standard."
+        if redattore.QUADRE.search(oggetto + testo):   # spazi da personalizzare: li riempie il Redattore con i dati di questo contatto
+            oggetto, testo, zona = _riempi_quadre(conn, c, k, oggetto, testo, zona)
+    if redattore.QUADRE.search(oggetto + testo):
+        resta = ", ".join(dict.fromkeys(redattore.QUADRE.findall(oggetto + testo)))[:200]
+        zona = (zona + " " if zona else "") + f"Attenzione: restano da completare {resta}."
+    da_vedere = bool(redattore.QUADRE.search(oggetto + testo))   # con parti da completare non parte mai da sola
     if "{saluto}" not in testo:
         testo = "{saluto}\n\n" + testo
     persona = k["genere"] == "persona" or bool(k["nome"] and k["ente"])
     testo_f = _componi(testo, k["nome"], k["ente"], persona) + PIEDE
     oggetto_f = _componi(oggetto, k["nome"], k["ente"], persona)[:200]
-    eid = _crea_email(conn, c, d["id"], k["email"], oggetto_f, testo_f, "primo")
-    stato = "approvata" if c["invio_automatico"] else "da_approvare"
+    eid = _crea_email(conn, c, d["id"], k["email"], oggetto_f, testo_f, "primo", automatica=False if da_vedere else None)
+    stato = "approvata" if c["invio_automatico"] and not da_vedere else "da_approvare"
     conn.execute("""UPDATE campagne_posta_dest SET stato=%s, email_id=%s, angolo=%s, angolo_motivo=%s, zona=%s, personalizzata=%s, passo=1, nota='', aggiornato_il=NOW()
                     WHERE id=%s""", (stato, eid, angolo, motivo, zona[:400], personalizzata, d["id"]))
     conn.commit()
@@ -424,6 +449,8 @@ def sollecito(conn, c: dict, d: dict) -> str:
         testo = "{saluto}\n\n" + testo
     persona = k["genere"] == "persona" or bool(k["nome"] and k["ente"])
     oggetto = str(j.get("oggetto") or "").strip() or ("Re: " + prima["oggetto"])
+    if redattore.QUADRE.search(oggetto + testo):
+        oggetto, testo = redattore.riempi_quadre_semplice(oggetto, k), redattore.riempi_quadre_semplice(testo, k)
     eid = _crea_email(conn, c, d["id"], k["email"], _componi(oggetto, k["nome"], k["ente"], persona)[:200],
                       _componi(testo, k["nome"], k["ente"], persona) + PIEDE, "sollecito")
     stato = "approvata" if c["invio_automatico"] else "da_approvare"

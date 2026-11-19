@@ -195,6 +195,16 @@ def prepara(conn, cid: int, limite: int = 300) -> dict:
     return {"preparate": fatte}
 
 
+QUADRE_SQL = r"\[[^]\[]{1,80}\]"
+
+
+def da_completare(conn, cid: int, ids: list[int] | None) -> int:
+    """Quante email da approvare hanno ancora parti tra [ ]."""
+    return conn.execute(f"""SELECT count(*) AS n FROM email_in_uscita WHERE campagna_id=%s AND stato IN ('da_approvare','errore')
+                            AND (testo ~ %s OR oggetto ~ %s){" AND id = ANY(%s)" if ids is not None else ""}""",
+                        [cid, QUADRE_SQL, QUADRE_SQL] + ([ids] if ids is not None else [])).fetchone()["n"]
+
+
 def approva(conn, cid: int, ids: list[int] | None, utente_id: int) -> int:
     """Le email approvate partono piano, dal giro di invio. ids=None: tutte quelle da approvare."""
     par = [cid]
@@ -203,8 +213,10 @@ def approva(conn, cid: int, ids: list[int] | None, utente_id: int) -> int:
         extra = " AND id = ANY(%s)"; par.append(ids)
     if ids is None:
         extra = " AND tipo_campagna NOT IN ('risposta','ripresa')"   # risposte e riprese con gli interessati si approvano una per una
+    # con parti tra [ ] ancora da completare non si approva: prima si modifica
     r = conn.execute(f"""UPDATE email_in_uscita SET stato='approvata', decisa_il=NOW(), decisa_da=%s
-                         WHERE campagna_id=%s AND stato IN ('da_approvare','errore'){extra} RETURNING destinatario_id, tipo_campagna""", [utente_id] + par).fetchall()
+                         WHERE campagna_id=%s AND stato IN ('da_approvare','errore'){extra}
+                           AND NOT (testo ~ %s OR oggetto ~ %s) RETURNING destinatario_id, tipo_campagna""", [utente_id] + par + [QUADRE_SQL, QUADRE_SQL]).fetchall()
     dest = [x["destinatario_id"] for x in r if x["destinatario_id"] and x["tipo_campagna"] not in ("risposta", "ripresa")]
     if dest:
         conn.execute("UPDATE campagne_posta_dest SET stato='approvata', aggiornato_il=NOW() WHERE id = ANY(%s)", (dest,))
@@ -595,7 +607,11 @@ def approva_email(cid: int, d: Scelta, u: dict = Depends(solo_titolare)):
     if not d.tutte and not d.ids:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Scegli quali email approvare")
     with connessione() as conn:
-        return {"approvate": approva(conn, cid, None if d.tutte else d.ids, u["id"])}
+        n = approva(conn, cid, None if d.tutte else d.ids, u["id"])
+        restano = da_completare(conn, cid, None if d.tutte else d.ids)
+    if restano and not n:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Nel testo restano parti tra [ ] da completare: premi «Modifica», completale e salva, poi approva")
+    return {"approvate": n, "da_completare": restano}
 
 
 @router.post("/{cid}/riapri")

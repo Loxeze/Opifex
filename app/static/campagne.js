@@ -231,7 +231,7 @@ async function apriCampagna(corpo, cid, torna) {
   approvaTutte.hidden = !n.da_approvare;
   const riapriTutte = n.approvata ? _btnCp("Rimetti in modifica le " + n.approvata + " approvate", async () => { try { const r = await api("POST", "/gestione/campagne/" + cid + "/riapri", { tutte: true }); msg.replaceChildren(avviso(r.riaperte + " email di nuovo da approvare e modificabili.", "ok")); ricarica(); } catch (e) { err(e); } }, "s") : null;
   approvaTutte.onclick = () => riempi(conferma, h("div", { class: "carta" }, h("p", {}, (n.da_approvare === 1 ? "Approvi 1 email?" : "Approvi " + n.da_approvare + " email?") + " Partiranno piano, circa " + c.per_ora + " all'ora. Approvarle tutte insieme non conta per l'invio automatico se non le hai lette. Le risposte agli interessati restano da approvare una per una."),
-    h("div", { class: "azioni" }, _btnCp("Sì, approva e invia", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/approva", { tutte: true }); ricarica(); } catch (e) { err(e); } }, "p"),
+    h("div", { class: "azioni" }, _btnCp("Sì, approva e invia", async () => { try { const r = await api("POST", "/gestione/campagne/" + cid + "/approva", { tutte: true }); if (r.da_completare) alert(r.da_completare + (r.da_completare === 1 ? " email non è stata approvata: ha" : " email non sono state approvate: hanno") + " ancora parti tra [ ] da completare. Le trovi in «Da approvare»."); ricarica(); } catch (e) { err(e); } }, "p"),
       h("button", { class: "s", type: "button", onclick: () => conferma.replaceChildren() }, "Annulla"))));
   const statoBtn = chiusa || c.stato === "bozza" ? null : c.stato === "in_pausa"
     ? _btnCp("Riprendi", async () => { await api("PUT", "/gestione/campagne/" + cid, { stato: "in_corso" }); ricarica(); }, "s")
@@ -292,7 +292,8 @@ async function apriCampagna(corpo, cid, torna) {
             h("div", {}, h("b", {}, "La tua versione"), _diffCp(oggP + "\n\n" + tesP, ogg + "\n\n" + tes, "nuovo")))) : null;
         zona.replaceChildren(...[
           cambiata ? h("span", { class: "cp-tua" }, "✎ Modificata da te: il Redattore imparerà da questa correzione") : null,
-          h("div", { class: "cp-ogg" }, h("span", { class: "sotto" }, "Oggetto: "), ogg || ""), h("div", { class: "cp-testo" }, tes || ""), confronto,
+          _QUADRE_CP.test((ogg || "") + (tes || "")) ? avviso("Ci sono ancora parti tra [ ] da completare: premi «Modifica», scrivile e salva. Finché restano, l'email non si può approvare.", "no") : null,
+          h("div", { class: "cp-ogg" }, h("span", { class: "sotto" }, "Oggetto: "), ..._quadreCp(ogg)), h("div", { class: "cp-testo" }, ..._quadreCp(tes)), confronto,
           h("div", { class: "azioni" },
             _btnCp("Modifica", () => scrivi(), "s"),
             _btnCp("Approva", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/approva", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "p"),
@@ -392,4 +393,10 @@ function cartaStileCp() {
     } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
   } }, h("summary", {}, h("b", {}, "Come scrivo io"), h("span", { class: "sotto" }, " — quello che il Redattore ha imparato dalle tue correzioni")), corpo);
   return box;
+}
+
+// Parti tra [ ] rimaste nel testo: evidenziate (2.67.2)
+const _QUADRE_CP = /\[[^\[\]\n]{1,80}\]/;
+function _quadreCp(t) {
+  return (t || "").split(/(\[[^\[\]\n]{1,80}\])/).map((p, i) => i % 2 ? h("mark", { class: "cp-quadra" }, p) : document.createTextNode(p));
 }

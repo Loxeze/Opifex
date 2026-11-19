@@ -111,7 +111,7 @@ with TestClient(app) as c:
        and sql("SELECT ultimo_contatto = CURRENT_DATE FROM crm_contatti WHERE id=%s", (m1[0][0],)) == [(True,)], (st, inter))
     # approva tutte; la seconda parte quando e' passato il tempo
     r = c.post(f"/gestione/campagne/{cid}/approva", headers=H, json={"tutte": True})
-    ok("«approva tutte»: approva quelle rimaste", r.json() == {"approvate": 1}, r.text)
+    ok("«approva tutte»: approva quelle rimaste", r.json() == {"approvate": 1, "da_completare": 0}, r.text)
     sql("UPDATE campagne_posta_dest SET inviata_il = NOW() - INTERVAL '2 minutes' WHERE campagna_id=%s AND inviata_il IS NOT NULL", (cid,))
     with psycopg.connect(DSN, row_factory=dict_row) as k:
         campagne.invia_in_coda(k)
@@ -127,14 +127,14 @@ with TestClient(app) as c:
     ok("risposta riconosciuta (anche con maiuscole e nome)", n == 2 and st[crm.hash_email("mario@museo.it")] == "risposto", (n, st))
     ok("«RIMUOVI»: tolto, consenso negato nel CRM", st[crm.hash_email("info@diocesano.it")] == "rimosso"
        and sql("SELECT consenso_marketing FROM crm_contatti WHERE email_hash=%s", (crm.hash_email("info@diocesano.it"),)) == [(False,)])
-    ok("notifica della risposta e storia «entrata» nel CRM", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Risposta alla campagna%%'") == [(1,)]
+    ok("nessuna notifica alla semplice risposta (arriva solo per gli interessati) e storia «entrata» nel CRM", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Risposta alla campagna%%'") == [(0,)]
        and sql("SELECT count(*) FROM crm_interazioni WHERE contatto_id=%s AND direzione='entrata' AND esito='risposto'", (m1[0][0],)) == [(1,)])
     with psycopg.connect(DSN, row_factory=dict_row) as k:
         ok("le risposte gia' lette non si contano due volte", campagne.risposte(k) == 0)
     did = sql("SELECT id FROM campagne_posta_dest WHERE campagna_id=%s AND stato='risposto'", (cid,))[0][0]
     r = c.post(f"/gestione/campagne/destinatari/{did}/esito", headers=H, json={"stato": "interessato", "crea_affare": True})
     ok("interessato + apri affare: nasce l'affare nel CRM per l'impresa giusta", r.status_code == 200 and r.json()["affare"]
-       and sql("SELECT azienda_id, stato FROM crm_opportunita WHERE id=%s", (r.json()["affare"],)) == [(az, "contattato")], r.text)
+       and sql("SELECT azienda_id, stato FROM crm_opportunita WHERE id=%s", (r.json()["affare"],)) == [(az, "interessato")], (r.text, sql("SELECT azienda_id, stato, titolo FROM crm_opportunita")))
     det = c.get(f"/gestione/campagne/{cid}", headers=H).json()
     ok("dettaglio: numeri e destinatari leggibili", det["numeri"]["partite"] == 2 and det["numeri"]["risposte"] == 2 and det["numeri"]["tasso_risposta"] == 100
        and {x["email"] for x in det["destinatari"]} == {"mario@museo.it", "info@diocesano.it"}, det["numeri"])

@@ -460,3 +460,4 @@ body.bottega .storico-barra>div{background:#1F4D43}
 @media (max-width:760px){.cp-due{grid-template-columns:1fr}}
 .cp-tolto{background:rgba(200,60,60,.16);text-decoration:line-through;text-decoration-color:rgba(200,60,60,.7)}
 .cp-agg{background:rgba(40,150,80,.18)}
+.cp-quadra{background:rgba(220,150,0,.28);color:inherit;border-radius:3px;padding:0 2px;font-weight:600}
