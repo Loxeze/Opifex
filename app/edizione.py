@@ -75,6 +75,8 @@ def prepara(conn) -> bool:
     scuola.semina(conn)
     from . import marchi   # i marchi social di Lorenzo (Renovatio, profilo personale, Castello di Montarrenti, Filigrana)
     marchi.semina(conn)
+    from . import redattore
+    redattore.assicura_agente(conn)
     return True
 
 

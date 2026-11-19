@@ -308,7 +308,7 @@ function vistaDashboard() {
 
     const imbuto = pbScheda("Imbuto di vendita", [graficoImbuto(c.imbuto), h("p", { class: "bt-nota" }, c.conversione != null ? "Da contatto a cliente vinto: " + nIt(c.conversione, 1) + "% · perse negli ultimi 90 giorni: " + op.perse_90g : "Importa i contatti nel CRM per vedere l'imbuto.")],
       h("button", { class: "s", onclick: () => vai("crm") }, "Apri il CRM"), "bt-s4");
-    const NOMI = { nuova: ["Nuova", PB.imbuto[0]], contattato: ["Contattato", PB.imbuto[1]], in_trattativa: ["In trattativa", PB.imbuto[3]], in_pausa: ["In pausa", "#9AA39E"] };
+    const NOMI = { interessato: ["Interessato", PB.imbuto[0]], call_fissata: ["Call fissata", PB.imbuto[1]], call_fatta: ["Call fatta", PB.imbuto[2]], proposta: ["Proposta inviata", PB.imbuto[3]], nuova: ["Nuova", PB.imbuto[0]], contattato: ["Contattato", PB.imbuto[1]], in_trattativa: ["In trattativa", PB.imbuto[3]], in_pausa: ["In pausa", "#9AA39E"] };
     const tab = h("div", { class: "bt-minis" }, op.per_fase.map(f => h("div", { class: "bt-mini", title: NOMI[f.stato][0] }, h("div", { class: "bt-cap" }, h("i", { class: "bt-chip", style: "background:" + NOMI[f.stato][1] }), NOMI[f.stato][0]), h("b", {}, nIt(f.n)), h("span", {}, eurInt(f.valore)))));
     const mov = c.da_muovere.length ? [h("div", { class: "bt-cap", style: "margin-top:8px" }, "Da muovere questa settimana"), c.da_muovere.map(m => h("div", { class: "bt-riga-mov" }, h("span", {}, m.titolo),
       h("span", { class: "bt-tag" + (m.giorni > 0 ? " rosso" : "") }, m.giorni > 0 ? "scaduta da " + m.giorni + (m.giorni === 1 ? " giorno" : " giorni") : m.giorni === 0 ? "scade oggi" : "scade tra " + (-m.giorni) + " giorni")))] : null;

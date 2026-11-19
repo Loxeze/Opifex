@@ -7,8 +7,8 @@ from . import cassaforte, crm, crm_modello
 CANALI = ("email", "telefono", "incontro", "riunione", "messaggio", "social", "altro")
 ESITI = ("nessuna_risposta", "risposto", "interessato", "non_interessato", "da_richiamare", "altro")
 TIPI_OPP = ("bando", "cliente", "partnership", "sponsor", "consulenza", "altro")
-STATI_OPP = ("nuova", "contattato", "in_trattativa", "vinta", "persa", "in_pausa")
-APERTE = ("nuova", "contattato", "in_trattativa", "in_pausa")
+STATI_OPP = ("interessato", "call_fissata", "call_fatta", "proposta", "nuova", "contattato", "in_trattativa", "vinta", "persa", "in_pausa")
+APERTE = ("interessato", "call_fissata", "call_fatta", "proposta", "nuova", "contattato", "in_trattativa", "in_pausa")
 NOME_RUBRICA = "Rubrica (contatti inseriti a mano)"
 
 
@@ -55,8 +55,8 @@ def elenco(conn, q: str = "", filtro: str = "", utente_id: int | None = None, li
     elif filtro == "mai_contattati":
         where.append("c.ultimo_contatto IS NULL")
     elif filtro == "con_opportunita":
-        where.append("EXISTS (SELECT 1 FROM crm_opportunita o WHERE o.contatto_id = c.id AND o.stato IN ('nuova','contattato','in_trattativa','in_pausa'))")
-    righe = conn.execute(f"""SELECT c.*, (SELECT count(*) FROM crm_opportunita o WHERE o.contatto_id = c.id AND o.stato IN ('nuova','contattato','in_trattativa','in_pausa')) AS opp_aperte
+        where.append("EXISTS (SELECT 1 FROM crm_opportunita o WHERE o.contatto_id = c.id AND o.stato IN ('interessato','call_fissata','call_fatta','proposta','nuova','contattato','in_trattativa','in_pausa'))")
+    righe = conn.execute(f"""SELECT c.*, (SELECT count(*) FROM crm_opportunita o WHERE o.contatto_id = c.id AND o.stato IN ('interessato','call_fissata','call_fatta','proposta','nuova','contattato','in_trattativa','in_pausa')) AS opp_aperte
                              FROM crm_contatti c WHERE {' AND '.join(where)}
                              ORDER BY c.prossimo_passo_il NULLS LAST, c.ultimo_contatto NULLS FIRST, c.id DESC LIMIT 20000""", par).fetchall()
     t = (q or "").strip().lower()
@@ -214,7 +214,7 @@ def pipeline(conn, utente_id: int) -> dict:
     righe = conn.execute("""SELECT o.id, o.titolo, o.tipo, o.stato, o.valore_euro, o.scadenza, o.prossima_azione, o.contatto_id, p.nome AS progetto, z.nome AS azienda,
                                    c.nome_cifrato, c.ente_cifrato, c.email_cifrata
                             FROM crm_opportunita o JOIN crm_contatti c ON c.id = o.contatto_id LEFT JOIN progetti p ON p.id = o.progetto_id LEFT JOIN aziende z ON z.id = o.azienda_id
-                            WHERE o.stato IN ('nuova','contattato','in_trattativa','in_pausa') OR o.chiusa_il > NOW() - interval '60 days'
+                            WHERE o.stato IN ('interessato','call_fissata','call_fatta','proposta','nuova','contattato','in_trattativa','in_pausa') OR o.chiusa_il > NOW() - interval '60 days'
                             ORDER BY o.scadenza NULLS LAST, o.id DESC LIMIT 400""").fetchall()
     for r in righe:
         r["contatto"] = _d(r.pop("nome_cifrato")) or _d(r.pop("ente_cifrato", None)) or _d(r.pop("email_cifrata", None))
@@ -232,7 +232,7 @@ def promemoria(conn) -> int:
     if r and r["valore"] == oggi:
         return 0
     n_c = conn.execute("SELECT count(*) AS n FROM crm_contatti WHERE prossimo_passo_il <= CURRENT_DATE").fetchone()["n"]
-    n_o = conn.execute("SELECT count(*) AS n FROM crm_opportunita WHERE stato IN ('nuova','contattato','in_trattativa') AND scadenza <= CURRENT_DATE + 3").fetchone()["n"]
+    n_o = conn.execute("SELECT count(*) AS n FROM crm_opportunita WHERE stato IN ('interessato','call_fissata','call_fatta','proposta','nuova','contattato','in_trattativa') AND scadenza <= CURRENT_DATE + 3").fetchone()["n"]
     conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES ('crm_promemoria_il', %s) ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore", (oggi,))
     if n_c or n_o:
         conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",

@@ -9,8 +9,8 @@ from .permessi import solo_titolare
 
 router = APIRouter(prefix="/gestione")
 
-APERTE = ("nuova", "contattato", "in_trattativa", "in_pausa")
-PESO = {"nuova": 0.10, "contattato": 0.25, "in_trattativa": 0.60, "in_pausa": 0.05}
+APERTE = ("interessato", "call_fissata", "call_fatta", "proposta", "nuova", "contattato", "in_trattativa", "in_pausa")
+PESO = {"interessato": 0.10, "call_fissata": 0.20, "call_fatta": 0.30, "proposta": 0.50, "nuova": 0.10, "contattato": 0.25, "in_trattativa": 0.60, "in_pausa": 0.05}
 FUSO = "Europe/Rome"
 
 
@@ -30,7 +30,7 @@ def crm(conn) -> dict:
                                count(*) FILTER (WHERE EXISTS (SELECT 1 FROM crm_opportunita o WHERE o.contatto_id = crm_contatti.id)) AS con_opportunita
                         FROM crm_contatti""").fetchone()
     righe = conn.execute("""SELECT stato, count(*) AS n, COALESCE(sum(valore_euro),0) AS valore FROM crm_opportunita
-                            WHERE stato IN ('nuova','contattato','in_trattativa','in_pausa') OR chiusa_il > NOW() - INTERVAL '90 days' GROUP BY stato""").fetchall()
+                            WHERE stato IN ('interessato','call_fissata','call_fatta','proposta','nuova','contattato','in_trattativa','in_pausa') OR chiusa_il > NOW() - INTERVAL '90 days' GROUP BY stato""").fetchall()
     per = {r["stato"]: {"n": int(r["n"]), "valore": float(r["valore"])} for r in righe}
     for s in (*APERTE, "vinta", "persa"):
         per.setdefault(s, {"n": 0, "valore": 0.0})
@@ -41,18 +41,18 @@ def crm(conn) -> dict:
     for nome, n in fasi:
         imbuto.append({"fase": nome, "n": n, "dal_precedente": round(100 * n / prima) if prima else None})
         prima = n or prima
-    aperte_n = sum(per[s]["n"] for s in ("nuova", "contattato", "in_trattativa"))
+    aperte_n = sum(per[s]["n"] for s in APERTE if s != "in_pausa")
     vt = conn.execute("""SELECT count(*) FILTER (WHERE chiusa_il >= date_trunc('year', NOW())) AS n_anno,
                                       COALESCE(sum(valore_euro) FILTER (WHERE chiusa_il >= date_trunc('year', NOW())),0) AS v_anno,
                                       count(*) AS n_tot, COALESCE(sum(valore_euro),0) AS v_tot FROM crm_opportunita WHERE stato = 'vinta'""").fetchone()
     ferme = conn.execute("""SELECT titolo, stato, scadenza, (CURRENT_DATE - COALESCE(scadenza, creata_il::date)) AS giorni FROM crm_opportunita
-                            WHERE stato IN ('nuova','contattato','in_trattativa') AND scadenza IS NOT NULL AND scadenza <= CURRENT_DATE + 7
+                            WHERE stato IN ('interessato','call_fissata','call_fatta','proposta','nuova','contattato','in_trattativa') AND scadenza IS NOT NULL AND scadenza <= CURRENT_DATE + 7
                             ORDER BY scadenza LIMIT 4""").fetchall()
     return {
         "contatti": {"totale": int(c["totale"]), "nuovi_7g": int(c["nuovi_7g"]), "nuovi_30g": int(c["nuovi_30g"])},
         "imbuto": imbuto,
         "conversione": round(100 * vinti / c["totale"], 1) if c["totale"] else None,
-        "operazioni": {"aperte": aperte_n, "in_pausa": per["in_pausa"]["n"], "valore_aperto": sum(per[s]["valore"] for s in ("nuova", "contattato", "in_trattativa")),
+        "operazioni": {"aperte": aperte_n, "in_pausa": per["in_pausa"]["n"], "valore_aperto": sum(per[s]["valore"] for s in APERTE if s != "in_pausa"),
                        "valore_pesato": round(sum(per[s]["valore"] * PESO[s] for s in PESO)),
                        "per_fase": [{"stato": s, "n": per[s]["n"], "valore": per[s]["valore"]} for s in APERTE],
                        "vinte_90g": per["vinta"]["n"], "valore_vinto_90g": per["vinta"]["valore"],

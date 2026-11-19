@@ -415,3 +415,19 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .carta.mq-marchio .mq-titolo h3,.carta .mq-titolo h3{font-size:18px;text-transform:none;letter-spacing:0;color:var(--testo);font-weight:600;margin:0}
 .si-periodo{width:auto!important;min-width:140px}
 .cp-nome{margin:6px 0 4px;font-size:22px}
+/* 2.64: flusso a blocchi delle campagne */
+.fl-flusso{display:flex;flex-direction:column;align-items:stretch;gap:2px;margin-top:8px}
+.fl-blocco{display:grid;grid-template-columns:92px 1fr auto;gap:12px;align-items:start;border:1px solid var(--bordo);border-left:4px solid var(--fl,var(--bordo));border-radius:10px;padding:10px 12px;background:var(--carta,transparent)}
+.fl-partenza{--fl:#2E6FA3}.fl-azione{--fl:#1F6B52}.fl-attesa{--fl:#8A6A2F}.fl-decisione{--fl:#7A4FA0}.fl-uscita{--fl:#9A3A1F}
+.fl-tipo{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--fl);font-weight:600;padding-top:2px}
+.fl-corpo{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fl-controlli{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-top:4px}
+.fl-controlli input[type=url]{min-width:min(420px,100%)}
+.fl-numero{font-size:20px;font-weight:600;color:var(--fl);min-width:2ch;text-align:right}
+.fl-freccia{text-align:center;color:var(--tenue);line-height:1;font-size:16px;padding-left:46px}
+.fl-uscite{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
+.fl-uscite .fl-blocco{grid-template-columns:1fr auto}.fl-uscite .fl-tipo{grid-column:1/-1}
+.cp-angolo{font-size:14px}
+.cp-avviso{color:var(--avv,#8A6A2F)}
+.cp-nome .cp-stato{margin-left:10px;vertical-align:middle;font-size:13px}
+@media (max-width:560px){.fl-blocco{grid-template-columns:1fr auto}.fl-tipo{grid-column:1/-1}.fl-freccia{padding-left:0}}

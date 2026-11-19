@@ -3,7 +3,7 @@
 
 const CANALI_CRM = { email: "Email", telefono: "Telefono", incontro: "Incontro", riunione: "Riunione", messaggio: "Messaggio", social: "Social", altro: "Altro" };
 const ESITI_CRM = { nessuna_risposta: "Nessuna risposta", risposto: "Ha risposto", interessato: "Interessato", non_interessato: "Non interessato", da_richiamare: "Da richiamare", altro: "—" };
-const STATI_OPP = { nuova: "Nuova", contattato: "Contattato", in_trattativa: "In trattativa", vinta: "Vinta", persa: "Persa", in_pausa: "In pausa" };
+const STATI_OPP = { interessato: "Interessato", call_fissata: "Call fissata", call_fatta: "Call fatta", proposta: "Proposta inviata", nuova: "Nuova", contattato: "Contattato", in_trattativa: "In trattativa", vinta: "Vinta", persa: "Persa", in_pausa: "In pausa" };
 const TIPI_OPP = { bando: "Bando", cliente: "Cliente", partnership: "Partnership", sponsor: "Sponsor", consulenza: "Consulenza", altro: "Altro" };
 const dataIt = (d) => d ? new Date(d).toLocaleDateString("it-IT") : "—";
 

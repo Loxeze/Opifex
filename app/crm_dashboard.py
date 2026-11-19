@@ -2,7 +2,7 @@
 from . import crm, crm_schede as cs
 
 # probabilita' indicative di chiusura per fase, per il valore «pesato» dell'imbuto
-PROBABILITA = {"nuova": 0.10, "contattato": 0.25, "in_trattativa": 0.60, "in_pausa": 0.05}
+PROBABILITA = {"interessato": 0.10, "call_fissata": 0.20, "call_fatta": 0.30, "proposta": 0.50, "nuova": 0.10, "contattato": 0.25, "in_trattativa": 0.60, "in_pausa": 0.05}
 FASI_IMBUTO = ("nuova", "contattato", "in_trattativa", "vinta")
 
 
@@ -19,7 +19,7 @@ def cruscotto(conn, utente_id: int) -> dict:
                                count(*) FILTER (WHERE ultimo_contatto IS NULL) AS mai_contattati
                         FROM crm_contatti""").fetchone()
     righe = conn.execute("""SELECT stato, count(*) AS n, COALESCE(sum(valore_euro), 0) AS valore FROM crm_opportunita
-                            WHERE stato IN ('nuova','contattato','in_trattativa','in_pausa') OR chiusa_il > NOW() - INTERVAL '90 days' GROUP BY stato""").fetchall()
+                            WHERE stato IN ('interessato','call_fissata','call_fatta','proposta','nuova','contattato','in_trattativa','in_pausa') OR chiusa_il > NOW() - INTERVAL '90 days' GROUP BY stato""").fetchall()
     per = {r["stato"]: {"n": r["n"], "valore": float(r["valore"])} for r in righe}
     for s in cs.STATI_OPP:
         per.setdefault(s, {"n": 0, "valore": 0.0})
@@ -35,14 +35,14 @@ def cruscotto(conn, utente_id: int) -> dict:
         prima = n or prima
     scadenze = conn.execute("""SELECT o.id, o.titolo, o.stato, o.valore_euro, o.scadenza, o.contatto_id, c.nome_cifrato, c.ente_cifrato, c.email_cifrata
                                FROM crm_opportunita o JOIN crm_contatti c ON c.id = o.contatto_id
-                               WHERE o.stato IN ('nuova','contattato','in_trattativa') AND o.scadenza IS NOT NULL AND o.scadenza <= CURRENT_DATE + 14
+                               WHERE o.stato IN ('interessato','call_fissata','call_fatta','proposta','nuova','contattato','in_trattativa') AND o.scadenza IS NOT NULL AND o.scadenza <= CURRENT_DATE + 14
                                ORDER BY o.scadenza LIMIT 8""").fetchall()
     ricontatti = conn.execute("""SELECT id, prossimo_passo, prossimo_passo_il, nome_cifrato, ente_cifrato, email_cifrata FROM crm_contatti
                                  WHERE prossimo_passo_il IS NOT NULL AND prossimo_passo_il <= CURRENT_DATE + 7 ORDER BY prossimo_passo_il LIMIT 8""").fetchall()
     attivita = conn.execute("""SELECT i.id, i.quando, i.canale, i.direzione, i.esito, i.oggetto, i.contatto_id, c.nome_cifrato, c.ente_cifrato, c.email_cifrata
                                FROM crm_interazioni i JOIN crm_contatti c ON c.id = i.contatto_id ORDER BY i.quando DESC LIMIT 8""").fetchall()
     per_tipo = conn.execute("""SELECT tipo, count(*) AS n, COALESCE(sum(valore_euro), 0) AS valore FROM crm_opportunita
-                               WHERE stato IN ('nuova','contattato','in_trattativa','in_pausa') GROUP BY tipo ORDER BY valore DESC, n DESC""").fetchall()
+                               WHERE stato IN ('interessato','call_fissata','call_fatta','proposta','nuova','contattato','in_trattativa','in_pausa') GROUP BY tipo ORDER BY valore DESC, n DESC""").fetchall()
     regioni = conn.execute("""SELECT regione AS valore, count(*) AS n FROM crm_contatti WHERE regione IS NOT NULL GROUP BY regione ORDER BY n DESC LIMIT 8""").fetchall()
     categorie = conn.execute("""SELECT categoria AS valore, count(*) AS n FROM crm_contatto_categorie GROUP BY categoria ORDER BY n DESC LIMIT 8""").fetchall()
     crm._registra(conn, None, utente_id, "cruscotto_titolare", {}, c["totale"])

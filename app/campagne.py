@@ -24,7 +24,7 @@ MAX_GIORNO = 300            # tetto di invii di campagna al giorno, tutte le cam
 PIEDE = "\n\n—\nSe non desidera ricevere altre comunicazioni di questo tipo, risponda a questa email scrivendo «RIMUOVI» nell'oggetto."
 RIMUOVI = re.compile(r"\b(rimuovi|rimuovimi|cancella|cancellami|disiscriv|unsubscribe|stop)\b", re.I)
 SEGNAPOSTO = ("{saluto}", "{nome}", "{ente}")
-STATI_FINE = ("inviata", "risposto", "interessato", "non_interessato", "rimosso")
+STATI_FINE = ("inviata", "risposto", "interessato", "non_interessato", "rimosso", "nessuna_risposta")
 
 ISTR_MODELLO = """Sei Posta, l'agente che scrive le email di Lorenzo Zeppa. Scrivi il MODELLO di un'email per una campagna a nome di «{impresa}».
 Regole:
@@ -117,11 +117,17 @@ def crea(conn, d: dict) -> int:
     if d.get("segmento_id"):
         filtri = crm_segmenti.pulisci(dict(crm_segmenti.segmento(conn, int(d["segmento_id"]))["filtri"] or {}, **filtri))
     _mittente(conn, d.get("mittente") or "")
-    cid = conn.execute("""INSERT INTO campagne_posta (nome, obiettivo, azienda_id, agente_id, mittente, filtri, per_ora) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+    from . import flusso
+    foglio = (d.get("foglio") or "").strip()
+    if foglio and not flusso.id_foglio(foglio):
+        raise ErroreCampagna("Indirizzo del foglio Google non valido: incolla il link del foglio")
+    cid = conn.execute("""INSERT INTO campagne_posta (nome, obiettivo, azienda_id, agente_id, mittente, filtri, per_ora, foglio, categoria, personalizza)
+                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                        (d["nome"].strip(), (d.get("obiettivo") or "").strip(), d.get("azienda_id"), agente_posta(conn), d["mittente"], Jsonb(filtri),
-                        int(d.get("per_ora") or 20))).fetchone()["id"]
+                        int(d.get("per_ora") or 20), foglio, (d.get("categoria") or "").strip()[:40], d.get("personalizza", True) is not False)).fetchone()["id"]
     conn.commit()
-    calcola_destinatari(conn, cid)
+    if not foglio or d.get("anche_crm"):   # con il foglio, i destinatari arrivano dal foglio (salvo richiesta esplicita)
+        calcola_destinatari(conn, cid)
     return cid
 
 
@@ -195,9 +201,11 @@ def approva(conn, cid: int, ids: list[int] | None, utente_id: int) -> int:
     extra = ""
     if ids is not None:
         extra = " AND id = ANY(%s)"; par.append(ids)
+    if ids is None:
+        extra = " AND tipo_campagna <> 'risposta'"   # le risposte a chi e' interessato si approvano una per una
     r = conn.execute(f"""UPDATE email_in_uscita SET stato='approvata', decisa_il=NOW(), decisa_da=%s
-                         WHERE campagna_id=%s AND stato IN ('da_approvare','errore'){extra} RETURNING destinatario_id""", [utente_id] + par).fetchall()
-    dest = [x["destinatario_id"] for x in r if x["destinatario_id"]]
+                         WHERE campagna_id=%s AND stato IN ('da_approvare','errore'){extra} RETURNING destinatario_id, tipo_campagna""", [utente_id] + par).fetchall()
+    dest = [x["destinatario_id"] for x in r if x["destinatario_id"] and x["tipo_campagna"] != "risposta"]
     if dest:
         conn.execute("UPDATE campagne_posta_dest SET stato='approvata', aggiornato_il=NOW() WHERE id = ANY(%s)", (dest,))
     conn.execute("UPDATE campagne_posta SET stato='in_corso' WHERE id=%s AND stato='bozza'", (cid,))
@@ -207,8 +215,8 @@ def approva(conn, cid: int, ids: list[int] | None, utente_id: int) -> int:
 
 def scarta(conn, cid: int, ids: list[int], utente_id: int) -> int:
     r = conn.execute("""UPDATE email_in_uscita SET stato='rifiutata', decisa_il=NOW(), decisa_da=%s
-                        WHERE campagna_id=%s AND id = ANY(%s) AND stato IN ('da_approvare','approvata','errore') RETURNING destinatario_id""", (utente_id, cid, ids)).fetchall()
-    dest = [x["destinatario_id"] for x in r if x["destinatario_id"]]
+                        WHERE campagna_id=%s AND id = ANY(%s) AND stato IN ('da_approvare','approvata','errore') RETURNING destinatario_id, tipo_campagna""", (utente_id, cid, ids)).fetchall()
+    dest = [x["destinatario_id"] for x in r if x["destinatario_id"] and x["tipo_campagna"] != "risposta"]
     if dest:
         conn.execute("UPDATE campagne_posta_dest SET stato='scartata', aggiornato_il=NOW() WHERE id = ANY(%s)", (dest,))
     conn.commit()
@@ -218,7 +226,7 @@ def scarta(conn, cid: int, ids: list[int], utente_id: int) -> int:
 def dopo_scarto(conn, email_id: int):
     """Chiamata quando un'email di campagna e' scartata dalla coda generale."""
     conn.execute("""UPDATE campagne_posta_dest SET stato='scartata', aggiornato_il=NOW()
-                    WHERE id = (SELECT destinatario_id FROM email_in_uscita WHERE id=%s)""", (email_id,))
+                    WHERE id = (SELECT destinatario_id FROM email_in_uscita WHERE id=%s AND tipo_campagna <> 'risposta')""", (email_id,))
 
 
 def dopo_invio(conn, riga: dict, ok: bool, errore: str = ""):
@@ -226,10 +234,15 @@ def dopo_invio(conn, riga: dict, ok: bool, errore: str = ""):
     if not riga.get("destinatario_id"):
         return
     if not ok:
-        conn.execute("UPDATE campagne_posta_dest SET stato='errore', aggiornato_il=NOW() WHERE id=%s", (riga["destinatario_id"],))
+        if riga.get("tipo_campagna") != "risposta":
+            conn.execute("UPDATE campagne_posta_dest SET stato='errore', aggiornato_il=NOW() WHERE id=%s", (riga["destinatario_id"],))
         return
-    d = conn.execute("""UPDATE campagne_posta_dest SET stato='inviata', inviata_il=NOW(), aggiornato_il=NOW() WHERE id=%s
-                        RETURNING contatto_id, campagna_id""", (riga["destinatario_id"],)).fetchone()
+    if riga.get("tipo_campagna") == "risposta":   # la risposta a chi e' interessato: il destinatario resta «interessato»
+        d = conn.execute("SELECT contatto_id, campagna_id FROM campagne_posta_dest WHERE id=%s", (riga["destinatario_id"],)).fetchone()
+    else:
+        d = conn.execute("""UPDATE campagne_posta_dest d SET stato='inviata', inviata_il=NOW(), aggiornato_il=NOW(),
+                              prossimo_il = NOW() + make_interval(days => (SELECT sollecito_giorni FROM campagne_posta WHERE id=d.campagna_id))
+                            WHERE id=%s RETURNING contatto_id, campagna_id""", (riga["destinatario_id"],)).fetchone()
     if d and d["contatto_id"]:
         nome = conn.execute("SELECT nome FROM campagne_posta WHERE id=%s", (d["campagna_id"],)).fetchone()
         conn.execute("""INSERT INTO crm_interazioni (contatto_id, canale, direzione, da_agente_id, oggetto, esito, note_cifrate)
@@ -282,16 +295,14 @@ def risposte(conn) -> int:
         if d is None:
             continue
         via = bool(RIMUOVI.search(r["oggetto"] or ""))
-        conn.execute("UPDATE campagne_posta_dest SET stato=%s, risposta_il=COALESCE(%s, NOW()), risposta_oggetto=%s, aggiornato_il=NOW() WHERE id=%s",
-                     ("rimosso" if via else "risposto", r["data"], (r["oggetto"] or "")[:200], d["id"]))
+        conn.execute("""UPDATE campagne_posta_dest SET stato=%s, risposta_il=COALESCE(%s, NOW()), risposta_oggetto=%s, risposta_vaglio_id=%s, prossimo_il=NULL,
+                          risposta_sintesi=%s, aggiornato_il=NOW() WHERE id=%s""",
+                     ("rimosso" if via else "risposto", r["data"], (r["oggetto"] or "")[:200], r["id"], "chiede di non ricevere altre email" if via else "", d["id"]))
         if d["contatto_id"]:
             conn.execute("""INSERT INTO crm_interazioni (contatto_id, canale, direzione, oggetto, esito) VALUES (%s,'email','entrata',%s,%s)""",
                          (d["contatto_id"], (r["oggetto"] or "")[:200], "non_interessato" if via else "risposto"))
             if via:
                 conn.execute("UPDATE crm_contatti SET consenso_marketing=FALSE WHERE id=%s", (d["contatto_id"],))
-        if not via:
-            conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)",
-                         (f"Risposta alla campagna «{d['nome']}»: «{(r['oggetto'] or '')[:80]}». La trovi in Posta e in CRM > Campagne.",))
         n += 1
     _scrivi(conn, "campagne_ultima_posta", str(ultimo))
     conn.commit()
@@ -313,15 +324,18 @@ def esito(conn, did: int, nuovo: str, crea_affare: bool, utente_id: int) -> dict
                      (d["contatto_id"], utente_id, f"Campagna «{d['nome']}»"[:200], esiti[nuovo]))
         if nuovo == "rimosso":
             conn.execute("UPDATE crm_contatti SET consenso_marketing=FALSE WHERE id=%s", (d["contatto_id"],))
-        if nuovo == "interessato" and crea_affare:
-            affare = conn.execute("""INSERT INTO crm_opportunita (contatto_id, titolo, tipo, stato, azienda_id, responsabile_utente_id, prossima_azione)
-                                     VALUES (%s,%s,'cliente','contattato',%s,%s,'Rispondere e fissare un incontro') RETURNING id""",
-                                  (d["contatto_id"], f"Campagna «{d['nome']}»"[:200], d["azienda_id"], utente_id)).fetchone()["id"]
+    conn.execute("UPDATE campagne_posta_dest SET prossimo_il=NULL, risposta_sintesi=CASE WHEN risposta_sintesi='' THEN %s ELSE risposta_sintesi END WHERE id=%s",
+                 ({"interessato": "segnato da Lorenzo", "non_interessato": "segnato da Lorenzo", "rimosso": "segnato da Lorenzo", "risposto": ""}[nuovo], did))
+    if nuovo == "interessato" and crea_affare and d["contatto_id"]:
+        from . import flusso
+        conn.commit()
+        affare = flusso.segna_interessato(conn, dict(conn.execute("SELECT * FROM campagne_posta_dest WHERE id=%s", (did,)).fetchone()), "", utente_id, False)
     conn.commit()
     return {"stato": nuovo, "affare": affare}
 
 
-CONTEGGI = ("in_attesa", "da_approvare", "approvata", "inviata", "scartata", "errore", "risposto", "interessato", "non_interessato", "rimosso")
+CONTEGGI = ("in_attesa", "in_studio", "da_approvare", "approvata", "inviata", "scartata", "errore", "risposto", "interessato", "non_interessato", "rimosso",
+            "nessuna_risposta")
 
 
 def _conta(conn, cid: int) -> dict:
@@ -336,22 +350,48 @@ def _conta(conn, cid: int) -> dict:
 
 def elenco(conn) -> list[dict]:
     return [dict(c, numeri=_conta(conn, c["id"])) for c in conn.execute(
-        """SELECT c.id, c.nome, c.stato, c.creata_il, c.per_ora, z.nome AS impresa FROM campagne_posta c LEFT JOIN aziende z ON z.id=c.azienda_id
+        """SELECT c.id, c.nome, c.stato, c.creata_il, c.per_ora, c.categoria, c.foglio <> '' AS da_foglio, c.spesa::float AS spesa, c.tetto_spesa::float AS tetto_spesa,
+                  c.invio_automatico, z.nome AS impresa FROM campagne_posta c LEFT JOIN aziende z ON z.id=c.azienda_id
            ORDER BY (c.stato='chiusa'), c.creata_il DESC""").fetchall()]
 
 
 def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
+    from . import flusso
     c = dict(campagna(conn, cid))
-    righe = conn.execute("""SELECT d.id, d.stato, d.inviata_il, d.risposta_il, d.risposta_oggetto, d.contatto_id,
-                                   k.nome_cifrato, k.ente_cifrato, k.email_cifrata, e.id AS email_id, e.oggetto, e.testo, e.errore
+    righe = conn.execute("""SELECT d.*, k.nome_cifrato, k.ente_cifrato, k.email_cifrata, k.comune, k.provincia, e.id AS e_id, e.oggetto AS e_oggetto, e.testo AS e_testo,
+                                   e.errore AS e_errore, e.stato AS e_stato, e.tipo_campagna AS e_tipo
                             FROM campagne_posta_dest d LEFT JOIN crm_contatti k ON k.id=d.contatto_id LEFT JOIN email_in_uscita e ON e.id=d.email_id
-                            WHERE d.campagna_id=%s ORDER BY (d.stato='da_approvare') DESC, (d.stato IN ('risposto','interessato')) DESC, d.id LIMIT 1000""", (cid,)).fetchall()
-    c["destinatari"] = [{"id": r["id"], "stato": r["stato"], "nome": _d(r["nome_cifrato"]), "ente": _d(r["ente_cifrato"]), "email": _d(r["email_cifrata"]),
-                         "contatto_id": r["contatto_id"], "inviata_il": r["inviata_il"], "risposta_il": r["risposta_il"], "risposta_oggetto": r["risposta_oggetto"],
-                         "email_id": r["email_id"], "oggetto": r["oggetto"] if r["stato"] in ("da_approvare", "approvata", "errore") else None,
-                         "testo": r["testo"] if r["stato"] in ("da_approvare", "approvata", "errore") else None, "errore": r["errore"]} for r in righe]
+                            WHERE d.campagna_id=%s
+                            ORDER BY (d.stato='da_approvare') DESC, (d.stato='interessato') DESC, (d.stato IN ('risposto','errore')) DESC, d.aggiornato_il DESC, d.id
+                            LIMIT 1000""", (cid,)).fetchall()
+    risposte = {r["destinatario_id"]: r for r in conn.execute(
+        """SELECT id, destinatario_id, oggetto, testo, stato, errore FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna='risposta' ORDER BY id""", (cid,)).fetchall()}
+    note = {r["contatto_id"]: r for r in conn.execute(
+        "SELECT contatto_id, aggiornato_il FROM crm_note_web WHERE contatto_id = ANY(%s)", ([r["contatto_id"] for r in righe if r["contatto_id"]],)).fetchall()}
+    aperta = ("da_approvare", "approvata", "errore")
+    c["destinatari"] = []
+    for r in righe:
+        rs = risposte.get(r["id"])
+        c["destinatari"].append({
+            "id": r["id"], "stato": r["stato"], "nome": _d(r["nome_cifrato"]), "ente": _d(r["ente_cifrato"]), "email": _d(r["email_cifrata"]),
+            "localita": ", ".join(x for x in (r["comune"], r["provincia"]) if x), "contatto_id": r["contatto_id"], "inviata_il": r["inviata_il"],
+            "risposta_il": r["risposta_il"], "risposta_oggetto": r["risposta_oggetto"], "risposta_sintesi": r["risposta_sintesi"], "passo": r["passo"],
+            "prossimo_il": r["prossimo_il"], "angolo": r["angolo"], "angolo_motivo": r["angolo_motivo"], "zona": r["zona"], "personalizzata": r["personalizzata"],
+            "nota": r["nota"], "opportunita_id": r["opportunita_id"], "note_del": note[r["contatto_id"]]["aggiornato_il"] if r["contatto_id"] in note else None,
+            "email_id": r["e_id"] if r["e_stato"] in aperta else None, "tipo": r["e_tipo"],
+            "oggetto": r["e_oggetto"] if r["e_stato"] in aperta else None, "testo": r["e_testo"] if r["e_stato"] in aperta else None, "errore": r["e_errore"],
+            "risposta": {"email_id": rs["id"], "oggetto": rs["oggetto"], "testo": rs["testo"], "stato": rs["stato"], "errore": rs["errore"]} if rs else None})
     c["numeri"] = _conta(conn, cid)
     c["mittente_email"] = next((m["email"] for m in mittenti(conn) if m["id"] == c["mittente"]), "")
+    c["autonomia"] = flusso.autonomia(conn, cid)
+    c["correzioni"] = [dict(x, ente=_d(x["ente_cifrato"])) for x in conn.execute(
+        """SELECT x.id, x.contatto_id, x.campo, x.valore, x.motivo, k.ente_cifrato, k.comune FROM crm_correzioni x JOIN crm_contatti k ON k.id=x.contatto_id
+           WHERE x.stato='proposta' AND x.contatto_id IN (SELECT contatto_id FROM campagne_posta_dest WHERE campagna_id=%s) ORDER BY x.id""", (cid,)).fetchall()]
+    for x in c["correzioni"]:
+        x.pop("ente_cifrato", None)
+    c["opportunita"] = conn.execute("SELECT stato, count(*) AS n FROM crm_opportunita WHERE campagna_id=%s GROUP BY stato", (cid,)).fetchall()
+    c["spesa"] = float(c["spesa"]); c["tetto_spesa"] = float(c["tetto_spesa"])
+    c["account_drive"] = conn.execute("SELECT id, email FROM account_google WHERE 'drive' = ANY(servizi) ORDER BY id").fetchall()
     crm._registra(conn, None, utente_id, "campagna_dettaglio", {"campagna": cid}, len(righe))
     return c
 
@@ -388,6 +428,10 @@ class Nuova(BaseModel):
     segmento_id: int | None = None
     filtri: dict = Field(default_factory=dict)
     per_ora: int = Field(default=20, ge=1, le=120)
+    foglio: str = Field(default="", max_length=300)
+    categoria: str = Field(default="", max_length=40)
+    personalizza: bool = True
+    anche_crm: bool = False
 
 
 @router.post("")
@@ -416,6 +460,17 @@ class Modifica(BaseModel):
     testo: str | None = Field(default=None, max_length=8000)
     stato: str | None = Field(default=None, pattern="^(in_corso|in_pausa|chiusa)$")
     per_ora: int | None = Field(default=None, ge=1, le=120)
+    categoria: str | None = Field(default=None, max_length=40)
+    brief: dict | None = None
+    foglio: str | None = Field(default=None, max_length=300)
+    foglio_account_id: int | None = None
+    personalizza: bool | None = None
+    modello: str | None = Field(default=None, max_length=80)
+    tetto_spesa: float | None = Field(default=None, ge=0, le=1000)
+    sollecito_giorni: int | None = Field(default=None, ge=3, le=60)
+    solleciti: int | None = Field(default=None, ge=0, le=2)
+    link_prenotazione: str | None = Field(default=None, max_length=400)
+    invio_automatico: bool | None = None
 
 
 @router.put("/{cid}")
@@ -425,10 +480,27 @@ def modifica(cid: int, d: Modifica, u: dict = Depends(solo_titolare)):
             campagna(conn, cid)
         except LookupError as e:
             _errore(e)
-        for k in ("nome", "obiettivo", "oggetto", "testo", "per_ora"):
+        from . import flusso
+        if d.foglio is not None and d.foglio.strip() and not flusso.id_foglio(d.foglio):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Indirizzo del foglio Google non valido: incolla il link del foglio")
+        if d.link_prenotazione and not re.match(r"^https://", d.link_prenotazione.strip()):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Il link di prenotazione deve iniziare con https://")
+        if d.invio_automatico:
+            a_ = flusso.autonomia(conn, cid)
+            if not a_["puo"]:
+                raise HTTPException(status.HTTP_409_CONFLICT, f"L'invio automatico si accende dopo {a_['serve']} bozze di fila approvate senza correzioni: per ora sono {a_['di_fila']}")
+        for k in ("nome", "obiettivo", "oggetto", "testo", "per_ora", "categoria", "foglio", "personalizza", "modello", "tetto_spesa", "sollecito_giorni",
+                  "solleciti", "link_prenotazione", "invio_automatico"):
             v = getattr(d, k)
             if v is not None:
                 conn.execute(f"UPDATE campagne_posta SET {k}=%s WHERE id=%s", (v.strip() if isinstance(v, str) else v, cid))
+        if d.brief is not None:
+            b = {k: str(d.brief.get(k) or "")[:1500] for k in ("destinatari", "occasione", "offerta", "cercare", "angoli", "evitare", "tono")}
+            conn.execute("UPDATE campagne_posta SET brief=%s WHERE id=%s", (Jsonb(b), cid))
+        if "foglio_account_id" in d.model_fields_set:
+            conn.execute("UPDATE campagne_posta SET foglio_account_id=%s WHERE id=%s", (d.foglio_account_id, cid))
+        if d.foglio is not None:
+            conn.execute("UPDATE campagne_posta SET foglio_letto_il=NULL, foglio_errore='' WHERE id=%s", (cid,))
         if d.stato:
             conn.execute("UPDATE campagne_posta SET stato=%s, chiusa_il=CASE WHEN %s='chiusa' THEN NOW() ELSE NULL END WHERE id=%s", (d.stato, d.stato, cid))
             if d.stato == "chiusa":   # chiudendo, le email non ancora partite tornano indietro
@@ -497,3 +569,60 @@ def segna_esito(did: int, d: Esito, u: dict = Depends(solo_titolare)):
             return esito(conn, did, d.stato, d.crea_affare, u["id"])
         except Exception as e:  # noqa: BLE001
             _errore(e)
+
+
+@router.post("/{cid}/foglio")
+def leggi_foglio(cid: int, u: dict = Depends(solo_titolare)):
+    from . import flusso
+    with connessione() as conn:
+        try:
+            c = dict(campagna(conn, cid))
+        except LookupError as e:
+            _errore(e)
+        if not c["foglio"]:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Collega prima un foglio Google alla campagna")
+        r = flusso.sincronizza_foglio(conn, c)
+        if r.get("errore"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, r["errore"])
+        return r
+
+
+@router.post("/{cid}/duplica")
+def duplica(cid: int, u: dict = Depends(solo_titolare)):
+    from . import flusso
+    with connessione() as conn:
+        try:
+            nid = flusso.duplica(conn, cid)
+        except LookupError as e:
+            _errore(e)
+        return {"id": nid}
+
+
+class Appunti(BaseModel):
+    appunti: str = Field(min_length=10, max_length=6000)
+
+
+@router.post("/{cid}/brief")
+def proponi_brief(cid: int, d: Appunti, u: dict = Depends(solo_titolare)):
+    from . import flusso
+    with connessione() as conn:
+        try:
+            return flusso.completa_brief(conn, cid, d.appunti)
+        except Exception as e:  # noqa: BLE001
+            _errore(e)
+
+
+class Correzione(BaseModel):
+    accetta: bool
+
+
+@router.post("/correzioni/{xid}")
+def decidi_correzione(xid: int, d: Correzione, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        x = conn.execute("SELECT * FROM crm_correzioni WHERE id=%s AND stato='proposta'", (xid,)).fetchone()
+        if x is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Correzione inesistente o gia' decisa")
+        if d.accetta:
+            conn.execute(f"UPDATE crm_contatti SET {x['campo']}=%s WHERE id=%s", (x["valore"], x["contatto_id"]))
+        conn.execute("UPDATE crm_correzioni SET stato=%s WHERE id=%s", ("accettata" if d.accetta else "rifiutata", xid))
+    return {"ok": True}

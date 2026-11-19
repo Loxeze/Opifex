@@ -61,13 +61,13 @@ def _dove(f: dict) -> tuple[str, dict]:
     if f.get("senza_responsabile"):
         w.append("c.responsabile_utente_id IS NULL")
     if f.get("con_opportunita"):
-        w.append("EXISTS (SELECT 1 FROM crm_opportunita o WHERE o.contatto_id = c.id AND o.stato IN ('nuova','contattato','in_trattativa','in_pausa'))")
+        w.append("EXISTS (SELECT 1 FROM crm_opportunita o WHERE o.contatto_id = c.id AND o.stato IN ('interessato','call_fissata','call_fatta','proposta','nuova','contattato','in_trattativa','in_pausa'))")
     return " AND ".join(w), p
 
 
 def _righe(conn, f: dict):
     dove, par = _dove(f)
-    righe = conn.execute(f"""SELECT c.*, (SELECT count(*) FROM crm_opportunita o WHERE o.contatto_id = c.id AND o.stato IN ('nuova','contattato','in_trattativa','in_pausa')) AS opp_aperte
+    righe = conn.execute(f"""SELECT c.*, (SELECT count(*) FROM crm_opportunita o WHERE o.contatto_id = c.id AND o.stato IN ('interessato','call_fissata','call_fatta','proposta','nuova','contattato','in_trattativa','in_pausa')) AS opp_aperte
                              FROM crm_contatti c WHERE {dove} ORDER BY c.prossimo_passo_il NULLS LAST, c.ultimo_contatto NULLS FIRST, c.id DESC LIMIT 20000""", par).fetchall()
     t = f.get("q", "").lower()
     for r in righe:

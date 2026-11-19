@@ -206,6 +206,7 @@ async def _manutenzione():
         _passo("commenti dei marchi social", lambda c: __import__("app.marchi", fromlist=["x"]).giro(c))
         _passo("traffico dei siti (Google Analytics)", lambda c: __import__("app.analytics", fromlist=["x"]).giro(c))
         _passo("campagne email: risposte", lambda c: __import__("app.campagne", fromlist=["x"]).risposte(c))
+        _passo("campagne email: flusso a blocchi", lambda c: __import__("app.flusso", fromlist=["x"]).giro(c))
         _passo("archivio NAS", lambda c: __import__("app.archivio_nas", fromlist=["x"]).giro(c))
         _passo("giro di aggiornamento", lambda c: __import__("app.giro_domande", fromlist=["x"]).giro(c))
         _passo("miglioramento degli agenti (Padre Casati)", miglioramento.giro)
@@ -324,6 +325,7 @@ async def ciclo_vita(app: FastAPI):
                     _sc3.semina(conn)
                     _sc3.ripara(conn)
                     _sc3.ripara_note(conn)
+                    __import__("app.redattore", fromlist=["x"]).assicura_agente(conn)
                     __import__("app.marchi", fromlist=["x"]).semina(conn)
                 from . import prezzi as _pz3
                 _pz3.applica_listino(conn)
