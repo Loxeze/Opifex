@@ -39,7 +39,7 @@ function crmCampagne() {
       h("div", { class: "azioni" }, bNuova), nuova,
       d.campagne.length ? h("div", { class: "mq-classifica" }, d.campagne.map(riga)) : h("p", { class: "sotto" }, "Nessuna campagna ancora."),
       d.imbuto && d.imbuto[0].n ? h("div", { class: "carta" }, graficoImbutoCp(d.imbuto, "L'imbuto di tutte le campagne")) : null,
-      _quadri(d.quadri)]);
+      _quadri(d.quadri), cartaFattureInCloud()]);
   };
   carica();
   return corpo;
@@ -63,6 +63,70 @@ function _quadri(quadri) {
     quadri.map(q => h("details", {}, h("summary", {}, h("b", {}, q.categoria), h("span", { class: "sotto" }, " — " + q.n_call + (q.n_call === 1 ? " call" : " call") + ", aggiornato " + new Date(q.aggiornato_il).toLocaleDateString("it-IT"))),
       h("div", { class: "im-quadro" }, q.testo))),
     _btnCp("Aggiorna i quadri adesso", async () => { try { const r = await api("POST", "/gestione/campagne/quadri/aggiorna"); alert(r.aggiornati + " quadri aggiornati."); } catch (e) { alert(e.message); } }, "s piccolo"));
+}
+
+// Preventivo: bozza dall'analisi della call, prezzi di Lorenzo, poi creazione in Fatture in Cloud
+const STATI_PREV = { bozza: "bozza", in_fatture: "in Fatture in Cloud", accettato: "accettato", rifiutato: "rifiutato", errore: "errore" };
+function editorPreventivo(p, dopo) {
+  const box = h("div", { class: "carta pv-editor" });
+  const msg = h("div");
+  const modificabile = p.stato === "bozza" || p.stato === "errore";
+  const oggetto = h("input", { type: "text", value: p.oggetto || "", maxlength: 200, disabled: !modificabile });
+  const note = h("textarea", { rows: 2, disabled: !modificabile }, p.note || "");
+  const righe = h("div", { class: "pv-voci" });
+  const totale = h("b");
+  const voce = (v) => {
+    const nome = h("input", { type: "text", value: v.nome || "", placeholder: "Voce", disabled: !modificabile });
+    const descr = h("textarea", { rows: 2, placeholder: "Descrizione", disabled: !modificabile }, v.descrizione || "");
+    const q = h("input", { type: "number", min: 0.01, step: 0.5, value: v.quantita || 1, disabled: !modificabile, "aria-label": "Quantità" });
+    const pr = h("input", { type: "number", min: 0, step: 10, value: v.prezzo == null ? "" : v.prezzo, placeholder: "€ netto", disabled: !modificabile, "aria-label": "Prezzo netto" });
+    const riga = h("div", { class: "pv-voce" }, h("div", { class: "pv-testi" }, nome, descr), h("label", {}, "Q.tà", q), h("label", {}, "Prezzo €", pr),
+      modificabile ? h("button", { class: "s piccolo", type: "button", onclick: () => { riga.remove(); conta(); }, "aria-label": "Togli la voce" }, "×") : null);
+    riga._leggi = () => ({ nome: nome.value, descrizione: descr.value, quantita: Number(q.value) || 1, prezzo: pr.value === "" ? null : Number(pr.value) });
+    q.oninput = pr.oninput = conta;
+    return riga;
+  };
+  function leggiVoci() { return [...righe.children].map(r => r._leggi()); }
+  function conta() { const t = leggiVoci().reduce((a, v) => a + (v.prezzo || 0) * (v.quantita || 1), 0); totale.textContent = t.toLocaleString("it-IT", { style: "currency", currency: "EUR" }) + " + IVA"; }
+  (p.voci || []).forEach(v => righe.append(voce(v)));
+  conta();
+  const salva = async () => { const r = await api("PUT", "/gestione/preventivi/" + p.id, { oggetto: oggetto.value, voci: leggiVoci(), note: note.value }); return r; };
+  const conferma = h("div");
+  box.append(...[h("div", { class: "mq-titolo" }, h("b", {}, "Preventivo per " + (p.cliente || "?")), h("span", { class: "cp-stato" }, STATI_PREV[p.stato] + (p.fic_numero ? " n. " + p.fic_numero : ""))),
+    p.errore ? avviso(p.errore, "no") : null,
+    h("label", {}, "Oggetto", oggetto), righe,
+    modificabile ? h("button", { class: "s piccolo", type: "button", onclick: () => { righe.append(voce({ quantita: 1 })); } }, "+ Voce") : null,
+    h("div", { class: "pv-totale" }, "Totale: ", totale), h("label", {}, "Note", note),
+    modificabile ? h("div", { class: "azioni" },
+      _btnCp("Salva", async () => { try { await salva(); msg.replaceChildren(avviso("Salvato.", "ok")); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } }, "s"),
+      h("button", { class: "p", type: "button", onclick: () => riempi(conferma, h("div", { class: "carta" }, h("p", {}, "Creo il preventivo in Fatture in Cloud con queste voci? Da lì lo invii, lo modifichi e lo trasformi in fattura."),
+        h("div", { class: "azioni" }, _btnCp("Sì, crealo", async () => { try { await salva(); const r = await api("POST", "/gestione/preventivi/" + p.id + "/crea"); msg.replaceChildren(avviso("Creato in Fatture in Cloud: preventivo n. " + r.numero + ". L'opportunità è a «proposta inviata».", "ok")); conferma.replaceChildren(); dopo && dopo(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } }, "p"),
+          h("button", { class: "s", type: "button", onclick: () => conferma.replaceChildren() }, "Annulla")))) }, "Crea in Fatture in Cloud")) : null,
+    p.stato === "in_fatture" ? h("div", { class: "azioni" }, p.fic_url ? h("a", { href: p.fic_url, target: "_blank", rel: "noopener", class: "s" }, "Apri in Fatture in Cloud") : null,
+      _btnCp("Accettato (vinta)", async () => { await api("POST", "/gestione/preventivi/" + p.id + "/esito", { accettato: true }); dopo && dopo(); }, "s piccolo"),
+      _btnCp("Rifiutato (persa)", async () => { await api("POST", "/gestione/preventivi/" + p.id + "/esito", { accettato: false }); dopo && dopo(); }, "s piccolo")) : null,
+    conferma, msg].filter(Boolean));
+  return box;
+}
+
+function cartaFattureInCloud() {
+  const box = h("div", { class: "carta" }, h("p", { class: "sotto" }, "Carico…"));
+  const carica = async () => {
+    let d; try { d = await api("GET", "/gestione/preventivi"); } catch (e) { box.replaceChildren(avviso(e.message, "no")); return; }
+    const c = d.config, msg = h("div");
+    if (c.collegato && c.azienda_id) {
+      riempi(box, [h("h3", {}, "Fatture in Cloud"), h("p", { class: "sotto" }, "Collegato all'azienda «" + (c.azienda || c.azienda_id) + "»" + (c.iva_id ? ", IVA " + c.iva + "%" : "") + ". I preventivi approvati in Opifex nascono lì; quando un preventivo diventa fattura, l'affare risulta vinto da solo."),
+        _btnCp("Scollega", async () => { await api("DELETE", "/gestione/preventivi/fatture-in-cloud"); carica(); }, "s piccolo")]);
+      return;
+    }
+    const tok = h("input", { type: "password", placeholder: "Token di Fatture in Cloud", autocomplete: "off" });
+    const aziende = h("div");
+    const vai_ = async (azienda_id) => { try { const r = await api("PUT", "/gestione/preventivi/fatture-in-cloud", { token: tok.value, azienda_id }); if (r.serve_scelta) { riempi(aziende, [h("p", {}, "Il token vede più aziende: quale uso?"), r.aziende.map(a => _btnCp(a.nome, () => vai_(a.id), "s"))]); return; } carica(); } catch (e) { msg.replaceChildren(avviso(e.message, "no")); } };
+    riempi(box, [h("h3", {}, "Fatture in Cloud"), h("p", { class: "sotto" }, "Per creare i preventivi in Fatture in Cloud: in Fatture in Cloud › Impostazioni › Applicazioni collegate crea il token con i permessi «Documenti emessi» (lettura e scrittura) e «Informazioni» (lettura), poi incollalo qui. Resta cifrato in Opifex."),
+      h("div", { class: "azioni" }, tok, _btnCp("Collega", () => vai_(null), "p")), aziende, msg]);
+  };
+  carica();
+  return box;
 }
 
 function _opz(lista, vuota, cosa, scelto) {
@@ -228,6 +292,15 @@ async function apriCampagna(corpo, cid, torna) {
     if (x.email_id && (x.stato === "da_approvare" || x.stato === "errore")) box.append(editor(x.email_id, x.oggetto, x.testo, x.tipo === "sollecito" ? "Leggi e correggi il sollecito" : "Leggi e correggi", false));
     if (x.risposta && (x.risposta.stato === "da_approvare" || x.risposta.stato === "errore")) box.append(editor(x.risposta.email_id, x.risposta.oggetto, x.risposta.testo, x.risposta.tipo === "ripresa" ? "L'email per riprendere il discorso (da approvare)" : "La risposta per fissare la call (da approvare)", true));
     else if (x.risposta) box.append(h("div", { class: "sotto" }, (x.risposta.tipo === "ripresa" ? "Email di ripresa: " : "Risposta per la call: ") + ({ approvata: "in partenza", inviata: "inviata", rifiutata: "scartata" })[x.risposta.stato]));
+    if (x.opportunita_id && x.stato === "interessato") {
+      const zona = h("div");
+      if (x.preventivo) {
+        box.append(h("details", { ontoggle: async (ev) => { if (ev.currentTarget.open && !zona.firstChild) { const d = await api("GET", "/gestione/preventivi?opportunita_id=" + x.opportunita_id); zona.replaceChildren(editorPreventivo(d.preventivi[0], ricarica)); } } },
+          h("summary", {}, "Preventivo " + STATI_PREV[x.preventivo.stato] + (x.preventivo.fic_numero ? " n. " + x.preventivo.fic_numero : "") + (x.preventivo.totale_netto ? " · " + x.preventivo.totale_netto.toLocaleString("it-IT", { style: "currency", currency: "EUR" }) : "")), zona));
+      } else {
+        box.append(h("div", { class: "azioni" }, _btnCp("Prepara il preventivo", async () => { try { const p = await api("POST", "/gestione/preventivi", { opportunita_id: x.opportunita_id }); zona.replaceChildren(editorPreventivo(p, ricarica)); } catch (e) { err(e); } }, "s piccolo")), zona);
+      }
+    }
     if (["inviata", "risposto", "interessato", "non_interessato", "nessuna_risposta"].includes(x.stato)) {
       const es = (st, et, affare) => h("button", { class: "s piccolo", type: "button", onclick: async () => { try { const r = await api("POST", "/gestione/campagne/destinatari/" + x.id + "/esito", { stato: st, crea_affare: !!affare }); if (r.affare) msg.replaceChildren(avviso("Aperta l'opportunità nel CRM e preparata la risposta con il link per la call.", "ok")); ricarica(); } catch (e) { err(e); } } }, et);
       box.append(h("div", { class: "azioni" }, x.contatto_id ? h("button", { class: "s piccolo", type: "button", onclick: () => apriContatto(x.contatto_id) }, "Scheda nel CRM") : null,

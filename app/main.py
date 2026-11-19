@@ -33,6 +33,7 @@ from .marchi import router as router_marchi
 from .guardiano import router as router_guardiano
 from .analytics import router as router_analytics
 from .campagne import router as router_campagne
+from .preventivi import router as router_preventivi
 from .sfondo_arte import router as router_arte
 from .stili_montaggio import router as router_contenuti
 from .monitor_social import router as router_monsoc
@@ -207,6 +208,7 @@ async def _manutenzione():
         _passo("traffico dei siti (Google Analytics)", lambda c: __import__("app.analytics", fromlist=["x"]).giro(c))
         _passo("campagne email: risposte", lambda c: __import__("app.campagne", fromlist=["x"]).risposte(c))
         _passo("campagne email: flusso a blocchi", lambda c: __import__("app.flusso", fromlist=["x"]).giro(c))
+        _passo("preventivi: fatture nate in Fatture in Cloud", lambda c: __import__("app.preventivi", fromlist=["x"]).controlla_fatture(c))
         _passo("archivio NAS", lambda c: __import__("app.archivio_nas", fromlist=["x"]).giro(c))
         _passo("giro di aggiornamento", lambda c: __import__("app.giro_domande", fromlist=["x"]).giro(c))
         _passo("miglioramento degli agenti (Padre Casati)", miglioramento.giro)
@@ -419,6 +421,7 @@ app.include_router(router_marchi)
 app.include_router(router_guardiano)
 app.include_router(router_analytics)
 app.include_router(router_campagne)
+app.include_router(router_preventivi)
 app.include_router(router_arte)
 app.include_router(router_contenuti)
 app.include_router(router_monsoc)

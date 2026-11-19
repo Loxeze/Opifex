@@ -440,3 +440,12 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .im-num{font-size:14px;white-space:nowrap}
 .im-quadro{white-space:pre-wrap;line-height:1.55;max-width:75ch;margin-top:6px}
 .cp-richiamo{font-size:14px;color:var(--avv,#8A6A2F)}
+/* 2.66: preventivi */
+.pv-editor{display:flex;flex-direction:column;gap:8px}
+.pv-voci{display:flex;flex-direction:column;gap:8px}
+.pv-voce{display:grid;grid-template-columns:1fr 90px 120px auto;gap:8px;align-items:end;border-top:1px solid var(--bordo);padding-top:8px}
+.pv-testi{display:flex;flex-direction:column;gap:4px;min-width:0}
+.pv-voce input[type=number]{width:100%}
+.pv-totale{font-size:16px}
+@media (max-width:560px){.pv-voce{grid-template-columns:1fr 1fr auto}.pv-testi{grid-column:1/-1}}
+.pv-editor>button{align-self:flex-start}

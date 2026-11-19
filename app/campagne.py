@@ -367,6 +367,9 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
     risposte = {r["destinatario_id"]: r for r in conn.execute(
         """SELECT id, destinatario_id, oggetto, testo, stato, errore, tipo_campagna FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna IN ('risposta','ripresa')
            ORDER BY id""", (cid,)).fetchall()}
+    prev = {r["opportunita_id"]: dict(r, totale_netto=float(r["totale_netto"])) for r in conn.execute(
+        """SELECT DISTINCT ON (opportunita_id) id, opportunita_id, stato, fic_numero, totale_netto FROM preventivi
+           WHERE opportunita_id = ANY(%s) ORDER BY opportunita_id, id DESC""", ([r["opportunita_id"] for r in righe if r["opportunita_id"]],)).fetchall()}
     note = {r["contatto_id"]: r for r in conn.execute(
         "SELECT contatto_id, aggiornato_il FROM crm_note_web WHERE contatto_id = ANY(%s)", ([r["contatto_id"] for r in righe if r["contatto_id"]],)).fetchall()}
     aperta = ("da_approvare", "approvata", "errore")
@@ -382,7 +385,8 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
             "email_id": r["e_id"] if r["e_stato"] in aperta else None, "tipo": r["e_tipo"],
             "oggetto": r["e_oggetto"] if r["e_stato"] in aperta else None, "testo": r["e_testo"] if r["e_stato"] in aperta else None, "errore": r["e_errore"],
             "risposta": {"email_id": rs["id"], "oggetto": rs["oggetto"], "testo": rs["testo"], "stato": rs["stato"], "errore": rs["errore"], "tipo": rs["tipo_campagna"]} if rs else None,
-            "richiamo_il": r["richiamo_il"], "richiamo_nota": r["richiamo_nota"], "richiamo_fatto": r["richiamo_fatto"]})
+            "richiamo_il": r["richiamo_il"], "richiamo_nota": r["richiamo_nota"], "richiamo_fatto": r["richiamo_fatto"],
+            "preventivo": prev.get(r["opportunita_id"])})
     c["numeri"] = _conta(conn, cid)
     c["mittente_email"] = next((m["email"] for m in mittenti(conn) if m["id"] == c["mittente"]), "")
     c["autonomia"] = flusso.autonomia(conn, cid)
