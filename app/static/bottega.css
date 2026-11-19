@@ -449,3 +449,14 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .pv-totale{font-size:16px}
 @media (max-width:560px){.pv-voce{grid-template-columns:1fr 1fr auto}.pv-testi{grid-column:1/-1}}
 .pv-editor>button{align-self:flex-start}
+
+/* 2.67: bozze da leggere, modificare e confrontare */
+.cp-bozza{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.cp-ogg{font-weight:600}
+.cp-testo,.cp-diff{white-space:pre-wrap;line-height:1.5;padding:10px 12px;border:1px solid var(--bordo);border-radius:8px;background:var(--carta2)}
+.cp-tua{font-size:13px;color:var(--primario)}
+.cp-due{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
+.cp-due>div{min-width:0;display:flex;flex-direction:column;gap:4px}
+@media (max-width:760px){.cp-due{grid-template-columns:1fr}}
+.cp-tolto{background:rgba(200,60,60,.16);text-decoration:line-through;text-decoration-color:rgba(200,60,60,.7)}
+.cp-agg{background:rgba(40,150,80,.18)}

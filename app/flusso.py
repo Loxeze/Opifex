@@ -295,6 +295,15 @@ def tetto_ok(conn, cid: int) -> bool:
 
 
 # ---------- studio e bozza ----------
+def _brief(conn, c: dict) -> str:
+    """Il brief della campagna piu' come scrive Lorenzo (regole ed esempi dalle sue correzioni)."""
+    from . import stile
+    b = redattore.testo_brief(c, conn)
+    s = stile.blocco(conn, c["id"])
+    return b + ("\n\n" + s if s else "")
+
+
+
 def _crea_email(conn, c: dict, d_id: int, email: str, oggetto: str, testo: str, tipo: str, automatica: bool | None = None, rispondi_a: str | None = None) -> int:
     from .campagne import _mittente
     canale, acc, mitt = _mittente(conn, c["mittente"])
@@ -332,7 +341,7 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
         if sito_testo or redattore.note_fresche(n):
             firma = f"\n{c['impresa']}" if c.get("impresa") else ""
             j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_PRIMA.format(
-                brief=redattore.testo_brief(c, conn), ente=k["ente"] or "(senza nome)", localita=_localita(k),
+                brief=_brief(conn, c), ente=k["ente"] or "(senza nome)", localita=_localita(k),
                 note=n["sintesi"] if n else "(nessuna)", sito=k["sito"], testo=sito_testo or "(non riletto: valgono le note qui sopra)",
                 firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 1600)
             _spendi(conn, c, spesa)
@@ -401,7 +410,7 @@ def sollecito(conn, c: dict, d: dict) -> str:
         if x:
             testo_prima = testo_prima.replace(x, "{nome}" if x == k["nome"] else "")
     j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_SOLLECITO.format(
-        brief=redattore.testo_brief(c, conn), ente=k["ente"] or "(senza nome)", note=(n["sintesi"] if n else "(nessuna)"),
+        brief=_brief(conn, c), ente=k["ente"] or "(senza nome)", note=(n["sintesi"] if n else "(nessuna)"),
         quando=prima["decisa_il"].strftime("il %d/%m") if prima["decisa_il"] else "", oggetto=prima["oggetto"], testo_prima=testo_prima[:2500],
         compito=compito, firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 1200)
     _spendi(conn, c, spesa)
@@ -609,6 +618,11 @@ def giro(conn) -> dict:
         fatto["call_fissate"] = imbuto.call_fissate(conn)
     fatto["call_fatte"] = imbuto.call_fatte(conn)
     fatto["quadri"] = imbuto.aggiorna_quadri(conn)
+    from . import stile
+    try:
+        fatto["stile"] = stile.studia(conn)
+    except ErroreFornitore:
+        conn.rollback()
     nuove = conn.execute("""SELECT c.nome, count(*) AS n FROM email_in_uscita e JOIN campagne_posta c ON c.id=e.campagna_id
                             WHERE e.stato='da_approvare' AND e.creata_il > NOW() - INTERVAL '5 minutes' GROUP BY c.nome""").fetchall() if fatto["bozze"] or fatto["solleciti"] else []
     for x in nuove:

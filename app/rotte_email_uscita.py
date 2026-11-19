@@ -43,7 +43,10 @@ def modifica(eid: int, d: Modifica, _: dict = Depends(solo_titolare)):
         if d.oggetto is not None:
             conn.execute("UPDATE email_in_uscita SET oggetto = %s WHERE id = %s", (invio_posta._riga_intest(d.oggetto), eid))
         if d.testo is not None:
-            conn.execute("UPDATE email_in_uscita SET testo = %s WHERE id = %s", (d.testo, eid))
+            conn.execute("UPDATE email_in_uscita SET testo = %s WHERE id = %s", (d.testo.replace("\r\n", "\n"), eid))
+        # bozza di una campagna corretta da Lorenzo: diventa un esempio per il Redattore
+        conn.execute("""UPDATE email_in_uscita SET corretta_il = CASE WHEN testo <> testo_proposto OR oggetto <> oggetto_proposto THEN NOW() END,
+                        stile_studiato = FALSE WHERE id = %s AND campagna_id IS NOT NULL""", (eid,))
     return {"ok": True}
 
 

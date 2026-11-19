@@ -282,15 +282,35 @@ async function apriCampagna(corpo, cid, torna) {
     if (x.richiamo_il) box.append(h("div", { class: "cp-richiamo" }, (x.richiamo_fatto ? "✓ Ricontattato: " : "⏰ Da ricontattare il ") + new Date(x.richiamo_il + "T12:00:00").toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" }) + (x.richiamo_nota ? " — «" + x.richiamo_nota + "»" : "")));
     if (x.risposta_oggetto || x.risposta_sintesi) box.append(h("div", { class: "sotto" }, "Risposta" + (x.risposta_oggetto ? ": «" + x.risposta_oggetto + "»" : "") + (x.risposta_sintesi ? " — " + x.risposta_sintesi : "")));
     if (x.errore && x.email_id) box.append(avviso(x.errore, "no"));
-    const editor = (email_id, ogg, tes, titolo, aperto) => {
-      const o = h("input", { type: "text", value: ogg || "", maxlength: 200 }), t = h("textarea", { rows: 9 }, tes || "");
-      return h("details", { open: aperto }, h("summary", {}, titolo), h("label", {}, "Oggetto", o), h("label", {}, "Testo", t),
-        h("div", { class: "azioni" },
-          _btnCp("Approva", async () => { try { if (o.value !== ogg || t.value !== tes) await api("PUT", "/gestione/email-uscita/" + email_id, { oggetto: o.value, testo: t.value }); await api("POST", "/gestione/campagne/" + cid + "/approva", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "p"),
-          _btnCp("Scarta", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/scarta", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s")));
+    const editor = (email_id, ogg, tes, oggP, tesP, titolo, aperto) => {
+      const zona = h("div", { class: "cp-bozza" });
+      const cambiata = tesP != null && (tes !== tesP || ogg !== oggP);
+      const leggi = () => {
+        const confronto = cambiata ? h("details", { class: "cp-confronto" }, h("summary", {}, "Confronta con la prima versione del Redattore"),
+          h("div", { class: "cp-due" }, h("div", {}, h("b", {}, "Redattore"), _diffCp(oggP + "\n\n" + tesP, ogg + "\n\n" + tes, "via")),
+            h("div", {}, h("b", {}, "La tua versione"), _diffCp(oggP + "\n\n" + tesP, ogg + "\n\n" + tes, "nuovo")))) : null;
+        zona.replaceChildren(...[
+          cambiata ? h("span", { class: "cp-tua" }, "✎ Modificata da te: il Redattore imparerà da questa correzione") : null,
+          h("div", { class: "cp-ogg" }, h("span", { class: "sotto" }, "Oggetto: "), ogg || ""), h("div", { class: "cp-testo" }, tes || ""), confronto,
+          h("div", { class: "azioni" },
+            _btnCp("Modifica", () => scrivi(), "s"),
+            _btnCp("Approva", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/approva", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "p"),
+            _btnCp("Scarta", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/scarta", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s"))].filter(Boolean));
+      };
+      const scrivi = () => {
+        const o = h("input", { type: "text", value: ogg || "", maxlength: 200 }), t = h("textarea", { rows: Math.min(22, Math.max(9, (tes || "").split("\n").length + 2)) }, tes || "");
+        const salva = _btnCp("Salva", async () => { if (!o.value.trim() || !t.value.trim()) { err(new Error("Oggetto e testo non possono restare vuoti")); return; }
+          try { await api("PUT", "/gestione/email-uscita/" + email_id, { oggetto: o.value, testo: t.value }); ricarica(); } catch (e) { err(e); } }, "p");
+        zona.replaceChildren(h("label", {}, "Oggetto", o), h("label", {}, "Testo", t),
+          h("p", { class: "sotto" }, "Salvi e la bozza resta da approvare. La tua versione e quella del Redattore restano tutte e due: il Redattore le confronta e impara a scrivere come te."),
+          h("div", { class: "azioni" }, salva, _btnCp("Annulla", () => leggi(), "s")));
+        t.focus();
+      };
+      leggi();
+      return h("details", { open: aperto }, h("summary", {}, titolo + (cambiata ? " · modificata da te" : "")), zona);
     };
-    if (x.email_id && (x.stato === "da_approvare" || x.stato === "errore")) box.append(editor(x.email_id, x.oggetto, x.testo, x.tipo === "sollecito" ? "Leggi e correggi il sollecito" : "Leggi e correggi", false));
-    if (x.risposta && (x.risposta.stato === "da_approvare" || x.risposta.stato === "errore")) box.append(editor(x.risposta.email_id, x.risposta.oggetto, x.risposta.testo, x.risposta.tipo === "ripresa" ? "L'email per riprendere il discorso (da approvare)" : "La risposta per fissare la call (da approvare)", true));
+    if (x.email_id && (x.stato === "da_approvare" || x.stato === "errore")) box.append(editor(x.email_id, x.oggetto, x.testo, x.oggetto_proposto, x.testo_proposto, x.tipo === "sollecito" ? "Leggi, modifica o approva il sollecito" : "Leggi, modifica o approva la bozza", true));
+    if (x.risposta && (x.risposta.stato === "da_approvare" || x.risposta.stato === "errore")) box.append(editor(x.risposta.email_id, x.risposta.oggetto, x.risposta.testo, x.risposta.oggetto_proposto, x.risposta.testo_proposto, x.risposta.tipo === "ripresa" ? "L'email per riprendere il discorso (da approvare)" : "La risposta per fissare la call (da approvare)", true));
     else if (x.risposta) box.append(h("div", { class: "sotto" }, (x.risposta.tipo === "ripresa" ? "Email di ripresa: " : "Risposta per la call: ") + ({ approvata: "in partenza", inviata: "inviata", rifiutata: "scartata" })[x.risposta.stato]));
     if (x.opportunita_id && x.stato === "interessato") {
       const zona = h("div");
@@ -327,8 +347,43 @@ async function apriCampagna(corpo, cid, torna) {
     c.imbuto && c.imbuto[0].n ? h("div", { class: "carta" }, graficoImbutoCp(c.imbuto, "L'imbuto della campagna")) : null,
     abbinare, bloccoBrief, quadro, bloccoTesto,
     h("details", { class: "carta", open: true }, h("summary", {}, h("b", {}, "Il flusso")), _blocchiFlusso(c, salva)),
-    correzioni,
+    correzioni, cartaStileCp(),
     h("div", { class: "azioni", style: "align-items:center" }, h("h3", { style: "margin:0" }, "Destinatari"), filtro), lista]);
 }
 
 function apriContatto(id) { stato.contattoAperto = id; vai("contatto"); }
+
+// Confronto parola per parola fra la bozza del Redattore e la versione di Lorenzo (2.67)
+function _diffCp(a, b, lato) {
+  const pa = (a || "").split(/(\s+)/), pb = (b || "").split(/(\s+)/), n = pa.length, m = pb.length;
+  const box = h("div", { class: "cp-diff" });
+  if (n * m > 4000000) { box.textContent = lato === "via" ? a : b; return box; }
+  const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = pa[i] === pb[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  let i = 0, j = 0;
+  const pezzo = (t, cl) => box.append(cl ? h("span", { class: cl }, t) : document.createTextNode(t));
+  while (i < n || j < m) {
+    if (i < n && j < m && pa[i] === pb[j]) { pezzo(pa[i]); i++; j++; }
+    else if (j < m && (i >= n || L[i][j + 1] >= L[i + 1][j])) { if (lato === "nuovo") pezzo(pb[j], /^\s+$/.test(pb[j]) ? null : "cp-agg"); j++; }
+    else { if (lato === "via") pezzo(pa[i], /^\s+$/.test(pa[i]) ? null : "cp-tolto"); i++; }
+  }
+  return box;
+}
+
+// «Come scrivo io»: le regole che il Redattore ha ricavato dalle correzioni (2.67)
+function cartaStileCp() {
+  const corpo = h("div");
+  const box = h("details", { class: "carta", ontoggle: async (ev) => {
+    if (!ev.currentTarget.open || corpo.firstChild) return;
+    try {
+      const s = await api("GET", "/gestione/campagne/stile");
+      const t = h("textarea", { rows: 10, placeholder: "Ancora nessuna regola. Correggi qualche bozza e approvala: le regole compariranno qui." }, s.regole || "");
+      const esito = h("span", { class: "sotto" });
+      corpo.replaceChildren(
+        h("p", { class: "sotto" }, "Ogni volta che correggi una bozza e la approvi, il Redattore confronta la sua versione con la tua e aggiorna queste regole. " +
+          "Le usa, insieme agli ultimi esempi di correzione, per tutte le bozze nuove. Puoi cambiarle anche a mano. Correzioni studiate finora: " + s.correzioni + "."),
+        t, h("div", { class: "azioni", style: "align-items:center" }, _btnCp("Salva le regole", async () => { try { const r = await api("PUT", "/gestione/campagne/stile", { regole: t.value }); t.value = r.regole; esito.textContent = "Salvate."; } catch (e) { esito.textContent = e.message; } }, "p"), esito));
+    } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); }
+  } }, h("summary", {}, h("b", {}, "Come scrivo io"), h("span", { class: "sotto" }, " — quello che il Redattore ha imparato dalle tue correzioni")), corpo);
+  return box;
+}

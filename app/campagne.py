@@ -359,13 +359,13 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
     from . import flusso
     c = dict(campagna(conn, cid))
     righe = conn.execute("""SELECT d.*, k.nome_cifrato, k.ente_cifrato, k.email_cifrata, k.comune, k.provincia, e.id AS e_id, e.oggetto AS e_oggetto, e.testo AS e_testo,
-                                   e.errore AS e_errore, e.stato AS e_stato, e.tipo_campagna AS e_tipo
+                                   e.errore AS e_errore, e.stato AS e_stato, e.tipo_campagna AS e_tipo, e.oggetto_proposto AS e_oggetto_p, e.testo_proposto AS e_testo_p
                             FROM campagne_posta_dest d LEFT JOIN crm_contatti k ON k.id=d.contatto_id LEFT JOIN email_in_uscita e ON e.id=d.email_id
                             WHERE d.campagna_id=%s
                             ORDER BY (d.stato='da_approvare') DESC, (d.stato='interessato') DESC, (d.stato IN ('risposto','errore')) DESC, d.aggiornato_il DESC, d.id
                             LIMIT 1000""", (cid,)).fetchall()
     risposte = {r["destinatario_id"]: r for r in conn.execute(
-        """SELECT id, destinatario_id, oggetto, testo, stato, errore, tipo_campagna FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna IN ('risposta','ripresa')
+        """SELECT id, destinatario_id, oggetto, testo, oggetto_proposto, testo_proposto, stato, errore, tipo_campagna FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna IN ('risposta','ripresa')
            ORDER BY id""", (cid,)).fetchall()}
     prev = {r["opportunita_id"]: dict(r, totale_netto=float(r["totale_netto"])) for r in conn.execute(
         """SELECT DISTINCT ON (opportunita_id) id, opportunita_id, stato, fic_numero, totale_netto FROM preventivi
@@ -384,7 +384,8 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
             "nota": r["nota"], "opportunita_id": r["opportunita_id"], "note_del": note[r["contatto_id"]]["aggiornato_il"] if r["contatto_id"] in note else None,
             "email_id": r["e_id"] if r["e_stato"] in aperta else None, "tipo": r["e_tipo"],
             "oggetto": r["e_oggetto"] if r["e_stato"] in aperta else None, "testo": r["e_testo"] if r["e_stato"] in aperta else None, "errore": r["e_errore"],
-            "risposta": {"email_id": rs["id"], "oggetto": rs["oggetto"], "testo": rs["testo"], "stato": rs["stato"], "errore": rs["errore"], "tipo": rs["tipo_campagna"]} if rs else None,
+            "oggetto_proposto": r["e_oggetto_p"] if r["e_stato"] in aperta else None, "testo_proposto": r["e_testo_p"] if r["e_stato"] in aperta else None,
+            "risposta": {"email_id": rs["id"], "oggetto": rs["oggetto"], "testo": rs["testo"], "oggetto_proposto": rs["oggetto_proposto"], "testo_proposto": rs["testo_proposto"], "stato": rs["stato"], "errore": rs["errore"], "tipo": rs["tipo_campagna"]} if rs else None,
             "richiamo_il": r["richiamo_il"], "richiamo_nota": r["richiamo_nota"], "richiamo_fatto": r["richiamo_fatto"],
             "preventivo": prev.get(r["opportunita_id"])})
     c["numeri"] = _conta(conn, cid)
@@ -456,6 +457,25 @@ def nuova(d: Nuova, u: dict = Depends(solo_titolare)):
             return {"id": cid, "numeri": _conta(conn, cid)}
         except Exception as e:  # noqa: BLE001
             _errore(e)
+
+
+class Stile(BaseModel):
+    regole: str = Field(max_length=4000)
+
+
+@router.get("/stile")
+def leggi_stile(_: dict = Depends(solo_titolare)):
+    """«Come scrivo io»: le regole ricavate dalle correzioni di Lorenzo."""
+    from . import stile
+    with connessione() as conn:
+        return stile.confronto(conn)
+
+
+@router.put("/stile")
+def scrivi_stile(d: Stile, _: dict = Depends(solo_titolare)):
+    from . import stile
+    with connessione() as conn:
+        return {"regole": stile.salva_regole(conn, d.regole)}
 
 
 @router.get("/{cid}")
