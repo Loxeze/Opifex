@@ -95,37 +95,77 @@ def aggiungi_destinatario(conn, cid: int, contatto_id: int, email: str) -> bool:
 
 # ---------- partenza: il foglio Google ----------
 def id_foglio(url: str) -> str:
-    m = re.search(r"/spreadsheets/d/([A-Za-z0-9_-]{20,})", url or "") or re.fullmatch(r"\s*([A-Za-z0-9_-]{20,})\s*", url or "")
+    m = (re.search(r"/(?:spreadsheets|file)/d/([A-Za-z0-9_-]{20,})", url or "") or re.search(r"[?&]id=([A-Za-z0-9_-]{20,})", url or "")
+         or re.fullmatch(r"\s*([A-Za-z0-9_-]{20,})\s*", url or ""))
     return m.group(1) if m else ""
 
 
-def _account_drive(conn, c: dict) -> int | None:
-    if c.get("foglio_account_id"):
-        return c["foglio_account_id"]
-    r = conn.execute("SELECT id FROM account_google WHERE 'drive' = ANY(servizi) ORDER BY id LIMIT 1").fetchone()
-    return r["id"] if r else None
+def _account_drive(conn, c: dict) -> list[dict]:
+    """Gli account Google con Drive: prima quello scelto per la campagna (o che l'ha gia' letta), poi gli altri."""
+    tutti = conn.execute("SELECT id, email FROM account_google WHERE 'drive' = ANY(servizi) ORDER BY id").fetchall()
+    return sorted(tutti, key=lambda a: a["id"] != c.get("foglio_account_id"))
+
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _da_xlsx(contenuto: bytes) -> str:
+    """Il primo foglio di un file Excel, in CSV."""
+    from .crm import ErroreCrm, _righe_xlsx
+    try:
+        fogli, righe = _righe_xlsx(contenuto)
+    except ErroreCrm as e:
+        raise ValueError(str(e)) from None
+    if not fogli:
+        raise ValueError("Il file Excel non ha fogli")
+    out = io.StringIO()
+    w = csv.writer(out)
+    for r in righe(fogli[0][1]):
+        w.writerow(r)
+    return out.getvalue()
 
 
 def scarica_foglio(conn, c: dict) -> str:
-    """Il primo foglio, in CSV, con il permesso Drive gia' dato (sola lettura: Opifex non scrive mai nel foglio)."""
+    """Il primo foglio in CSV: un foglio Google (esportato) o un file Excel/CSV caricato su Drive (scaricato e letto).
+    Prova tutti gli account collegati con Drive e ricorda quello che riesce ad aprirlo. Opifex non scrive mai nel file."""
     from . import google
-    fid, aid = id_foglio(c["foglio"]), _account_drive(conn, c)
+    fid = id_foglio(c["foglio"])
     if not fid:
-        raise ValueError("Indirizzo del foglio Google non valido")
-    if not aid:
-        raise ValueError("Nessun account Google collegato con Drive")
-    try:
-        r = httpx.get(f"https://www.googleapis.com/drive/v3/files/{fid}/export", params={"mimeType": "text/csv"},
-                      headers={"Authorization": "Bearer " + google.token_accesso(conn, aid)}, timeout=30)
-    except httpx.HTTPError as e:
-        raise ValueError(f"Google non risponde ({type(e).__name__})") from None
-    if r.status_code == 404:
-        raise ValueError("Foglio non trovato: controlla l'indirizzo e che l'account Google collegato possa aprirlo")
-    if r.status_code == 403:
-        raise ValueError("L'account Google collegato non puo' leggere questo foglio: condividilo con lui o ricollega l'account con Drive")
-    if r.status_code != 200:
-        raise ValueError(f"Google ha risposto {r.status_code}")
-    return r.content.decode("utf-8-sig", "replace")
+        raise ValueError("Indirizzo del foglio non valido: incolla il link del foglio Google o del file Excel su Drive")
+    conti = _account_drive(conn, c)
+    if not conti:
+        raise ValueError("Nessun account Google collegato con Drive: ricollega l'account spuntando Drive")
+    base = f"https://www.googleapis.com/drive/v3/files/{fid}"
+    for a in conti:
+        try:
+            h = {"Authorization": "Bearer " + google.token_accesso(conn, a["id"])}
+            info = httpx.get(base, params={"fields": "mimeType,name", "supportsAllDrives": "true"}, headers=h, timeout=30)
+            if info.status_code in (401, 403, 404):
+                continue   # questo account non lo vede: si prova il prossimo
+            if info.status_code != 200:
+                raise ValueError(f"Google ha risposto {info.status_code}")
+            tipo = info.json().get("mimeType", "")
+            if tipo == "application/vnd.google-apps.spreadsheet":
+                r = httpx.get(base + "/export", params={"mimeType": "text/csv"}, headers=h, timeout=30)
+            elif tipo in (XLSX, "text/csv", "text/plain", "application/vnd.ms-excel"):
+                r = httpx.get(base, params={"alt": "media", "supportsAllDrives": "true"}, headers=h, timeout=60)
+            else:
+                raise ValueError(f"Il file «{info.json().get('name', '')}» non è un foglio: serve un foglio Google, un Excel (.xlsx) o un CSV")
+            if r.status_code != 200:
+                raise ValueError(f"Google ha risposto {r.status_code} leggendo il file")
+        except httpx.HTTPError as e:
+            raise ValueError(f"Google non risponde ({type(e).__name__})") from None
+        except google.ErroreGoogle:
+            continue   # collegamento scaduto per questo account
+        if c.get("id") and c.get("foglio_account_id") != a["id"]:
+            conn.execute("UPDATE campagne_posta SET foglio_account_id=%s WHERE id=%s", (a["id"], c["id"]))
+        if tipo == XLSX:
+            return _da_xlsx(r.content)
+        if tipo == "application/vnd.ms-excel":
+            raise ValueError("Il file è nel vecchio formato Excel (.xls): aprilo e salvalo come .xlsx, oppure convertilo in foglio Google")
+        return r.content.decode("utf-8-sig", "replace")
+    raise ValueError("Nessuno degli account collegati con Drive (" + ", ".join(a["email"] for a in conti) +
+                     ") può aprire questo file: condividilo con uno di loro, oppure collega con Drive l'account che lo possiede")
 
 
 def righe_foglio(testo_csv: str) -> tuple[dict, list[dict]]:
