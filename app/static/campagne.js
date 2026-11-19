@@ -229,6 +229,7 @@ async function apriCampagna(corpo, cid, torna) {
   }, "p") : null;
   const approvaTutte = h("button", { class: "p", type: "button" }, n.da_approvare === 1 ? "Approva l'email da approvare" : "Approva tutte le " + n.da_approvare + " email");
   approvaTutte.hidden = !n.da_approvare;
+  const riapriTutte = n.approvata ? _btnCp("Rimetti in modifica le " + n.approvata + " approvate", async () => { try { const r = await api("POST", "/gestione/campagne/" + cid + "/riapri", { tutte: true }); msg.replaceChildren(avviso(r.riaperte + " email di nuovo da approvare e modificabili.", "ok")); ricarica(); } catch (e) { err(e); } }, "s") : null;
   approvaTutte.onclick = () => riempi(conferma, h("div", { class: "carta" }, h("p", {}, (n.da_approvare === 1 ? "Approvi 1 email?" : "Approvi " + n.da_approvare + " email?") + " Partiranno piano, circa " + c.per_ora + " all'ora. Approvarle tutte insieme non conta per l'invio automatico se non le hai lette. Le risposte agli interessati restano da approvare una per una."),
     h("div", { class: "azioni" }, _btnCp("Sì, approva e invia", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/approva", { tutte: true }); ricarica(); } catch (e) { err(e); } }, "p"),
       h("button", { class: "s", type: "button", onclick: () => conferma.replaceChildren() }, "Annulla"))));
@@ -310,7 +311,12 @@ async function apriCampagna(corpo, cid, torna) {
       return h("details", { open: aperto }, h("summary", {}, titolo + (cambiata ? " · modificata da te" : "")), zona);
     };
     if (x.email_id && (x.stato === "da_approvare" || x.stato === "errore")) box.append(editor(x.email_id, x.oggetto, x.testo, x.oggetto_proposto, x.testo_proposto, x.tipo === "sollecito" ? "Leggi, modifica o approva il sollecito" : "Leggi, modifica o approva la bozza", true));
-    if (x.risposta && (x.risposta.stato === "da_approvare" || x.risposta.stato === "errore")) box.append(editor(x.risposta.email_id, x.risposta.oggetto, x.risposta.testo, x.risposta.oggetto_proposto, x.risposta.testo_proposto, x.risposta.tipo === "ripresa" ? "L'email per riprendere il discorso (da approvare)" : "La risposta per fissare la call (da approvare)", true));
+    const inCoda = (email_id, cosa) => h("div", { class: "azioni cp-incoda", style: "align-items:center" }, h("span", { class: "sotto" }, "✓ " + cosa + " approvata, in coda: non è ancora partita."),
+      _btnCp("Rimetti in modifica", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/riapri", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s piccolo"),
+      _btnCp("Scarta", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/scarta", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s piccolo"));
+    if (x.email_id && x.email_stato === "approvata") box.append(inCoda(x.email_id, x.tipo === "sollecito" ? "Sollecito" : "Email"));
+    if (x.risposta && x.risposta.stato === "approvata") box.append(inCoda(x.risposta.email_id, x.risposta.tipo === "ripresa" ? "Email di ripresa" : "Risposta"));
+    else if (x.risposta && (x.risposta.stato === "da_approvare" || x.risposta.stato === "errore")) box.append(editor(x.risposta.email_id, x.risposta.oggetto, x.risposta.testo, x.risposta.oggetto_proposto, x.risposta.testo_proposto, x.risposta.tipo === "ripresa" ? "L'email per riprendere il discorso (da approvare)" : "La risposta per fissare la call (da approvare)", true));
     else if (x.risposta) box.append(h("div", { class: "sotto" }, (x.risposta.tipo === "ripresa" ? "Email di ripresa: " : "Risposta per la call: ") + ({ approvata: "in partenza", inviata: "inviata", rifiutata: "scartata" })[x.risposta.stato]));
     if (x.opportunita_id && x.stato === "interessato") {
       const zona = h("div");
@@ -343,7 +349,7 @@ async function apriCampagna(corpo, cid, torna) {
       return h("div", { class: "azioni", style: "align-items:center" }, h("span", {}, (r.data ? new Date(r.data).toLocaleDateString("it-IT") + " · " : "") + r.titolo), sel,
         _btnCp("Abbina", async () => { if (!sel.value) return; try { const x = await api("POST", "/gestione/campagne/riunioni/" + r.id + "/abbina", { contatto_id: Number(sel.value) }); if (x.messaggio) alert(x.messaggio); ricarica(); } catch (e) { err(e); } }, "s piccolo")); })) : null;
   riempi(corpo, [h("div", { class: "azioni" }, indietro), h("h2", { class: "cp-nome" }, c.nome, h("span", { class: "cp-stato" }, STATI_CP[c.stato])),
-    h("div", { class: "azioni" }, avvia, approvaTutte, statoBtn, duplica, chiudi), conferma, msg,
+    h("div", { class: "azioni" }, ...[avvia, approvaTutte, riapriTutte, statoBtn, duplica, chiudi].filter(Boolean)), conferma, msg,
     c.imbuto && c.imbuto[0].n ? h("div", { class: "carta" }, graficoImbutoCp(c.imbuto, "L'imbuto della campagna")) : null,
     abbinare, bloccoBrief, quadro, bloccoTesto,
     h("details", { class: "carta", open: true }, h("summary", {}, h("b", {}, "Il flusso")), _blocchiFlusso(c, salva)),

@@ -213,6 +213,21 @@ def approva(conn, cid: int, ids: list[int] | None, utente_id: int) -> int:
     return len(r)
 
 
+def riapri(conn, cid: int, ids: list[int] | None) -> int:
+    """Approvate per sbaglio: finche' non sono partite tornano «da approvare», modificabili. ids=None: tutte le approvate della campagna."""
+    par: list = [cid]
+    extra = ""
+    if ids is not None:
+        extra = " AND id = ANY(%s)"; par.append(ids)
+    r = conn.execute(f"""UPDATE email_in_uscita SET stato='da_approvare', decisa_il=NULL, decisa_da=NULL
+                         WHERE campagna_id=%s AND stato='approvata'{extra} RETURNING destinatario_id, tipo_campagna""", par).fetchall()
+    dest = [x["destinatario_id"] for x in r if x["destinatario_id"] and x["tipo_campagna"] not in ("risposta", "ripresa")]
+    if dest:
+        conn.execute("UPDATE campagne_posta_dest SET stato='da_approvare', aggiornato_il=NOW() WHERE id = ANY(%s) AND stato='approvata'", (dest,))
+    conn.commit()
+    return len(r)
+
+
 def scarta(conn, cid: int, ids: list[int], utente_id: int) -> int:
     r = conn.execute("""UPDATE email_in_uscita SET stato='rifiutata', decisa_il=NOW(), decisa_da=%s
                         WHERE campagna_id=%s AND id = ANY(%s) AND stato IN ('da_approvare','approvata','errore') RETURNING destinatario_id, tipo_campagna""", (utente_id, cid, ids)).fetchall()
@@ -382,7 +397,7 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
             "risposta_il": r["risposta_il"], "risposta_oggetto": r["risposta_oggetto"], "risposta_sintesi": r["risposta_sintesi"], "passo": r["passo"],
             "prossimo_il": r["prossimo_il"], "angolo": r["angolo"], "angolo_motivo": r["angolo_motivo"], "zona": r["zona"], "personalizzata": r["personalizzata"],
             "nota": r["nota"], "opportunita_id": r["opportunita_id"], "note_del": note[r["contatto_id"]]["aggiornato_il"] if r["contatto_id"] in note else None,
-            "email_id": r["e_id"] if r["e_stato"] in aperta else None, "tipo": r["e_tipo"],
+            "email_id": r["e_id"] if r["e_stato"] in aperta else None, "tipo": r["e_tipo"], "email_stato": r["e_stato"],
             "oggetto": r["e_oggetto"] if r["e_stato"] in aperta else None, "testo": r["e_testo"] if r["e_stato"] in aperta else None, "errore": r["e_errore"],
             "oggetto_proposto": r["e_oggetto_p"] if r["e_stato"] in aperta else None, "testo_proposto": r["e_testo_p"] if r["e_stato"] in aperta else None,
             "risposta": {"email_id": rs["id"], "oggetto": rs["oggetto"], "testo": rs["testo"], "oggetto_proposto": rs["oggetto_proposto"], "testo_proposto": rs["testo_proposto"], "stato": rs["stato"], "errore": rs["errore"], "tipo": rs["tipo_campagna"]} if rs else None,
@@ -581,6 +596,18 @@ def approva_email(cid: int, d: Scelta, u: dict = Depends(solo_titolare)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Scegli quali email approvare")
     with connessione() as conn:
         return {"approvate": approva(conn, cid, None if d.tutte else d.ids, u["id"])}
+
+
+@router.post("/{cid}/riapri")
+def riapri_email(cid: int, d: Scelta, u: dict = Depends(solo_titolare)):
+    """Rimette in modifica le email approvate e non ancora partite."""
+    if not d.tutte and not d.ids:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Scegli quali email rimettere in modifica")
+    with connessione() as conn:
+        n = riapri(conn, cid, None if d.tutte else d.ids)
+    if not n:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Nessuna email da rimettere in modifica: quelle già partite non si possono più cambiare")
+    return {"riaperte": n}
 
 
 @router.post("/{cid}/scarta")

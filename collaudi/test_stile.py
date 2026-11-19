@@ -108,7 +108,19 @@ with TestClient(app) as c:
     t2 = sql("SELECT testo FROM email_in_uscita WHERE id=%s", (eid2,))[0][0]
     c.put(f"/gestione/email-uscita/{eid2}", headers=H, json={"testo": t2.replace("\n", "\r\n")})
     ok("salvare il testo identico non e' una correzione", sql("SELECT corretta_il FROM email_in_uscita WHERE id=%s", (eid2,)) == [(None,)])
+    # approvata per sbaglio: torna in modifica finche' non parte
+    c.post(f"/gestione/campagne/{cid}/approva", headers=H, json={"ids": [eid2]})
+    x = [d for d in c.get(f"/gestione/campagne/{cid}", headers=H).json()["destinatari"] if d["id"] == d2][0]
+    ok("approvata: la scheda lo dice", x["email_stato"] == "approvata" and x["stato"] == "approvata", x["email_stato"])
+    r = c.post(f"/gestione/campagne/{cid}/riapri", headers=H, json={"ids": [eid2]})
+    ok("rimessa in modifica: di nuovo da approvare e modificabile", r.json()["riaperte"] == 1 and sql("SELECT e.stato, e.decisa_il, d.stato FROM email_in_uscita e JOIN campagne_posta_dest d ON d.id=e.destinatario_id WHERE e.id=%s", (eid2,)) == [("da_approvare", None, "da_approvare")]
+       and c.put(f"/gestione/email-uscita/{eid2}", headers=H, json={"testo": "Buongiorno,\n\nversione nuova"}).status_code == 200, r.text)
+    c.post(f"/gestione/campagne/{cid}/approva", headers=H, json={"tutte": True})
+    ok("tutte le approvate in una volta", c.post(f"/gestione/campagne/{cid}/riapri", headers=H, json={"tutte": True}).json()["riaperte"] == 2)
+    sql("UPDATE email_in_uscita SET stato='inviata' WHERE id=%s", (eid2,))
+    r = c.post(f"/gestione/campagne/{cid}/riapri", headers=H, json={"ids": [eid2]})
+    ok("partita: non si riapre e lo dice", r.status_code == 409 and "già partite" in r.json()["detail"], r.text)
     js = open("app/static/campagne.js").read()
-    ok("interfaccia: Modifica, Salva, confronto e carta «Come scrivo io»", all(x in js for x in ('"Modifica"', '"Salva"', "Confronta con la prima versione del Redattore", "cartaStileCp", "_diffCp")))
+    ok("interfaccia: Modifica, Salva, confronto e carta «Come scrivo io»", all(x in js for x in ('"Modifica"', '"Salva"', "Confronta con la prima versione del Redattore", "cartaStileCp", "_diffCp", "Rimetti in modifica")))
 
 print(f"TOTALE: {sum(ris)}/{len(ris)}")
