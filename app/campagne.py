@@ -240,6 +240,29 @@ def riapri(conn, cid: int, ids: list[int] | None) -> int:
     return len(r)
 
 
+def riscrivi(conn, cid: int, ids: list[int] | None) -> int:
+    """Prime email non ancora partite da far riscrivere al Redattore (con le regole nuove: ognuna diversa dalle altre).
+    ids=None: tutte quelle che Lorenzo non ha corretto a mano. Il destinatario torna in coda e il giro gli scrive un'email nuova."""
+    par: list = [cid]
+    extra = " AND corretta_il IS NULL"
+    if ids is not None:
+        extra = " AND id = ANY(%s)"; par.append(ids)
+    r = conn.execute(f"""UPDATE email_in_uscita SET stato='rifiutata', errore='riscritta dal Redattore', decisa_il=NOW()
+                         WHERE campagna_id=%s AND tipo_campagna='primo' AND stato IN ('da_approvare','approvata','errore'){extra}
+                         RETURNING destinatario_id""", par).fetchall()
+    dest = [x["destinatario_id"] for x in r if x["destinatario_id"]]
+    if dest:
+        conn.execute("""UPDATE campagne_posta_dest SET stato='in_attesa', email_id=NULL, nota='', zona='', angolo='', angolo_motivo='', aggiornato_il=NOW()
+                        WHERE id = ANY(%s) AND stato IN ('da_approvare','approvata','errore')""", (dest,))
+    conn.commit()
+    return len(r)
+
+
+def da_riscrivere(conn, cid: int) -> int:
+    return conn.execute("""SELECT count(*) AS n FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna='primo'
+                           AND stato IN ('da_approvare','approvata','errore') AND corretta_il IS NULL""", (cid,)).fetchone()["n"]
+
+
 def scarta(conn, cid: int, ids: list[int], utente_id: int) -> int:
     r = conn.execute("""UPDATE email_in_uscita SET stato='rifiutata', decisa_il=NOW(), decisa_da=%s
                         WHERE campagna_id=%s AND id = ANY(%s) AND stato IN ('da_approvare','approvata','errore') RETURNING destinatario_id, tipo_campagna""", (utente_id, cid, ids)).fetchall()
@@ -418,6 +441,7 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
     c["numeri"] = _conta(conn, cid)
     c["mittente_email"] = next((m["email"] for m in mittenti(conn) if m["id"] == c["mittente"]), "")
     c["autonomia"] = flusso.autonomia(conn, cid)
+    c["da_riscrivere"] = da_riscrivere(conn, cid)
     c["correzioni"] = [dict(x, ente=_d(x["ente_cifrato"])) for x in conn.execute(
         """SELECT x.id, x.contatto_id, x.campo, x.valore, x.motivo, k.ente_cifrato, k.comune FROM crm_correzioni x JOIN crm_contatti k ON k.id=x.contatto_id
            WHERE x.stato='proposta' AND x.contatto_id IN (SELECT contatto_id FROM campagne_posta_dest WHERE campagna_id=%s) ORDER BY x.id""", (cid,)).fetchall()]
@@ -624,6 +648,18 @@ def riapri_email(cid: int, d: Scelta, u: dict = Depends(solo_titolare)):
     if not n:
         raise HTTPException(status.HTTP_409_CONFLICT, "Nessuna email da rimettere in modifica: quelle già partite non si possono più cambiare")
     return {"riaperte": n}
+
+
+@router.post("/{cid}/riscrivi")
+def riscrivi_email(cid: int, d: Scelta, u: dict = Depends(solo_titolare)):
+    """Fa riscrivere al Redattore le email non ancora partite (tutte quelle non corrette a mano, o quelle scelte)."""
+    if not d.tutte and not d.ids:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Scegli quali email far riscrivere")
+    with connessione() as conn:
+        n = riscrivi(conn, cid, None if d.tutte else d.ids)
+    if not n:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Nessuna email da riscrivere: quelle già partite non si possono più cambiare")
+    return {"riscritte": n}
 
 
 @router.post("/{cid}/scarta")

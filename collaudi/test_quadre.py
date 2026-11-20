@@ -108,11 +108,25 @@ with TestClient(app) as c:
     st = prepara(d4)
     ok("tetto raggiunto: nessuna email, il contatto aspetta, campagna in pausa", not PROMPT and st == "in_attesa" and sql("SELECT stato FROM campagne_posta WHERE id=%s", (cid,)) == [("in_pausa",)], st)
 
+    # 4b. far riscrivere le bozze gia' fatte (non partite, non corrette a mano)
+    sql("UPDATE campagne_posta SET spesa=0, stato='in_corso' WHERE id=%s", (cid,))
+    ok("la campagna conta le bozze da far riscrivere (non quelle corrette a mano)", c.get(f"/gestione/campagne/{cid}", headers=H).json()["da_riscrivere"] == 2)
+    vecchia = email(d1)[0]
+    r = c.post(f"/gestione/campagne/{cid}/riscrivi", headers=H, json={"tutte": True})
+    ok("riscrivi tutte: tornano al Redattore, la corretta a mano resta", r.json()["riscritte"] == 2 and sql("SELECT stato, email_id FROM campagne_posta_dest WHERE id=%s", (d1,)) == [("in_attesa", None)]
+       and email(d3)[3] == "approvata" and sql("SELECT stato, errore FROM email_in_uscita WHERE id=%s", (vecchia,)) == [("rifiutata", "riscritta dal Redattore")], r.text)
+    RISP[:] = [mod("Montalcino a marzo", "{saluto}\n\ndi passaggio tra le colline di Montalcino, vorrei proporre a Cantina Colle Alto un breve video sulla vendemmia passata.\n\nLorenzo")]
+    prepara(d1)
+    ok("il giro dopo: bozza nuova e diversa", email(d1)[0] != vecchia and "vendemmia" in email(d1)[2])
+    sql("UPDATE email_in_uscita SET stato='inviata' WHERE id=%s", (email(d1)[0],))
+    r = c.post(f"/gestione/campagne/{cid}/riscrivi", headers=H, json={"ids": [email(d1)[0]]})
+    ok("gia' partita: non si riscrive", r.status_code == 409, r.text)
+
     # 5. misura della somiglianza
     ok("somiglianza: uguali a parte il saluto = 1; email diverse = poco", redattore.somiglianza("Gentile Anna,\n" + uguale[10:], "Buongiorno,\n" + uguale[10:]) == 1.0
        and redattore.somiglianza(uguale, diversa) < 0.2)
     ok("istruzione generale: parentesi quadre ed email sempre diverse", "SPAZI DA PERSONALIZZARE" in redattore.ISTRUZIONI and "ogni email e' diversa" in redattore.ISTRUZIONI and "parentesi quadre" in redattore.COMPITO_PRIMA)
     js = open("app/static/campagne.js").read()
-    ok("interfaccia: parti tra [ ] evidenziate e avviso", "_quadreCp" in js and "parti tra [ ] da completare" in js)
+    ok("interfaccia: parti tra [ ] evidenziate e avviso", "_quadreCp" in js and "parti tra [ ] da completare" in js and "Fai riscrivere" in js)
 
 print(f"TOTALE: {sum(ris)}/{len(ris)}")

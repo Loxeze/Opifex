@@ -229,6 +229,10 @@ async function apriCampagna(corpo, cid, torna) {
   }, "p") : null;
   const approvaTutte = h("button", { class: "p", type: "button" }, n.da_approvare === 1 ? "Approva l'email da approvare" : "Approva tutte le " + n.da_approvare + " email");
   approvaTutte.hidden = !n.da_approvare;
+  const riscriviTutte = c.da_riscrivere ? _btnCp("Fai riscrivere le " + c.da_riscrivere + " bozze", () => riempi(conferma, h("div", { class: "carta" },
+    h("p", {}, "Il Redattore riscrive da capo le " + c.da_riscrivere + " prime email non ancora partite, ognuna diversa dalle altre. Quelle che hai corretto a mano restano come sono. Ci vuole qualche minuto per ogni gruppo di 5 email, con un piccolo costo per ciascuna."),
+    h("div", { class: "azioni" }, _btnCp("Sì, riscrivile", async () => { try { const r = await api("POST", "/gestione/campagne/" + cid + "/riscrivi", { tutte: true }); msg.replaceChildren(avviso(r.riscritte + " email tornate al Redattore: le nuove bozze arrivano nei prossimi giri.", "ok")); ricarica(); } catch (e) { err(e); } }, "p"),
+      _btnCp("Annulla", () => conferma.replaceChildren(), "s")))), "s") : null;
   const riapriTutte = n.approvata ? _btnCp("Rimetti in modifica le " + n.approvata + " approvate", async () => { try { const r = await api("POST", "/gestione/campagne/" + cid + "/riapri", { tutte: true }); msg.replaceChildren(avviso(r.riaperte + " email di nuovo da approvare e modificabili.", "ok")); ricarica(); } catch (e) { err(e); } }, "s") : null;
   approvaTutte.onclick = () => riempi(conferma, h("div", { class: "carta" }, h("p", {}, (n.da_approvare === 1 ? "Approvi 1 email?" : "Approvi " + n.da_approvare + " email?") + " Partiranno piano, circa " + c.per_ora + " all'ora. Approvarle tutte insieme non conta per l'invio automatico se non le hai lette. Le risposte agli interessati restano da approvare una per una."),
     h("div", { class: "azioni" }, _btnCp("Sì, approva e invia", async () => { try { const r = await api("POST", "/gestione/campagne/" + cid + "/approva", { tutte: true }); if (r.da_completare) alert(r.da_completare + (r.da_completare === 1 ? " email non è stata approvata: ha" : " email non sono state approvate: hanno") + " ancora parti tra [ ] da completare. Le trovi in «Da approvare»."); ricarica(); } catch (e) { err(e); } }, "p"),
@@ -294,10 +298,11 @@ async function apriCampagna(corpo, cid, torna) {
           cambiata ? h("span", { class: "cp-tua" }, "✎ Modificata da te: il Redattore imparerà da questa correzione") : null,
           _QUADRE_CP.test((ogg || "") + (tes || "")) ? avviso("Ci sono ancora parti tra [ ] da completare: premi «Modifica», scrivile e salva. Finché restano, l'email non si può approvare.", "no") : null,
           h("div", { class: "cp-ogg" }, h("span", { class: "sotto" }, "Oggetto: "), ..._quadreCp(ogg)), h("div", { class: "cp-testo" }, ..._quadreCp(tes)), confronto,
-          h("div", { class: "azioni" },
+          h("div", { class: "azioni" }, ...[
             _btnCp("Modifica", () => scrivi(), "s"),
+            cambiata || x.tipo === "sollecito" || email_id !== x.email_id ? null : _btnCp("Fai riscrivere", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/riscrivi", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s"),
             _btnCp("Approva", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/approva", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "p"),
-            _btnCp("Scarta", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/scarta", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s"))].filter(Boolean));
+            _btnCp("Scarta", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/scarta", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s")].filter(Boolean))].filter(Boolean));
       };
       const scrivi = () => {
         const o = h("input", { type: "text", value: ogg || "", maxlength: 200 }), t = h("textarea", { rows: Math.min(22, Math.max(9, (tes || "").split("\n").length + 2)) }, tes || "");
@@ -350,7 +355,7 @@ async function apriCampagna(corpo, cid, torna) {
       return h("div", { class: "azioni", style: "align-items:center" }, h("span", {}, (r.data ? new Date(r.data).toLocaleDateString("it-IT") + " · " : "") + r.titolo), sel,
         _btnCp("Abbina", async () => { if (!sel.value) return; try { const x = await api("POST", "/gestione/campagne/riunioni/" + r.id + "/abbina", { contatto_id: Number(sel.value) }); if (x.messaggio) alert(x.messaggio); ricarica(); } catch (e) { err(e); } }, "s piccolo")); })) : null;
   riempi(corpo, [h("div", { class: "azioni" }, indietro), h("h2", { class: "cp-nome" }, c.nome, h("span", { class: "cp-stato" }, STATI_CP[c.stato])),
-    h("div", { class: "azioni" }, ...[avvia, approvaTutte, riapriTutte, statoBtn, duplica, chiudi].filter(Boolean)), conferma, msg,
+    h("div", { class: "azioni" }, ...[avvia, approvaTutte, riapriTutte, riscriviTutte, statoBtn, duplica, chiudi].filter(Boolean)), conferma, msg,
     c.imbuto && c.imbuto[0].n ? h("div", { class: "carta" }, graficoImbutoCp(c.imbuto, "L'imbuto della campagna")) : null,
     abbinare, bloccoBrief, quadro, bloccoTesto,
     h("details", { class: "carta", open: true }, h("summary", {}, h("b", {}, "Il flusso")), _blocchiFlusso(c, salva)),
