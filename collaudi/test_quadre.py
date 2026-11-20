@@ -58,45 +58,60 @@ with TestClient(app) as c:
     def email(did):
         return sql("SELECT e.id, e.oggetto, e.testo, e.stato, d.zona FROM campagne_posta_dest d JOIN email_in_uscita e ON e.id=d.email_id WHERE d.id=%s", (did,))[0]
 
-    # 1. il Redattore riempie le parti tra [ ]
+    def mod(o, t):
+        return json.dumps({"oggetto": o, "testo": t})
+    # 1. testo standard con [ ]: il Redattore lo riscrive per il contatto
     k1 = contatto("Paolo Neri", "Cantina Colle Alto", "paolo@collealto.it", "Montalcino", "Toscana")
     d1 = dest(k1, "paolo@collealto.it")
-    RISP[:] = [json.dumps({"oggetto": "Un video per Cantina Colle Alto", "testo": "{saluto}\n\nscrivo a Cantina Colle Alto perche' a marzo saremo a Montalcino, nel cuore della Toscana. Mi piacerebbe raccontare i vostri vini.\n\nLorenzo"})]
+    RISP[:] = [mod("Colle Alto e le vigne di Montalcino", "{saluto}\n\nscrivo a Cantina Colle Alto perche' a marzo saremo a Montalcino, nel cuore della Toscana. Mi piacerebbe raccontare i vostri vini.\n\nLorenzo")]
     PROMPT.clear()
     st = prepara(d1)
     e = email(d1)
-    ok("testo standard con [ ]: il Redattore le riempie con i dati del contatto", "[" not in e[1] + e[2] and "Montalcino" in e[2] and "Colle Alto" in e[1] and "controllale" in e[4], e)
+    ok("testo standard con [ ]: riscritto per il contatto, parentesi riempite", "[" not in e[1] + e[2] and "Montalcino" in e[2] and "riscritto per questo contatto" in e[4], e)
     p = PROMPT[-1][1]
     ok("al Redattore: testo base, ente e localita', mai nome della persona ne' email", "[nome della cantina]" in p and "Montalcino" in p and "Paolo" not in p and "paolo@" not in p
-       and "SPAZI DA PERSONALIZZARE" in p, p[:400])
-    ok("riempite: con invio automatico parte da sola", st == "approvata" and e[3] == "approvata", (st, e[3]))
+       and "SPAZI DA PERSONALIZZARE" in p and "email identiche finiscono nello spam" in p, p[:400])
+    ok("riscritta e diversa: con invio automatico parte da sola", st == "approvata" and e[3] == "approvata", (st, e[3]))
 
-    # 2. il modello sbaglia (lascia le quadre): riempimento dal CRM, l'ignoto resta e blocca
-    k2 = contatto("", "Fattoria Due Querce", "info@duequerce.it", "Greve in Chianti", "Toscana")
-    d2 = dest(k2, "info@duequerce.it")
-    RISP[:] = [json.dumps({"oggetto": "Un video per [nome della cantina]", "testo": "uguale [zona]"})]
+    # 2. il secondo contatto: il Redattore vede la prima email e non deve ripeterla
+    k2 = contatto("Giulia Verdi", "Fattoria Due Querce", "giulia@duequerce.it", "Greve in Chianti", "Toscana")
+    d2 = dest(k2, "giulia@duequerce.it")
+    uguale = "{saluto}\n\nscrivo a Fattoria Due Querce perche' a marzo saremo a Montalcino, nel cuore della Toscana. Mi piacerebbe raccontare i vostri vini.\n\nLorenzo"
+    diversa = "{saluto}\n\nil Chianti a marzo lo attraverseremo con la telecamera: passando da Greve, mi farebbe piacere fermarmi da Fattoria Due Querce e girare qualche immagine delle vostre botti.\n\nLorenzo"
+    RISP[:] = [mod("Un video per Fattoria Due Querce", uguale), mod("Greve, marzo e le vostre botti", diversa)]
+    PROMPT.clear()
     st = prepara(d2)
     e = email(d2)
-    ok("riempite dal CRM le ovvie: nome, zona, regione", "Fattoria Due Querce" in e[1] and "saremo in Greve in Chianti" in e[2] and "della Toscana" in e[2], e)
-    ok("la parte ignota resta, segnalata, e non parte da sola", "[vino di punta]" in e[2] and "Attenzione: restano da completare [vino di punta]" in e[4] and st == "da_approvare" and e[3] == "da_approvare", (st, e[4]))
-    r = c.post(f"/gestione/campagne/{cid}/approva", headers=H, json={"ids": [e[0]]})
-    ok("con parti tra [ ] non si approva: lo dice", r.status_code == 422 and "[ ]" in r.json()["detail"] and email(d2)[3] == "da_approvare", r.text)
-    r = c.post(f"/gestione/campagne/{cid}/approva", headers=H, json={"tutte": True})
-    ok("«approva tutte» salta quella e lo conta", r.status_code == 422 or r.json().get("da_completare") == 1, r.text)
-    c.put(f"/gestione/email-uscita/{e[0]}", headers=H, json={"testo": e[2].replace("[vino di punta]", "Chianti Classico")})
-    r = c.post(f"/gestione/campagne/{cid}/approva", headers=H, json={"ids": [e[0]]})
-    ok("completata a mano: si approva", r.status_code == 200 and email(d2)[3] == "approvata", r.text)
+    ok("troppo simile alla prima: il Redattore la riscrive una seconda volta", len(PROMPT) == 2 and "troppo simile" in PROMPT[1][1] and "Greve" in e[2] and st == "approvata", (len(PROMPT), st, e[2][:120]))
+    ok("vede le email gia' scritte (senza saluto, quindi senza il nome della persona)", "EMAIL GIA' SCRITTE" in PROMPT[0][1] and "Colle Alto" in PROMPT[0][1] and "Paolo" not in PROMPT[0][1])
 
-    # 3. tetto finito: niente modello, solo il CRM
-    sql("UPDATE campagne_posta SET spesa = tetto_spesa WHERE id=%s", (cid,))
+    # 3. il Redattore non riesce a cambiarla: testo standard, avviso, non parte da sola
     k3 = contatto("", "Tenuta Sole", "info@tenutasole.it", "Alba", "Piemonte")
     d3 = dest(k3, "info@tenutasole.it")
-    PROMPT.clear()
-    prepara(d3)
+    RISP[:] = [mod("x", uguale), mod("x", uguale)]
+    st = prepara(d3)
     e = email(d3)
-    ok("tetto raggiunto: nessuna chiamata, riempite dal CRM", not PROMPT and "Tenuta Sole" in e[2] and "Alba" in e[2] and "[vino di punta]" in e[2], e)
-    # 4. istruzione anche per le email personalizzate
-    ok("istruzione generale del Redattore sulle parentesi quadre", "SPAZI DA PERSONALIZZARE" in redattore.ISTRUZIONI and "parentesi quadre" in redattore.COMPITO_PRIMA)
+    ok("niente da fare: resta il testo di Lorenzo, riempito dal CRM, con l'avviso; non parte da sola", st == "da_approvare" and e[3] == "da_approvare" and "Tenuta Sole" in e[2] and "Alba" in e[2]
+       and "non e' riuscito a renderla diversa" in e[4], (st, e[4]))
+    ok("la parte ignota resta evidenziata come da completare", "[vino di punta]" in e[2] and "restano da completare [vino di punta]" in e[4], e[4])
+    r = c.post(f"/gestione/campagne/{cid}/approva", headers=H, json={"ids": [e[0]]})
+    ok("con parti tra [ ] non si approva: lo dice", r.status_code == 422 and "[ ]" in r.json()["detail"] and email(d3)[3] == "da_approvare", r.text)
+    c.put(f"/gestione/email-uscita/{e[0]}", headers=H, json={"testo": "Buongiorno,\n\nad Alba a marzo: avete dieci minuti per una telefonata sul vostro Barolo?\n\nLorenzo"})
+    r = c.post(f"/gestione/campagne/{cid}/approva", headers=H, json={"ids": [e[0]]})
+    ok("completata a mano: si approva", r.status_code == 200 and email(d3)[3] == "approvata", r.text)
+
+    # 4. tetto finito: niente email uguali al posto di quelle scritte, il contatto aspetta e la campagna va in pausa
+    sql("UPDATE campagne_posta SET spesa = tetto_spesa WHERE id=%s", (cid,))
+    k4 = contatto("", "Cascina Bassa", "info@cascinabassa.it", "Barolo", "Piemonte")
+    d4 = dest(k4, "info@cascinabassa.it")
+    PROMPT.clear()
+    st = prepara(d4)
+    ok("tetto raggiunto: nessuna email, il contatto aspetta, campagna in pausa", not PROMPT and st == "in_attesa" and sql("SELECT stato FROM campagne_posta WHERE id=%s", (cid,)) == [("in_pausa",)], st)
+
+    # 5. misura della somiglianza
+    ok("somiglianza: uguali a parte il saluto = 1; email diverse = poco", redattore.somiglianza("Gentile Anna,\n" + uguale[10:], "Buongiorno,\n" + uguale[10:]) == 1.0
+       and redattore.somiglianza(uguale, diversa) < 0.2)
+    ok("istruzione generale: parentesi quadre ed email sempre diverse", "SPAZI DA PERSONALIZZARE" in redattore.ISTRUZIONI and "ogni email e' diversa" in redattore.ISTRUZIONI and "parentesi quadre" in redattore.COMPITO_PRIMA)
     js = open("app/static/campagne.js").read()
     ok("interfaccia: parti tra [ ] evidenziate e avviso", "_quadreCp" in js and "parti tra [ ] da completare" in js)
 

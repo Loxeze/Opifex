@@ -316,23 +316,47 @@ def _crea_email(conn, c: dict, d_id: int, email: str, oggetto: str, testo: str, 
     return eid
 
 
-def _riempi_quadre(conn, c: dict, k: dict, oggetto: str, testo: str, zona: str) -> tuple[str, str, str]:
-    """Le parti tra [ ] del testo standard: il Redattore le riempie con i dati pubblici del contatto (ente, localita', note del sito)."""
-    if tetto_ok(conn, c["id"]):
-        n = redattore.note(conn, k["id"])
-        try:
-            j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_RIEMPI.format(
-                oggetto=oggetto, testo=testo, ente=k["ente"] or "(senza nome)", categoria=c.get("categoria") or "(non indicata)",
-                localita=_localita(k), note=(n["sintesi"] if n else "(nessuna)")), 1200)
-            _spendi(conn, c, spesa)
-            if isinstance(j, dict) and str(j.get("testo") or "").strip() and str(j.get("oggetto") or "").strip():
-                o2, t2 = str(j["oggetto"]).strip(), str(j["testo"]).strip()
-                if not redattore.QUADRE.search(o2 + t2):
-                    return o2, t2, zona + " Parti tra [ ] personalizzate dal Redattore: controllale."
-        except ErroreFornitore:
-            conn.rollback()
-    return (redattore.riempi_quadre_semplice(oggetto, k), redattore.riempi_quadre_semplice(testo, k),
-            zona + " Parti tra [ ] riempite con i dati del CRM: controllale.")
+TROPPO_SIMILE = 0.5   # quota di gruppi di 3 parole in comune oltre cui due email sono «uguali» per un filtro antispam
+
+
+def _recenti(conn, cid: int, tipo: str, escluso: int | None = None, n: int = 40) -> list[dict]:
+    return conn.execute("""SELECT oggetto, testo FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna=%s AND stato <> 'rifiutata'
+                           AND destinatario_id IS DISTINCT FROM %s ORDER BY id DESC LIMIT %s""", (cid, tipo, escluso, n)).fetchall()
+
+
+def _troppo_simile(testo: str, recenti: list[dict]) -> float:
+    return max((redattore.somiglianza(testo, r["testo"]) for r in recenti), default=0.0)
+
+
+def _senza_saluto(t: str) -> str:
+    t = re.sub(r"(?s)\n*—\nSe non desidera ricevere.*$", "", t or "").strip()
+    return t.split("\n", 1)[1].strip() if "\n" in t else t
+
+
+def _diversifica(conn, c: dict, k: dict, oggetto: str, testo: str, tipo: str, d_id: int) -> tuple[str, str, str, bool]:
+    """Ogni email della campagna dev'essere diversa dalle altre (antispam). Il Redattore riscrive il testo per questo contatto,
+    senza ripetere le email gia' scritte. Restituisce (oggetto, testo, nota, ok). Solleva ErroreFornitore se il modello non risponde."""
+    recenti = _recenti(conn, c["id"], tipo, d_id)
+    altre = "\n\n".join(f"- Oggetto: {r['oggetto']}\n{_senza_saluto(r['testo'])[:600]}" for r in recenti[:4]) or "(nessuna ancora)"
+    n = redattore.note(conn, k["id"])
+    ancora, base, base_o = "", testo, oggetto
+    for giro in range(2):
+        j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_VARIA.format(
+            brief=_brief(conn, c), oggetto=oggetto, testo=testo, ente=k["ente"] or "(senza nome)", categoria=c.get("categoria") or "(non indicata)",
+            localita=_localita(k), note=(n["sintesi"] if n else "(nessuna)"), altre=altre, ancora=ancora), 1400)
+        _spendi(conn, c, spesa)
+        if not (isinstance(j, dict) and str(j.get("testo") or "").strip() and str(j.get("oggetto") or "").strip()):
+            break
+        o2, t2 = str(j["oggetto"]).strip(), str(j["testo"]).strip()
+        sim = _troppo_simile(t2, recenti + [{"testo": base}])
+        if sim < TROPPO_SIMILE and not redattore.QUADRE.search(o2 + t2):
+            return o2, t2, "Testo riscritto per questo contatto, diverso dalle altre email.", True
+        ancora = (f"\nATTENZIONE: la tua versione precedente era troppo simile ad altre email (circa {round(sim * 100)}% di frasi uguali)"
+                  + (" e conteneva ancora parentesi quadre" if redattore.QUADRE.search(o2 + t2) else "") + ". Riscrivila davvero, con frasi tue.\n")
+        if not tetto_ok(conn, c["id"]):
+            break
+    return (redattore.riempi_quadre_semplice(base_o, k), redattore.riempi_quadre_semplice(base, k),
+            "Attenzione: il Redattore non e' riuscito a renderla diversa dalle altre: modificala prima di approvarla.", False)
 
 
 def prepara_uno(conn, c: dict, d: dict) -> str:
@@ -341,7 +365,7 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
     k = contatto(conn, d["contatto_id"])
     if "@" not in k["email"]:
         conn.execute("UPDATE campagne_posta_dest SET stato='scartata', nota='senza email', aggiornato_il=NOW() WHERE id=%s", (d["id"],)); return "scartata"
-    if c["personalizza"] and k["sito"] and not tetto_ok(conn, c["id"]):   # tetto raggiunto: la campagna si ferma e avvisa, il contatto aspetta
+    if not tetto_ok(conn, c["id"]):   # tetto raggiunto: la campagna si ferma e avvisa, il contatto aspetta (niente email identiche al posto di quelle scritte)
         _spendi(conn, c, 0)
         conn.commit()
         return "in_attesa"
@@ -390,12 +414,15 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
         oggetto, testo = c["oggetto"], c["testo"]
         if not zona:
             zona = "Senza sito: testo standard." if not k["sito"] else "Personalizzazione spenta: testo standard."
-        if redattore.QUADRE.search(oggetto + testo):   # spazi da personalizzare: li riempie il Redattore con i dati di questo contatto
-            oggetto, testo, zona = _riempi_quadre(conn, c, k, oggetto, testo, zona)
+    # regola fissa: nessuna email uguale alle altre. Il testo standard si riscrive sempre; quella personalizzata se somiglia troppo alle altre.
+    diversa = True
+    if not personalizzata or _troppo_simile(testo, _recenti(conn, c["id"], "primo", d["id"])) >= TROPPO_SIMILE or redattore.QUADRE.search(oggetto + testo):
+        oggetto, testo, nota_v, diversa = _diversifica(conn, c, k, oggetto, testo, "primo", d["id"])
+        zona = (zona + " " if zona else "") + nota_v
     if redattore.QUADRE.search(oggetto + testo):
         resta = ", ".join(dict.fromkeys(redattore.QUADRE.findall(oggetto + testo)))[:200]
         zona = (zona + " " if zona else "") + f"Attenzione: restano da completare {resta}."
-    da_vedere = bool(redattore.QUADRE.search(oggetto + testo))   # con parti da completare non parte mai da sola
+    da_vedere = bool(redattore.QUADRE.search(oggetto + testo)) or not diversa   # parti da completare o email uguale alle altre: non parte mai da sola
     if "{saluto}" not in testo:
         testo = "{saluto}\n\n" + testo
     persona = k["genere"] == "persona" or bool(k["nome"] and k["ente"])
@@ -449,12 +476,13 @@ def sollecito(conn, c: dict, d: dict) -> str:
         testo = "{saluto}\n\n" + testo
     persona = k["genere"] == "persona" or bool(k["nome"] and k["ente"])
     oggetto = str(j.get("oggetto") or "").strip() or ("Re: " + prima["oggetto"])
-    if redattore.QUADRE.search(oggetto + testo):
-        oggetto, testo = redattore.riempi_quadre_semplice(oggetto, k), redattore.riempi_quadre_semplice(testo, k)
+    diversa, nota_v = True, ""
+    if _troppo_simile(testo, _recenti(conn, c["id"], "sollecito", d["id"])) >= TROPPO_SIMILE or redattore.QUADRE.search(oggetto + testo):
+        oggetto, testo, nota_v, diversa = _diversifica(conn, c, k, oggetto, testo, "sollecito", d["id"])
     eid = _crea_email(conn, c, d["id"], k["email"], _componi(oggetto, k["nome"], k["ente"], persona)[:200],
-                      _componi(testo, k["nome"], k["ente"], persona) + PIEDE, "sollecito")
-    stato = "approvata" if c["invio_automatico"] else "da_approvare"
-    nota = f"Sollecito {prossimo - 1}" + (f" — novità: {j.get('cosa')}" if prossimo == 3 and j.get("cosa") else "")
+                      _componi(testo, k["nome"], k["ente"], persona) + PIEDE, "sollecito", automatica=False if not diversa else None)
+    stato = "approvata" if c["invio_automatico"] and diversa else "da_approvare"
+    nota = f"Sollecito {prossimo - 1}" + (f" — novità: {j.get('cosa')}" if prossimo == 3 and j.get("cosa") else "") + ("" if diversa else " — " + nota_v)
     conn.execute("UPDATE campagne_posta_dest SET stato=%s, email_id=%s, passo=%s, prossimo_il=NULL, nota=%s, aggiornato_il=NOW() WHERE id=%s",
                  (stato, eid, prossimo, nota[:400], d["id"]))
     conn.commit()
