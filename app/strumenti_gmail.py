@@ -28,9 +28,9 @@ AVVISO = ("\n\nPOSTA: ti e' affidata una casella Gmail (gmail_cerca, gmail_leggi
           "Quando prepari una bozza dillo a Lorenzo con destinatario e oggetto.")
 
 
-def _richiesta(metodo, url, tok, **kw):
+def _richiesta(metodo, url, tok, headers_extra=None, **kw):
     try:
-        r = httpx.request(metodo, url, headers={"Authorization": "Bearer " + tok}, timeout=30, **kw)
+        r = httpx.request(metodo, url, headers={"Authorization": "Bearer " + tok, **(headers_extra or {})}, timeout=120 if headers_extra else 30, **kw)
     except httpx.HTTPError as e:
         raise ErroreGoogle(f"Gmail non raggiungibile ({type(e).__name__})") from None
     if r.status_code >= 400:

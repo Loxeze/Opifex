@@ -129,7 +129,7 @@ with TestClient(app) as c:
     s = st[crm.hash_email("booking@sunrise.com")]
     ok("Sunrise: il CRM dice Hurghada, il sito Sharm: segnalato", s[0] == "da_approvare" and "Attenzione" in s[3], s)
     e = sql("SELECT oggetto, testo, oggetto_proposto = oggetto, tipo_campagna, stato FROM email_in_uscita WHERE destinatari='direzione@coralbay.com'")[0]
-    ok("email: saluto, firma, riga RIMUOVI, da approvare", e[1].startswith("Buongiorno,") and "RIMUOVI" in e[1] and e[2] and e[3] == "primo" and e[4] == "da_approvare", e)
+    ok("email: saluto, firma, senza riga RIMUOVI (2.69), da approvare", e[1].startswith("Buongiorno,") and "RIMUOVI" not in e[1] and e[2] and e[3] == "primo" and e[4] == "da_approvare", e)
     ok("spesa registrata a nome del Redattore", float(sql("SELECT spesa FROM campagne_posta WHERE id=%s", (cid,))[0][0]) > 0
        and sql("SELECT count(*) FROM costi_api c JOIN agenti a ON a.id=c.agente_id WHERE a.nome='Redattore delle campagne'")[0][0] >= 2)
     ok("notifica: email nuove da approvare", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Campagna «Hotel Sharm»: %%email nuove%%'")[0][0] == 1)

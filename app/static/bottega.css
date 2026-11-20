@@ -511,3 +511,23 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .lg-domanda-fatta{padding:6px 0;border-bottom:1px solid var(--bordo)}
 .lg-formazione{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
 .lg-comp-testa{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:4px}
+
+/* 2.69: editor delle email come in Gmail */
+.cp-etichetta{font-weight:600;font-size:14px}
+.cp-ricco-box{border:1px solid var(--bordo);border-radius:10px;background:#fff;overflow:hidden}
+.cp-barra{display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--bordo);background:var(--carta2)}
+.cp-tasto{font:inherit;font-size:13px;min-width:34px;min-height:32px;padding:4px 9px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--testo);cursor:pointer}
+.cp-tasto:hover{background:#fff;border-color:var(--bordo)}
+.cp-tasto.cp-tenue{color:var(--tenue)}
+.cp-sep{width:1px;height:20px;background:var(--bordo);margin:0 3px}
+.cp-editor{min-height:260px;max-height:70vh;overflow:auto;padding:14px 16px;line-height:1.55;outline:none;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;overflow-wrap:anywhere}
+.cp-editor:focus{box-shadow:inset 0 0 0 2px var(--primario)}
+.cp-editor p,.cp-ricco p{margin:0 0 .8em}
+.cp-editor img,.cp-ricco img{max-width:100%;height:auto;border-radius:4px}
+.cp-ricco{white-space:normal;font-family:Arial,Helvetica,sans-serif;font-size:14px}
+.cp-ricco a,.cp-editor a{color:#1a5fb4}
+.cp-allegati{display:flex;flex-wrap:wrap;gap:6px}
+.cp-allegato{display:inline-flex;align-items:center;gap:2px;background:var(--carta2);border-radius:999px;padding:3px 6px 3px 10px;font-size:13px;max-width:100%;overflow-wrap:anywhere}
+.cp-allegato.campagna{background:var(--ok-b)}
+.cp-x{border:0;background:transparent;font-size:16px;line-height:1;padding:0 6px;cursor:pointer;color:var(--tenue)}
+.cp-all-riga{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:6px 0;border-bottom:1px solid var(--bordo)}

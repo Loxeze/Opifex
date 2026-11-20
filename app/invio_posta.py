@@ -48,7 +48,8 @@ def _riga_intest(v) -> str:
     return re.sub(r"[\r\n]+", " ", str(v or "")).strip()
 
 
-def _messaggio(mittente: str, dest: list[str], oggetto: str, testo: str, in_risposta: dict | None = None) -> EmailMessage:
+def _messaggio(mittente: str, dest: list[str], oggetto: str, testo: str, in_risposta: dict | None = None,
+               html: str | None = None, immagini: list | None = None, allegati: list | None = None) -> EmailMessage:
     m = EmailMessage()
     if mittente:
         m["From"] = mittente
@@ -56,6 +57,9 @@ def _messaggio(mittente: str, dest: list[str], oggetto: str, testo: str, in_risp
     m["Subject"] = oggetto
     if in_risposta and in_risposta.get("message_id"):
         m["In-Reply-To"] = in_risposta["message_id"]; m["References"] = in_risposta["message_id"]
+    if html or immagini or allegati:   # 2.69: testo formattato, immagini nel testo e allegati
+        from . import posta_ricca
+        return posta_ricca.componi(m, testo, html, immagini or [], allegati or [])
     m.set_content(testo)
     return m
 
@@ -93,15 +97,29 @@ def _spedisci(conn, riga: dict):
             orig = strumenti_gmail._richiesta("GET", f"{strumenti_gmail._API}/messages/{str(riga['rispondi_a'])}", tok, params={"format": "metadata", "metadataHeaders": ["Message-ID"]})
             corpo["threadId"] = orig.get("threadId")
             risposta = {"message_id": _riga_intest(strumenti_gmail._intest(orig, "Message-ID"))}
-        msg = _messaggio("", dest, _riga_intest(riga["oggetto"]), riga["testo"], risposta)
+        imm, alleg = _ricchi(conn, riga)
+        msg = _messaggio("", dest, _riga_intest(riga["oggetto"]), riga["testo"], risposta, riga.get("html"), imm, alleg)
         corpo = {k: v for k, v in corpo.items() if v}
-        corpo["raw"] = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        grezzo = msg.as_bytes()
+        if len(grezzo) > 4 * 1024 * 1024 and not corpo.get("threadId"):   # con allegati grandi: caricamento diretto del messaggio
+            strumenti_gmail._richiesta("POST", "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send", tok,
+                                       params={"uploadType": "media"}, content=grezzo, headers_extra={"Content-Type": "message/rfc822"})
+            return
+        corpo["raw"] = base64.urlsafe_b64encode(grezzo).decode()
         strumenti_gmail._richiesta("POST", f"{strumenti_gmail._API}/messages/send", tok, json=corpo)
         return
     c = conn.execute("SELECT * FROM caselle_posta WHERE id = %s", (riga["account_id"],)).fetchone()
     if c is None:
         raise strumenti_posta.ErrorePosta("La casella non esiste piu'")
-    _spedisci_smtp(c, _messaggio(c["email"], dest, _riga_intest(riga["oggetto"]), riga["testo"]))
+    imm, alleg = _ricchi(conn, riga)
+    _spedisci_smtp(c, _messaggio(c["email"], dest, _riga_intest(riga["oggetto"]), riga["testo"], None, riga.get("html"), imm, alleg))
+
+
+def _ricchi(conn, riga: dict) -> tuple[list, list]:
+    if not riga.get("id"):
+        return [], []
+    from . import posta_ricca
+    return posta_ricca.per_invio(conn, riga)
 
 
 def _canale(conn, agente_id: int, gmail_account_id, caselle: list[dict], nome_casella) -> tuple[str, int, str]:

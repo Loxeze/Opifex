@@ -287,17 +287,23 @@ async function apriCampagna(corpo, cid, torna) {
     if (x.richiamo_il) box.append(h("div", { class: "cp-richiamo" }, (x.richiamo_fatto ? "✓ Ricontattato: " : "⏰ Da ricontattare il ") + new Date(x.richiamo_il + "T12:00:00").toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" }) + (x.richiamo_nota ? " — «" + x.richiamo_nota + "»" : "")));
     if (x.risposta_oggetto || x.risposta_sintesi) box.append(h("div", { class: "sotto" }, "Risposta" + (x.risposta_oggetto ? ": «" + x.risposta_oggetto + "»" : "") + (x.risposta_sintesi ? " — " + x.risposta_sintesi : "")));
     if (x.errore && x.email_id) box.append(avviso(x.errore, "no"));
-    const editor = (email_id, ogg, tes, oggP, tesP, titolo, aperto) => {
+    const editor = (email_id, ogg, tes, oggP, tesP, titolo, aperto, html, allegati, tipo) => {
       const zona = h("div", { class: "cp-bozza" });
       const cambiata = tesP != null && (tes !== tesP || ogg !== oggP);
+      const conCampagna = (c.allegati || []).filter(a => tipo === "primo" || (tipo === "sollecito" && a.in_solleciti));
+      const elencoAllegati = (lista, togli) => (lista.length || conCampagna.length) ? h("div", { class: "cp-allegati" },
+        lista.filter(a => !a.inline).map(a => h("span", { class: "cp-allegato" }, "📎 " + a.nome, h("span", { class: "sotto" }, " " + _pesoCp(a.dimensione)),
+          togli ? h("button", { type: "button", class: "cp-x", title: "Togli", "aria-label": "Togli " + a.nome, onclick: () => togli(a) }, "×") : null)),
+        conCampagna.map(a => h("span", { class: "cp-allegato campagna", title: "Allegato della campagna" }, "📎 " + a.nome, h("span", { class: "sotto" }, " con la campagna")))) : null;
       const leggi = () => {
         const confronto = cambiata ? h("details", { class: "cp-confronto" }, h("summary", {}, "Confronta con la prima versione del Redattore"),
           h("div", { class: "cp-due" }, h("div", {}, h("b", {}, "Redattore"), _diffCp(oggP + "\n\n" + tesP, ogg + "\n\n" + tes, "via")),
             h("div", {}, h("b", {}, "La tua versione"), _diffCp(oggP + "\n\n" + tesP, ogg + "\n\n" + tes, "nuovo")))) : null;
+        const corpoTesto = html ? _htmlCp(html, allegati) : h("div", { class: "cp-testo" }, ..._quadreCp(tes));
         zona.replaceChildren(...[
           cambiata ? h("span", { class: "cp-tua" }, "✎ Modificata da te: il Redattore imparerà da questa correzione") : null,
           _QUADRE_CP.test((ogg || "") + (tes || "")) ? avviso("Ci sono ancora parti tra [ ] da completare: premi «Modifica», scrivile e salva. Finché restano, l'email non si può approvare.", "no") : null,
-          h("div", { class: "cp-ogg" }, h("span", { class: "sotto" }, "Oggetto: "), ..._quadreCp(ogg)), h("div", { class: "cp-testo" }, ..._quadreCp(tes)), confronto,
+          h("div", { class: "cp-ogg" }, h("span", { class: "sotto" }, "Oggetto: "), ..._quadreCp(ogg)), corpoTesto, elencoAllegati(allegati || []), confronto,
           h("div", { class: "azioni" }, ...[
             _btnCp("Modifica", () => scrivi(), "s"),
             cambiata || x.tipo === "sollecito" || email_id !== x.email_id ? null : _btnCp("Fai riscrivere", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/riscrivi", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s"),
@@ -305,24 +311,29 @@ async function apriCampagna(corpo, cid, torna) {
             _btnCp("Scarta", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/scarta", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s")].filter(Boolean))].filter(Boolean));
       };
       const scrivi = () => {
-        const o = h("input", { type: "text", value: ogg || "", maxlength: 200 }), t = h("textarea", { rows: Math.min(22, Math.max(9, (tes || "").split("\n").length + 2)) }, tes || "");
-        const salva = _btnCp("Salva", async () => { if (!o.value.trim() || !t.value.trim()) { err(new Error("Oggetto e testo non possono restare vuoti")); return; }
-          try { await api("PUT", "/gestione/email-uscita/" + email_id, { oggetto: o.value, testo: t.value }); ricarica(); } catch (e) { err(e); } }, "p");
-        zona.replaceChildren(h("label", {}, "Oggetto", o), h("label", {}, "Testo", t),
-          h("p", { class: "sotto" }, "Salvi e la bozza resta da approvare. La tua versione e quella del Redattore restano tutte e due: il Redattore le confronta e impara a scrivere come te."),
+        const o = h("input", { type: "text", value: ogg || "", maxlength: 200 });
+        let lista = (allegati || []).slice();
+        const ed = _editorRiccoCp(html || _daTestoCp(tes || ""), lista, email_id, (nuovo) => { lista.push(nuovo); disegnaAll(); });
+        const zonaAll = h("div");
+        const disegnaAll = () => zonaAll.replaceChildren(elencoAllegati(lista, async (a) => { try { await api("DELETE", "/gestione/email-uscita/allegati/" + a.id); lista = lista.filter(y => y.id !== a.id); disegnaAll(); } catch (e) { err(e); } }) || "");
+        disegnaAll();
+        const salva = _btnCp("Salva", async () => { const v = ed.valore(); if (!o.value.trim() || !ed.testo().trim()) { err(new Error("Oggetto e testo non possono restare vuoti")); return; }
+          try { await api("PUT", "/gestione/email-uscita/" + email_id, { oggetto: o.value, html: v }); ricarica(); } catch (e) { err(e); } }, "p");
+        zona.replaceChildren(h("label", {}, "Oggetto", o), h("div", { class: "cp-etichetta" }, "Testo"), ed.el, zonaAll,
+          h("p", { class: "sotto" }, "Puoi formattare il testo, mettere link, immagini e allegati. Gli indirizzi web scritti nel testo diventano link da soli. Salvi e la bozza resta da approvare; la versione del Redattore resta per il confronto, così impara a scrivere come te."),
           h("div", { class: "azioni" }, salva, _btnCp("Annulla", () => leggi(), "s")));
-        t.focus();
+        ed.fuoco();
       };
       leggi();
       return h("details", { open: aperto }, h("summary", {}, titolo + (cambiata ? " · modificata da te" : "")), zona);
     };
-    if (x.email_id && (x.stato === "da_approvare" || x.stato === "errore")) box.append(editor(x.email_id, x.oggetto, x.testo, x.oggetto_proposto, x.testo_proposto, x.tipo === "sollecito" ? "Leggi, modifica o approva il sollecito" : "Leggi, modifica o approva la bozza", true));
+    if (x.email_id && (x.stato === "da_approvare" || x.stato === "errore")) box.append(editor(x.email_id, x.oggetto, x.testo, x.oggetto_proposto, x.testo_proposto, x.tipo === "sollecito" ? "Leggi, modifica o approva il sollecito" : "Leggi, modifica o approva la bozza", true, x.html, x.allegati, x.tipo));
     const inCoda = (email_id, cosa) => h("div", { class: "azioni cp-incoda", style: "align-items:center" }, h("span", { class: "sotto" }, "✓ " + cosa + " approvata, in coda: non è ancora partita."),
       _btnCp("Rimetti in modifica", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/riapri", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s piccolo"),
       _btnCp("Scarta", async () => { try { await api("POST", "/gestione/campagne/" + cid + "/scarta", { ids: [email_id] }); ricarica(); } catch (e) { err(e); } }, "s piccolo"));
     if (x.email_id && x.email_stato === "approvata") box.append(inCoda(x.email_id, x.tipo === "sollecito" ? "Sollecito" : "Email"));
     if (x.risposta && x.risposta.stato === "approvata") box.append(inCoda(x.risposta.email_id, x.risposta.tipo === "ripresa" ? "Email di ripresa" : "Risposta"));
-    else if (x.risposta && (x.risposta.stato === "da_approvare" || x.risposta.stato === "errore")) box.append(editor(x.risposta.email_id, x.risposta.oggetto, x.risposta.testo, x.risposta.oggetto_proposto, x.risposta.testo_proposto, x.risposta.tipo === "ripresa" ? "L'email per riprendere il discorso (da approvare)" : "La risposta per fissare la call (da approvare)", true));
+    else if (x.risposta && (x.risposta.stato === "da_approvare" || x.risposta.stato === "errore")) box.append(editor(x.risposta.email_id, x.risposta.oggetto, x.risposta.testo, x.risposta.oggetto_proposto, x.risposta.testo_proposto, x.risposta.tipo === "ripresa" ? "L'email per riprendere il discorso (da approvare)" : "La risposta per fissare la call (da approvare)", true, x.risposta.html, x.risposta.allegati, x.risposta.tipo));
     else if (x.risposta) box.append(h("div", { class: "sotto" }, (x.risposta.tipo === "ripresa" ? "Email di ripresa: " : "Risposta per la call: ") + ({ approvata: "in partenza", inviata: "inviata", rifiutata: "scartata" })[x.risposta.stato]));
     if (x.opportunita_id && x.stato === "interessato") {
       const zona = h("div");
@@ -359,7 +370,7 @@ async function apriCampagna(corpo, cid, torna) {
     c.imbuto && c.imbuto[0].n ? h("div", { class: "carta" }, graficoImbutoCp(c.imbuto, "L'imbuto della campagna")) : null,
     abbinare, bloccoBrief, quadro, bloccoTesto,
     h("details", { class: "carta", open: true }, h("summary", {}, h("b", {}, "Il flusso")), _blocchiFlusso(c, salva)),
-    correzioni, cartaStileCp(),
+    correzioni, cartaAllegatiCp(c, ricarica), cartaStileCp(),
     h("div", { class: "azioni", style: "align-items:center" }, h("h3", { style: "margin:0" }, "Destinatari"), filtro), lista]);
 }
 
@@ -404,4 +415,87 @@ function cartaStileCp() {
 const _QUADRE_CP = /\[[^\[\]\n]{1,80}\]/;
 function _quadreCp(t) {
   return (t || "").split(/(\[[^\[\]\n]{1,80}\])/).map((p, i) => i % 2 ? h("mark", { class: "cp-quadra" }, p) : document.createTextNode(p));
+}
+
+// ---------- 2.69: email come in Gmail (testo formattato, link, immagini, allegati) ----------
+const _pesoCp = (n) => n >= 1048576 ? (n / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+const _escCp = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function _daTestoCp(t) {
+  return t.trim().split(/\n\s*\n/).filter(p => p.trim()).map(p => "<p>" + _escCp(p).replace(/\n/g, "<br>") + "</p>").join("");
+}
+const _immaginiCp = {};   // id allegato -> indirizzo locale dell'immagine (si scarica una volta)
+async function _srcCp(a) {
+  if (_immaginiCp[a.id]) return _immaginiCp[a.id];
+  const r = await fetch("/gestione/email-uscita/allegati/" + a.id, { headers: token ? { Authorization: "Bearer " + token } : {} });
+  if (!r.ok) return "";
+  return (_immaginiCp[a.id] = URL.createObjectURL(await r.blob()));
+}
+function _immaginiDaCid(el, allegati) {
+  el.querySelectorAll("img[src^='cid:']").forEach(async (img) => {
+    const cidImg = img.getAttribute("src").slice(4), a = (allegati || []).find(x => x.cid === cidImg);
+    img.setAttribute("data-cid", cidImg); img.removeAttribute("src"); img.alt = img.alt || "immagine";
+    if (a) { const u = await _srcCp(a); if (u) img.src = u; }
+  });
+}
+function _htmlCp(html, allegati) {
+  const el = h("div", { class: "cp-testo cp-ricco" });
+  el.innerHTML = html;   // gia' ripulito dal server: solo formattazione, link e immagini interne
+  el.querySelectorAll("a").forEach(a => { a.target = "_blank"; a.rel = "noopener"; });
+  _immaginiDaCid(el, allegati);
+  return el;
+}
+function _editorRiccoCp(html, allegati, email_id, aggiunto) {
+  const area = h("div", { class: "cp-editor", contenteditable: "true", role: "textbox", "aria-multiline": "true", "aria-label": "Testo dell'email", spellcheck: "true" });
+  area.innerHTML = html;
+  _immaginiDaCid(area, allegati);
+  const cmd = (c, v) => { area.focus(); document.execCommand(c, false, v); };
+  const tasto = (et, titolo, fn, cls) => h("button", { type: "button", class: "cp-tasto" + (cls ? " " + cls : ""), title: titolo, "aria-label": titolo, onmousedown: (e) => e.preventDefault(), onclick: fn }, et);
+  const carica = async (file, inline) => {
+    const fd = new FormData(); fd.append("file", file); fd.append("inline", inline ? "true" : "false");
+    return api("POST", "/gestione/email-uscita/" + email_id + "/allegati", fd, { scadenzaMs: 120000 });
+  };
+  const sceltaImg = h("input", { type: "file", accept: "image/*", style: "display:none", onchange: async () => {
+    const f = sceltaImg.files[0]; sceltaImg.value = ""; if (!f) return;
+    try { const a = await carica(f, true); allegati.push(a); area.focus();
+      document.execCommand("insertHTML", false, '<img data-cid="' + a.cid + '" alt="' + _escCp(a.nome) + '" src="' + await _srcCp(a) + '">'); } catch (e) { alert(e.message); } } });
+  const sceltaFile = h("input", { type: "file", multiple: true, style: "display:none", onchange: async () => {
+    for (const f of [...sceltaFile.files]) { try { aggiunto(await carica(f, false)); } catch (e) { alert(f.name + ": " + e.message); } }
+    sceltaFile.value = ""; } });
+  const barra = h("div", { class: "cp-barra", role: "toolbar", "aria-label": "Formattazione" },
+    tasto(h("b", {}, "G"), "Grassetto", () => cmd("bold")), tasto(h("i", {}, "C"), "Corsivo", () => cmd("italic")), tasto(h("u", {}, "S"), "Sottolineato", () => cmd("underline")),
+    h("span", { class: "cp-sep" }),
+    tasto("• Elenco", "Elenco puntato", () => cmd("insertUnorderedList")), tasto("1. Elenco", "Elenco numerato", () => cmd("insertOrderedList")),
+    h("span", { class: "cp-sep" }),
+    tasto("🔗 Link", "Trasforma il testo selezionato in un link", () => {
+      const sel = window.getSelection(); const testo = sel ? String(sel) : "";
+      let u = prompt("Indirizzo del link (https://…)", /^(https?:\/\/|www\.)/i.test(testo) ? testo : "https://"); if (!u || u === "https://") return;
+      if (/^www\./i.test(u)) u = "https://" + u;
+      if (!/^(https?:\/\/|mailto:)/i.test(u)) { alert("Il link deve cominciare con https:// o mailto:"); return; }
+      if (testo) cmd("createLink", u); else cmd("insertHTML", '<a href="' + _escCp(u) + '">' + _escCp(u) + "</a>");
+    }), tasto("Togli link", "Togli il link", () => cmd("unlink")),
+    h("span", { class: "cp-sep" }),
+    tasto("🖼 Immagine", "Metti un'immagine nel testo", () => sceltaImg.click()), tasto("📎 Allega", "Allega un file", () => sceltaFile.click()),
+    tasto("Tx", "Togli la formattazione", () => cmd("removeFormat"), "cp-tenue"), sceltaImg, sceltaFile);
+  return {
+    el: h("div", { class: "cp-ricco-box" }, barra, area),
+    fuoco: () => area.focus(),
+    testo: () => area.innerText || "",
+    valore: () => { const copia = area.cloneNode(true); copia.querySelectorAll("img[data-cid]").forEach(i => i.setAttribute("src", "cid:" + i.getAttribute("data-cid"))); return copia.innerHTML; },
+  };
+}
+
+// Allegati della campagna: partono con ogni prima email (e, se scelto, con i solleciti)
+function cartaAllegatiCp(c, ricarica) {
+  const scelta = h("input", { type: "file", multiple: true });
+  const esito = h("div");
+  return h("details", { class: "carta", open: !!(c.allegati && c.allegati.length) },
+    h("summary", {}, h("b", {}, "Allegati della campagna"), h("span", { class: "sotto" }, " — " + (c.allegati && c.allegati.length ? c.allegati.length + " file, partono con ogni prima email" : "per esempio una brochure o un portfolio"))),
+    h("p", { class: "sotto" }, "Partono con ogni prima email della campagna; se vuoi anche con i solleciti, spunta la casella. Massimo 15 MB a file, 20 MB in tutto: per video o cartelle pesanti meglio un link nel testo."),
+    (c.allegati || []).map(a => h("div", { class: "cp-all-riga" }, h("span", {}, "📎 " + a.nome + " ", h("span", { class: "sotto" }, _pesoCp(a.dimensione))),
+      h("label", { class: "interruttore" }, h("input", { type: "checkbox", checked: a.in_solleciti, onchange: async (ev) => { await api("PUT", "/gestione/campagne/" + c.id + "/allegati/" + a.id, { in_solleciti: ev.target.checked }); } }), h("span", {}, "anche nei solleciti")),
+      _btnCp("Togli", async () => { await api("DELETE", "/gestione/campagne/" + c.id + "/allegati/" + a.id); ricarica(); }, "s piccolo"))),
+    h("div", { class: "azioni", style: "align-items:center" }, scelta, _btnCp("Aggiungi", async () => {
+      for (const f of [...scelta.files]) { const fd = new FormData(); fd.append("file", f);
+        try { await api("POST", "/gestione/campagne/" + c.id + "/allegati", fd, { scadenzaMs: 120000 }); } catch (e) { esito.replaceChildren(avviso(f.name + ": " + e.message, "no")); return; } }
+      ricarica(); }, "p")), esito);
 }

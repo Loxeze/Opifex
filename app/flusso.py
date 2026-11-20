@@ -40,7 +40,7 @@ Se il contatto indica QUANDO risentirsi («tra un mese», «a marzo», «dopo l'
 e mettila in "richiamo" (AAAA-MM-GG; per un mese usa il primo giorno), con le sue parole in "quando". Altrimenti null.
 Rispondi SOLO con JSON: {"esito": "...", "sintesi": "una frase in italiano su cosa dice", "richiamo": "AAAA-MM-GG o null", "quando": "le sue parole o vuoto"}"""
 
-ISTR_RISPOSTA = """Scrivi per Lorenzo Zeppa una risposta breve (40-90 parole) a chi si e' detto interessato alla sua email. Tono personale e cordiale,
+ISTR_RISPOSTA = """Scrivi per Lorenzo Zeppa una risposta (80-130 parole, curata e garbata, mai sbrigativa) a chi si e' detto interessato alla sua email. Tono personale e cordiale,
 prima persona. Ringrazia, rispondi in una frase a quello che chiede se puoi farlo senza inventare, e proponi una chiamata di 20 minuti
 {link}. Firma: Lorenzo. Rispondi SOLO con JSON: {{"testo": "..."}}"""
 
@@ -343,7 +343,7 @@ def _diversifica(conn, c: dict, k: dict, oggetto: str, testo: str, tipo: str, d_
     for giro in range(2):
         j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_VARIA.format(
             brief=_brief(conn, c), oggetto=oggetto, testo=testo, ente=k["ente"] or "(senza nome)", categoria=c.get("categoria") or "(non indicata)",
-            localita=_localita(k), note=(n["sintesi"] if n else "(nessuna)"), altre=altre, ancora=ancora), 1400)
+            localita=_localita(k), note=(n["sintesi"] if n else "(nessuna)"), altre=altre, ancora=ancora), 2000)
         _spendi(conn, c, spesa)
         if not (isinstance(j, dict) and str(j.get("testo") or "").strip() and str(j.get("oggetto") or "").strip()):
             break
@@ -386,7 +386,7 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
             j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_PRIMA.format(
                 brief=_brief(conn, c), ente=k["ente"] or "(senza nome)", localita=_localita(k),
                 note=n["sintesi"] if n else "(nessuna)", sito=k["sito"], testo=sito_testo or "(non riletto: valgono le note qui sopra)",
-                firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 1600)
+                firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 2200)
             _spendi(conn, c, spesa)
             if isinstance(j, dict) and j.get("oggetto") and j.get("testo"):
                 personalizzata = True

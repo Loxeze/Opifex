@@ -12,7 +12,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 from psycopg.types.json import Jsonb
 
@@ -21,7 +21,7 @@ from .db import connessione
 from .permessi import solo_titolare
 
 MAX_GIORNO = 300            # tetto di invii di campagna al giorno, tutte le campagne insieme (Gmail personale: circa 500)
-PIEDE = "\n\n—\nSe non desidera ricevere altre comunicazioni di questo tipo, risponda a questa email scrivendo «RIMUOVI» nell'oggetto."
+PIEDE = ""   # 2.69: niente piu' riga «RIMUOVI» in fondo: sono email personali di Lorenzo, non una newsletter
 RIMUOVI = re.compile(r"\b(rimuovi|rimuovimi|cancella|cancellami|disiscriv|unsubscribe|stop)\b", re.I)
 SEGNAPOSTO = ("{saluto}", "{nome}", "{ente}")
 STATI_FINE = ("inviata", "risposto", "interessato", "non_interessato", "rimosso", "nessuna_risposta")
@@ -409,13 +409,14 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
     from . import flusso
     c = dict(campagna(conn, cid))
     righe = conn.execute("""SELECT d.*, k.nome_cifrato, k.ente_cifrato, k.email_cifrata, k.comune, k.provincia, e.id AS e_id, e.oggetto AS e_oggetto, e.testo AS e_testo,
-                                   e.errore AS e_errore, e.stato AS e_stato, e.tipo_campagna AS e_tipo, e.oggetto_proposto AS e_oggetto_p, e.testo_proposto AS e_testo_p
+                                   e.errore AS e_errore, e.stato AS e_stato, e.tipo_campagna AS e_tipo, e.oggetto_proposto AS e_oggetto_p, e.testo_proposto AS e_testo_p,
+                                   e.html AS e_html
                             FROM campagne_posta_dest d LEFT JOIN crm_contatti k ON k.id=d.contatto_id LEFT JOIN email_in_uscita e ON e.id=d.email_id
                             WHERE d.campagna_id=%s
                             ORDER BY (d.stato='da_approvare') DESC, (d.stato='interessato') DESC, (d.stato IN ('risposto','errore')) DESC, d.aggiornato_il DESC, d.id
                             LIMIT 1000""", (cid,)).fetchall()
     risposte = {r["destinatario_id"]: r for r in conn.execute(
-        """SELECT id, destinatario_id, oggetto, testo, oggetto_proposto, testo_proposto, stato, errore, tipo_campagna FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna IN ('risposta','ripresa')
+        """SELECT id, destinatario_id, oggetto, testo, html, oggetto_proposto, testo_proposto, stato, errore, tipo_campagna FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna IN ('risposta','ripresa')
            ORDER BY id""", (cid,)).fetchall()}
     prev = {r["opportunita_id"]: dict(r, totale_netto=float(r["totale_netto"])) for r in conn.execute(
         """SELECT DISTINCT ON (opportunita_id) id, opportunita_id, stato, fic_numero, totale_netto FROM preventivi
@@ -423,6 +424,11 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
     note = {r["contatto_id"]: r for r in conn.execute(
         "SELECT contatto_id, aggiornato_il FROM crm_note_web WHERE contatto_id = ANY(%s)", ([r["contatto_id"] for r in righe if r["contatto_id"]],)).fetchall()}
     aperta = ("da_approvare", "approvata", "errore")
+    alleg = {}
+    for a in conn.execute("""SELECT a.id, a.email_id, a.nome, a.mime, a.dimensione, a.inline, a.cid FROM email_allegati a JOIN email_in_uscita e ON e.id=a.email_id
+                             WHERE e.campagna_id=%s AND e.stato IN ('da_approvare','approvata','errore') ORDER BY a.id""", (cid,)).fetchall():
+        alleg.setdefault(a["email_id"], []).append(dict(a))
+    c["allegati"] = conn.execute("SELECT id, nome, mime, dimensione, in_solleciti FROM campagne_allegati WHERE campagna_id=%s ORDER BY id", (cid,)).fetchall()
     c["destinatari"] = []
     for r in righe:
         rs = risposte.get(r["id"])
@@ -435,7 +441,8 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
             "email_id": r["e_id"] if r["e_stato"] in aperta else None, "tipo": r["e_tipo"], "email_stato": r["e_stato"],
             "oggetto": r["e_oggetto"] if r["e_stato"] in aperta else None, "testo": r["e_testo"] if r["e_stato"] in aperta else None, "errore": r["e_errore"],
             "oggetto_proposto": r["e_oggetto_p"] if r["e_stato"] in aperta else None, "testo_proposto": r["e_testo_p"] if r["e_stato"] in aperta else None,
-            "risposta": {"email_id": rs["id"], "oggetto": rs["oggetto"], "testo": rs["testo"], "oggetto_proposto": rs["oggetto_proposto"], "testo_proposto": rs["testo_proposto"], "stato": rs["stato"], "errore": rs["errore"], "tipo": rs["tipo_campagna"]} if rs else None,
+            "html": r["e_html"] if r["e_stato"] in aperta else None, "allegati": alleg.get(r["e_id"], []) if r["e_stato"] in aperta else [],
+            "risposta": {"email_id": rs["id"], "oggetto": rs["oggetto"], "testo": rs["testo"], "html": rs["html"], "allegati": alleg.get(rs["id"], []), "oggetto_proposto": rs["oggetto_proposto"], "testo_proposto": rs["testo_proposto"], "stato": rs["stato"], "errore": rs["errore"], "tipo": rs["tipo_campagna"]} if rs else None,
             "richiamo_il": r["richiamo_il"], "richiamo_nota": r["richiamo_nota"], "richiamo_fatto": r["richiamo_fatto"],
             "preventivo": prev.get(r["opportunita_id"])})
     c["numeri"] = _conta(conn, cid)
@@ -527,6 +534,39 @@ def scrivi_stile(d: Stile, _: dict = Depends(solo_titolare)):
     from . import stile
     with connessione() as conn:
         return {"regole": stile.salva_regole(conn, d.regole)}
+
+
+@router.post("/{cid}/allegati")
+async def nuovo_allegato_campagna(cid: int, file: UploadFile = File(...), _: dict = Depends(solo_titolare)):
+    """2.69: un allegato (per esempio una brochure) che parte con ogni prima email della campagna."""
+    from . import posta_ricca
+    dati = await file.read(posta_ricca.MAX_FILE + 1)
+    with connessione() as conn:
+        try:
+            campagna(conn, cid)
+            return posta_ricca.aggiungi_a_campagna(conn, cid, file.filename or "allegato", file.content_type or "", dati)
+        except LookupError as e:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from None
+        except ValueError as e:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from None
+
+
+class AllegatoCampagna(BaseModel):
+    in_solleciti: bool
+
+
+@router.put("/{cid}/allegati/{aid}")
+def modifica_allegato_campagna(cid: int, aid: int, d: AllegatoCampagna, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        conn.execute("UPDATE campagne_allegati SET in_solleciti=%s WHERE id=%s AND campagna_id=%s", (d.in_solleciti, aid, cid))
+        return {"ok": True}
+
+
+@router.delete("/{cid}/allegati/{aid}")
+def togli_allegato_campagna(cid: int, aid: int, _: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        conn.execute("DELETE FROM campagne_allegati WHERE id=%s AND campagna_id=%s", (aid, cid))
+        return {"ok": True}
 
 
 @router.get("/{cid}")

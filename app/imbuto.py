@@ -40,7 +40,7 @@ ISTR_RIPRESA = """BRIEF DELLA CAMPAGNA
 DESTINATARIO: {ente}
 Ci aveva risposto il {quando}: «{sintesi}». Ci aveva chiesto di risentirci adesso.
 
-Scrivi l'email per riprendere il discorso: breve (40-90 parole), personale, che ricorda in mezza frase lo scambio precedente e ripropone la
+Scrivi l'email per riprendere il discorso (80-130 parole, curata e garbata), personale, che ricorda in mezza frase lo scambio precedente e ripropone la
 chiamata di 20 minuti{link}. Comincia con {{saluto}} su una riga da sola, firma Lorenzo Zeppa{firma}.
 Rispondi SOLO con JSON: {{"oggetto": "...", "testo": "..."}}"""
 

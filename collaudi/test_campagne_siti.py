@@ -89,7 +89,7 @@ with TestClient(app) as c:
     ok("preparate 2 email da approvare", r.json() == {"preparate": 2}, r.text)
     em = {x[0]: x for x in sql("SELECT destinatari, oggetto, testo, stato, id FROM email_in_uscita WHERE campagna_id=%s", (cid,))}
     ok("testo personalizzato: «Gentile Mario Rossi,» e l'ente nell'oggetto", em["mario@museo.it"][2].startswith("Gentile Mario Rossi,") and em["mario@museo.it"][1] == "Una mostra digitale per Museo del Mare", em.get("mario@museo.it"))
-    ok("senza nome di persona: «Buongiorno,»; in fondo la riga per non ricevere altro", em["info@diocesano.it"][2].startswith("Buongiorno,") and "RIMUOVI" in em["info@diocesano.it"][2])
+    ok("senza nome di persona: «Buongiorno,»; niente riga RIMUOVI (2.69)", em["info@diocesano.it"][2].startswith("Buongiorno,") and "RIMUOVI" not in em["info@diocesano.it"][2])
     ok("nulla e' partito: tutte da approvare", all(x[3] == "da_approvare" for x in em.values()))
     ok("non affollano la coda generale delle email da approvare", not any(x["destinatari"] in em for x in c.get("/gestione/email-uscita", headers=H).json()))
     ok("notifica: email da leggere e approvare", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Campagna «Musei liguri 2027»: 2 email%%'") == [(1,)])
