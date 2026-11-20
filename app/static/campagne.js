@@ -179,7 +179,8 @@ function _blocchiFlusso(c, salva) {
   // partenza
   const foglio = campo(h("input", { type: "url", value: c.foglio || "", placeholder: "Link del foglio Google" }), "foglio");
   const accDrive = c.account_drive.length > 1 ? campo(_opz(c.account_drive, "— account Google —", a => "letto con " + a.email, c.foglio_account_id), "foglio_account_id", el => el.value ? Number(el.value) : null) : null;
-  const leggiOra = c.foglio ? _btnCp("Leggi il foglio adesso", async () => { try { const r = await api("POST", "/gestione/campagne/" + c.id + "/foglio"); alert(r.righe + " righe lette: " + r.nuove + " contatti nuovi, " + r.destinatari + " destinatari aggiunti" + (r.senza_email ? ", " + r.senza_email + " senza email" : "") + "."); salva({}); } catch (e) { alert(e.message); } }, "s piccolo") : null;
+  const leggiOra = c.foglio ? _btnCp("Leggi il foglio adesso", async () => { try { const r = await api("POST", "/gestione/campagne/" + c.id + "/foglio"); alert(r.righe + " righe lette: " + r.nuove + " contatti nuovi, " + r.destinatari + " destinatari aggiunti" + (r.senza_email ? ", " + r.senza_email + " senza email" : "") + "." +
+          ((r.fogli || []).length > 1 || (r.fogli || []).some(f => f.nota) ? "\n\nFogli del file:\n" + r.fogli.map(f => "• " + f.nome + ": " + (f.righe ? f.righe + " righe" : "nessun contatto") + (f.nota ? " (" + f.nota + ")" : "")).join("\n") : "")); salva({}); } catch (e) { alert(e.message); } }, "s piccolo") : null;
   const statoFoglio = c.foglio ? (c.foglio_errore ? avviso(c.foglio_errore, "no") : h("span", { class: "sotto" }, c.foglio_letto_il ? c.foglio_righe + " righe · letto " + new Date(c.foglio_letto_il).toLocaleString("it-IT") : "non ancora letto")) : null;
   // studio
   const pers = h("input", { type: "checkbox" }); pers.checked = c.personalizza; campo(pers, "personalizza", el => el.checked);

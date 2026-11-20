@@ -50,7 +50,7 @@ def finto_get(url, params=None, headers=None, timeout=None):
     if (params or {}).get("alt") == "media":
         return R(200, content=FILE)
     if url.endswith("/export"):
-        return R(200, content="Hotel,Sito,Email\nSunrise,sunrise.com,b@s.com\n".encode())
+        return R(200, content=xlsx([["Hotel", "Sito", "Email"], ["Sunrise", "sunrise.com", "b@s.com"]]) if (params or {}).get("mimeType") == flusso.XLSX else b"")
     return R(500)
 TIPO = [flusso.XLSX]
 flusso.httpx.get = finto_get
@@ -72,7 +72,7 @@ VISTI.clear()
 c = dict(k.execute("SELECT * FROM campagne_posta WHERE id=%s", (cid,)).fetchone())
 TIPO[0] = "application/vnd.google-apps.spreadsheet"
 testo = flusso.scarica_foglio(k, c)
-ok("la volta dopo parte dall'account giusto; foglio Google: esportato", VISTI[0][0] == "tok-personale" and "Sunrise" in testo and VISTI[-1][1].endswith("/export"), VISTI)
+ok("la volta dopo parte dall'account giusto; foglio Google: esportato in Excel (tutte le schede)", VISTI[0][0] == "tok-personale" and "Sunrise" in testo and VISTI[-1][1].endswith("/export") and VISTI[-1][2].get("mimeType") == flusso.XLSX, VISTI)
 TIPO[0] = "application/pdf"
 try:
     flusso.scarica_foglio(k, c); ok("un PDF non e' un foglio", False)

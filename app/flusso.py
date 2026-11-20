@@ -109,24 +109,30 @@ def _account_drive(conn, c: dict) -> list[dict]:
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-def _da_xlsx(contenuto: bytes) -> str:
-    """Il primo foglio di un file Excel, in CSV."""
+def _fogli_xlsx(contenuto: bytes) -> list[tuple[str, list[list[str]]]]:
+    """Tutti i fogli di un file Excel, ognuno con le sue righe."""
     from .crm import ErroreCrm, _righe_xlsx
     try:
         fogli, righe = _righe_xlsx(contenuto)
+        out = [(nome or f"Foglio {n}", [list(r) for r in righe(percorso)]) for n, (nome, percorso) in enumerate(fogli, 1)]
     except ErroreCrm as e:
         raise ValueError(str(e)) from None
-    if not fogli:
+    except KeyError:
+        raise ValueError("Il file Excel e' danneggiato: salvalo di nuovo come .xlsx") from None
+    if not out:
         raise ValueError("Il file Excel non ha fogli")
+    return out
+
+
+def _da_xlsx(contenuto: bytes) -> str:
+    """Il primo foglio di un file Excel, in CSV (compatibilita')."""
     out = io.StringIO()
-    w = csv.writer(out)
-    for r in righe(fogli[0][1]):
-        w.writerow(r)
+    csv.writer(out).writerows(_fogli_xlsx(contenuto)[0][1])
     return out.getvalue()
 
 
-def scarica_foglio(conn, c: dict) -> str:
-    """Il primo foglio in CSV: un foglio Google (esportato) o un file Excel/CSV caricato su Drive (scaricato e letto).
+def scarica_fogli(conn, c: dict) -> list[tuple[str, list[list[str]]]]:
+    """TUTTI i fogli del file: un foglio Google (esportato in Excel, cosi' arrivano tutte le schede) o un file Excel/CSV su Drive.
     Prova tutti gli account collegati con Drive e ricorda quello che riesce ad aprirlo. Opifex non scrive mai nel file."""
     from . import google
     fid = id_foglio(c["foglio"])
@@ -146,7 +152,8 @@ def scarica_foglio(conn, c: dict) -> str:
                 raise ValueError(f"Google ha risposto {info.status_code}")
             tipo = info.json().get("mimeType", "")
             if tipo == "application/vnd.google-apps.spreadsheet":
-                r = httpx.get(base + "/export", params={"mimeType": "text/csv"}, headers=h, timeout=30)
+                r = httpx.get(base + "/export", params={"mimeType": XLSX}, headers=h, timeout=60)
+                tipo = XLSX
             elif tipo in (XLSX, "text/csv", "text/plain", "application/vnd.ms-excel"):
                 r = httpx.get(base, params={"alt": "media", "supportsAllDrives": "true"}, headers=h, timeout=60)
             else:
@@ -160,32 +167,85 @@ def scarica_foglio(conn, c: dict) -> str:
         if c.get("id") and c.get("foglio_account_id") != a["id"]:
             conn.execute("UPDATE campagne_posta SET foglio_account_id=%s WHERE id=%s", (a["id"], c["id"]))
         if tipo == XLSX:
-            return _da_xlsx(r.content)
+            return _fogli_xlsx(r.content)
         if tipo == "application/vnd.ms-excel":
             raise ValueError("Il file è nel vecchio formato Excel (.xls): aprilo e salvalo come .xlsx, oppure convertilo in foglio Google")
-        return r.content.decode("utf-8-sig", "replace")
+        testo = r.content.decode("utf-8-sig", "replace")
+        sep = ";" if testo[:2000].count(";") > testo[:2000].count(",") else ","
+        return [(info.json().get("name") or "CSV", list(csv.reader(io.StringIO(testo), delimiter=sep)))]
     raise ValueError("Nessuno degli account collegati con Drive (" + ", ".join(a["email"] for a in conti) +
                      ") può aprire questo file: condividilo con uno di loro, oppure collega con Drive l'account che lo possiede")
 
 
-def righe_foglio(testo_csv: str) -> tuple[dict, list[dict]]:
-    """Riconosce le colonne dall'intestazione (nome/hotel/ente, sito, email, localita'/comune, provincia, regione, note)."""
-    righe = list(csv.reader(io.StringIO(testo_csv)))
-    if not righe:
-        return {}, []
-    testa = [x.strip().lower() for x in righe[0]]
+def scarica_foglio(conn, c: dict) -> str:
+    """Il primo foglio in CSV (compatibilita': la campagna ora legge tutti i fogli con scarica_fogli)."""
+    out = io.StringIO()
+    csv.writer(out).writerows(scarica_fogli(conn, c)[0][1])
+    return out.getvalue()
+
+
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}", re.I)
+_SITO_RE = re.compile(r"^(?:https?://)?(?:www\.)?[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:it|com|net|org|eu|info|biz|wine|vin|bio|travel|museum|art|"
+                      r"shop|store|online|site|io|co|me|tv|ch|fr|de|es|at|be|nl|uk|us|sm|va|mt|hr|si|pt|gr|pl|cz|hu|ro|se|dk|no|fi|ie|lu|li|mc)(?:[/?#]\S*)?/?$", re.I)
+
+
+def _punti_testa(riga: list[str]) -> tuple[int, dict]:
+    testa = [str(x or "").strip().lower() for x in riga]
     mappa = {}
     for campo, rx in COLONNE.items():
         for i, t in enumerate(testa):
-            if i not in mappa.values() and re.search(rx, t):
+            if t and len(t) <= 60 and i not in mappa.values() and re.search(rx, t):
                 mappa[campo] = i
                 break
+    return len(mappa) + sum(1 for k in ("ente", "email", "sito") if k in mappa), mappa
+
+
+def analizza_foglio(righe: list[list[str]]) -> tuple[dict, list[dict], int | None]:
+    """Legge un foglio in profondita': trova la riga di intestazione anche se non e' la prima (titoli, righe vuote sopra),
+    riconosce dal contenuto le colonne di email e siti senza intestazione e, riga per riga, cerca email e sito in tutte le celle."""
+    righe = [[str(x or "").strip() for x in r] for r in righe]
+    migliore, mappa, testa = 0, {}, None
+    for i, r in enumerate(righe[:25]):
+        punti, m = _punti_testa(r)
+        if punti > migliore and ("ente" in m or "email" in m or "sito" in m):
+            migliore, mappa, testa = punti, m, i
+    dati = righe[(testa + 1) if testa is not None else 0:]
+    larg = max((len(r) for r in dati), default=0)
+    colonne = [[r[c] for r in dati if c < len(r) and r[c]] for c in range(larg)]
+    usate = set(mappa.values())
+    for campo, prova in (("email", lambda v: bool(_EMAIL_RE.search(v))), ("sito", lambda v: bool(_SITO_RE.match(v)) and "@" not in v)):
+        if campo in mappa:
+            continue
+        for c, valori in enumerate(colonne):
+            if c not in usate and len(valori) >= 1 and sum(map(prova, valori)) >= max(1, len(valori) // 2):
+                mappa[campo] = c; usate.add(c)
+                break
+    if "ente" not in mappa:   # senza intestazione: il nome e' la prima colonna di testo che non e' email, sito o numero
+        for c, valori in enumerate(colonne):
+            if c not in usate and valori and sum(1 for v in valori if re.search(r"[a-zà-ù]{3}", v, re.I) and "@" not in v and not _SITO_RE.match(v)) >= max(1, len(valori) // 2):
+                mappa["ente"] = c; usate.add(c)
+                break
     out = []
-    for r in righe[1:]:
-        v = {k: (r[i].strip() if i < len(r) else "") for k, i in mappa.items()}
+    for r in dati:
+        if testa is not None and r == righe[testa]:
+            continue   # intestazione ripetuta
+        v = {k: (r[i] if i < len(r) else "") for k, i in mappa.items()}
+        e = _EMAIL_RE.search(v.get("email", "")) or next((m for m in (_EMAIL_RE.search(x) for x in r) if m), None)
+        if "email" in v or e:
+            v["email"] = e.group(0) if e else ""
+        if not v.get("sito"):
+            s_ = next((x for x in r if _SITO_RE.match(x) and "@" not in x and not re.fullmatch(r"[\d.,]+", x)), "")
+            if s_:
+                v["sito"] = s_
         if any(v.values()):
             out.append(v)
-    return mappa, out
+    return mappa, out, testa
+
+
+def righe_foglio(testo_csv: str) -> tuple[dict, list[dict]]:
+    """Un CSV (un solo foglio)."""
+    mappa, righe, _ = analizza_foglio(list(csv.reader(io.StringIO(testo_csv))))
+    return mappa, righe
 
 
 def _lista(conn, c: dict) -> int:
@@ -222,13 +282,22 @@ def sincronizza_foglio(conn, c: dict) -> dict:
     """Righe nuove -> contatti nuovi (o gia' esistenti) e destinatari. Righe corrette -> contatto aggiornato, senza ricominciare."""
     c = dict(c)
     try:
-        mappa, righe = righe_foglio(scarica_foglio(conn, c))
+        fogli = scarica_fogli(conn, c)
     except ValueError as e:
         conn.execute("UPDATE campagne_posta SET foglio_errore=%s, foglio_letto_il=NOW() WHERE id=%s", (str(e)[:300], c["id"])); conn.commit()
         return {"errore": str(e)}
-    if "ente" not in mappa and "sito" not in mappa and "email" not in mappa:
-        msg = "Nel foglio non trovo le colonne: servono almeno nome, sito o email nella prima riga"
-        conn.execute("UPDATE campagne_posta SET foglio_errore=%s, foglio_letto_il=NOW() WHERE id=%s", (msg, c["id"])); conn.commit()
+    righe, resoconto, mappa = [], [], {}
+    for nome, grezze in fogli:   # tutti i fogli del file, ognuno con la sua intestazione
+        m, r, testa = analizza_foglio(grezze)
+        if not r or not ({"ente", "sito", "email"} & set(m)) or (testa is None and not ({"sito", "email"} & set(m))):   # senza intestazione servono email o siti
+            resoconto.append({"nome": nome, "righe": 0, "colonne": [], "nota": "vuoto" if not any(any(x for x in g) for g in grezze) else "non ci sono contatti riconoscibili"})
+            continue
+        righe += r
+        mappa.update(m)
+        resoconto.append({"nome": nome, "righe": len(r), "colonne": sorted(m), "nota": f"intestazione alla riga {testa + 1}" if testa else ""})
+    if not righe:
+        msg = "In nessun foglio del file trovo contatti: servono almeno un nome, un sito o un'email (" + ", ".join(f["nome"] for f in resoconto) + ")"
+        conn.execute("UPDATE campagne_posta SET foglio_errore=%s, foglio_letto_il=NOW() WHERE id=%s", (msg[:300], c["id"])); conn.commit()
         return {"errore": msg}
     lista = _lista(conn, c)
     nuove = aggiornate = destinatari = senza_email = 0
@@ -274,7 +343,7 @@ def sincronizza_foglio(conn, c: dict) -> dict:
     conn.execute("UPDATE campagne_posta SET foglio_errore='', foglio_letto_il=NOW(), foglio_righe=%s WHERE id=%s", (len(righe), c["id"]))
     conn.commit()
     return {"righe": len(righe), "nuove": nuove, "aggiornate": aggiornate, "destinatari": destinatari, "senza_email": senza_email,
-            "colonne": sorted(mappa)}
+            "colonne": sorted(mappa), "fogli": resoconto}
 
 
 # ---------- spesa ----------

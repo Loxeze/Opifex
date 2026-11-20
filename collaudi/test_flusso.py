@@ -62,7 +62,7 @@ FOGLIO = ["Hotel,Sito,Email,Località,Provincia,Note\n"
           "Senza Sito Hotel,,info@senzasito.com,Sharm el Sheikh,,\n"
           "Senza Email Hotel,www.senzaemail.com,,Sharm,,\n"
           "Sunrise,https://www.sunrise.com,booking@sunrise.com,Hurghada,,\n"]
-flusso.scarica_foglio = lambda conn, c: FOGLIO[0]
+flusso.scarica_fogli = lambda conn, c: [("Foglio1", list(__import__('csv').reader(__import__('io').StringIO(FOGLIO[0]))))]
 SPEDITE = []
 invio_posta._spedisci = lambda conn, riga: SPEDITE.append((riga["destinatari"], riga["oggetto"], riga.get("tipo_campagna")))
 
