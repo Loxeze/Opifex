@@ -606,8 +606,14 @@ def riprova(conn, rid: int):
 
 
 # ---------- lato agente ----------
+def _tre() -> bool:
+    from . import edizione
+    return edizione.tre()
+
+
 def livello_agente(conn, agente_id: int) -> int:
-    r = conn.execute("SELECT round(avg(livello))::int AS m FROM agenti_competenze WHERE agente_id = %s", (agente_id,)).fetchone()
+    tab = "agenti_competenze3" if _tre() else "agenti_competenze"   # 3.0: le competenze di Padre Casati
+    r = conn.execute(f"SELECT round(avg(livello))::int AS m FROM {tab} WHERE agente_id = %s", (agente_id,)).fetchone()
     return r["m"] or 0
 
 
@@ -619,6 +625,9 @@ def testo_competenza(conn, competenza_id: int, livello: int) -> str:
 
 
 def competenze_agente(conn, agente_id: int) -> list[dict]:
+    if _tre():   # 3.0: le competenze di Padre Casati (agenti_competenze3), con la carta d'identita' come descrizione
+        return conn.execute("""SELECT c.id, c.nome, COALESCE(NULLIF(c.carta, ''), c.descrizione, '') AS descrizione, x.livello FROM agenti_competenze3 x
+                               JOIN competenze c ON c.id = x.competenza_id WHERE x.agente_id = %s ORDER BY x.livello DESC, c.nome""", (agente_id,)).fetchall()
     return conn.execute("""SELECT c.id, c.nome, c.descrizione, x.livello FROM agenti_competenze x JOIN competenze c ON c.id = x.competenza_id
                            WHERE x.agente_id = %s ORDER BY x.livello DESC, c.nome""", (agente_id,)).fetchall()
 

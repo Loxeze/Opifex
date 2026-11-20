@@ -16,10 +16,18 @@ def riepilogo(_: dict = Depends(solo_titolare)):
         agenti = {r["id"]: {"budget": r["budget_token_mensile"]} for r in conn.execute("SELECT id, budget_token_mensile FROM agenti").fetchall()}
         for a in agenti.values():
             a.update({"competenze": [], "formazioni": {"concluse": 0, "in_corso": 0, "in_coda": 0, "ultima": None}, "token_giorni": [0] * oggi, "token_mese": 0})
-        for r in conn.execute("""SELECT x.agente_id, c.nome, x.livello FROM agenti_competenze x JOIN competenze c ON c.id = x.competenza_id
-                                 ORDER BY x.livello DESC, lower(c.nome)""").fetchall():
+        from . import edizione
+        tre = edizione.tre()
+        for r in conn.execute(f"""SELECT x.agente_id, c.nome, x.livello FROM {'agenti_competenze3' if tre else 'agenti_competenze'} x JOIN competenze c ON c.id = x.competenza_id
+                                  ORDER BY x.livello DESC, lower(c.nome)""").fetchall():
             if r["agente_id"] in agenti:
                 agenti[r["agente_id"]]["competenze"].append({"nome": r["nome"], "livello": r["livello"]})
+        if tre:   # 3.0: la formazione e' lo studio di Padre Casati sulle competenze dell'agente (fonti studiate e da studiare)
+            for r in conn.execute("""SELECT x.agente_id, count(f.id) FILTER (WHERE f.stato = 'integrata') AS studiate, count(f.id) FILTER (WHERE f.stato = 'da_studiare') AS da_studiare,
+                                            max(f.studiata_il) AS ultima
+                                     FROM agenti_competenze3 x JOIN competenze_fonti f ON f.competenza_id = x.competenza_id GROUP BY x.agente_id""").fetchall():
+                if r["agente_id"] in agenti:
+                    agenti[r["agente_id"]]["studio"] = {"studiate": r["studiate"], "da_studiare": r["da_studiare"], "ultima": r["ultima"].isoformat() if r["ultima"] else None}
         for r in conn.execute("""SELECT agente_id,
                                         count(*) FILTER (WHERE stato = 'conclusa') AS concluse,
                                         count(*) FILTER (WHERE stato IN ('in_corso', 'da_approvare')) AS in_corso,
@@ -46,4 +54,4 @@ def riepilogo(_: dict = Depends(solo_titolare)):
         for a in agenti.values():
             a["n_competenze"] = len(a["competenze"])
             a["livello_medio"] = round(sum(c["livello"] for c in a["competenze"]) / len(a["competenze"]), 1) if a["competenze"] else 0
-        return {"giorno": oggi, "giorni_mese": giorni, "agenti": agenti}
+        return {"giorno": oggi, "giorni_mese": giorni, "agenti": agenti, "edizione3": tre}

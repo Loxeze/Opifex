@@ -39,13 +39,16 @@ function extraAgente(r) {
   const f = r.formazioni || {};
   const comp = r.competenze || [];
   const mostrate = comp.slice(0, 3);
-  const formaz = [f.concluse ? f.concluse + (f.concluse === 1 ? " formazione conclusa" : " formazioni concluse") : "Nessuna formazione conclusa", f.in_corso ? f.in_corso + " in corso" : null, f.in_coda ? f.in_coda + " in coda" : null,
+  const st = r.studio;   // 3.0: lo studio di Padre Casati
+  const formaz = r.__tre ? [st && st.studiate ? st.studiate + (st.studiate === 1 ? " fonte studiata" : " fonti studiate") + " da Padre Casati" : "Padre Casati non ha ancora studiato fonti per le sue competenze",
+    st && st.da_studiare ? st.da_studiare + " da studiare" : null, st && st.ultima ? "ultima il " + new Date(st.ultima).toLocaleDateString("it-IT", { day: "numeric", month: "short" }) : null].filter(Boolean).join(" · ")
+    : [f.concluse ? f.concluse + (f.concluse === 1 ? " formazione conclusa" : " formazioni concluse") : "Nessuna formazione conclusa", f.in_corso ? f.in_corso + " in corso" : null, f.in_coda ? f.in_coda + " in coda" : null,
     f.ultima ? "ultima il " + new Date(f.ultima).toLocaleDateString("it-IT", { day: "numeric", month: "short" }) : null].filter(Boolean).join(" · ");
   const perc = r.budget ? Math.round(100 * r.token_mese / r.budget) : null;
   return h("div", { class: "agente-extra" },
     h("div", { class: "extra-titolo" }, "Competenze", comp.length ? h("span", { class: "extra-dx" }, "livello medio " + String(r.livello_medio).replace(".", ",") + " · " + comp.length) : null),
-    comp.length ? h("div", { class: "skills" }, mostrate.map(c => h("div", { class: "skill" }, h("span", { class: "skill-nome", title: c.nome }, c.nome), pallini(c.livello))),
-      comp.length > 3 ? h("div", { class: "sotto" }, "e altre " + (comp.length - 3)) : null) : h("div", { class: "sotto" }, "Nessuna competenza assegnata."),
+    comp.length ? h("div", { class: "skills" }, mostrate.map(c => h("div", { class: "skill" }, h("span", { class: "skill-nome", title: c.nome }, c.nome), pallini(Math.min(5, c.livello)), c.livello > 5 ? h("span", { class: "sotto" }, " " + c.livello) : null)),
+      comp.length > 3 ? h("div", { class: "sotto" }, "e altre " + (comp.length - 3)) : null) : h("div", { class: "sotto" }, r.__tre ? "Nessuna competenza ancora: le assegna Padre Casati quando ne studia una che gli serve." : "Nessuna competenza assegnata."),
     h("div", { class: "sotto" }, formaz),
     h("div", { class: "sotto" }, [(r.esempi || 0) + " esempi di lavoro eccellente", (r.revisioni_30g || 0) + " revisioni in 30 giorni",
       r.copertura && r.copertura.sottoposti ? "lavoro assegnato a " + r.copertura.con_lavoro + " di " + r.copertura.sottoposti + " sottoposti (7 giorni)" : null].filter(Boolean).join(" · ")),
@@ -58,7 +61,7 @@ async function riempiExtraAgenti(radice) {
     const d = await api("GET", "/gestione/agenti-riepilogo");
     radice.querySelectorAll(".agente-extra-posto").forEach(el => {
       const r = d.agenti[el.dataset.id];
-      if (r) { r.__giorniMese = d.giorni_mese; const x = extraAgente(r); if (x) el.replaceWith(x); } else el.remove();
+      if (r) { r.__giorniMese = d.giorni_mese; r.__tre = !!d.edizione3; const x = extraAgente(r); if (x) el.replaceWith(x); } else el.remove();
     });
   } catch (e) { radice.querySelectorAll(".agente-extra-posto").forEach(el => el.remove()); }
 }

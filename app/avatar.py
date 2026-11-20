@@ -122,7 +122,7 @@ def cornice(livello: int) -> str:
 
 def medaglie(conn, agente_id: int) -> list[dict]:
     """Una medaglia per ogni competenza posseduta, del livello raggiunto."""
-    return [{"competenza": c["nome"], "livello": c["livello"], "medaglia": MEDAGLIE[c["livello"]]} for c in ginnasio.competenze_agente(conn, agente_id)]
+    return [{"competenza": c["nome"], "livello": c["livello"], "medaglia": MEDAGLIE.get(min(5, c["livello"]), "📖")} for c in ginnasio.competenze_agente(conn, agente_id)]
 
 
 def scheda_giocatore(conn, agente_id: int) -> dict:
