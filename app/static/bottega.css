@@ -461,3 +461,53 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .cp-tolto{background:rgba(200,60,60,.16);text-decoration:line-through;text-decoration-color:rgba(200,60,60,.7)}
 .cp-agg{background:rgba(40,150,80,.18)}
 .cp-quadra{background:rgba(220,150,0,.28);color:inherit;border-radius:3px;padding:0 2px;font-weight:600}
+
+/* 2.68: il legale */
+.lg-stato{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:4px 0 12px}
+.lg-pallino{width:9px;height:9px;border-radius:50%;background:var(--bordo);flex:none}
+.lg-pallino.attivo{background:var(--ok);box-shadow:0 0 0 4px var(--ok-b)}
+.lg-link{font-weight:600;color:var(--primario)}
+.lg-tessera{text-align:left;font:inherit;color:inherit;cursor:pointer}
+.lg-schede{margin:4px 0 14px}
+.lg-n{display:inline-block;margin-left:6px;background:var(--no);color:#fff;border-radius:999px;font-size:11px;font-weight:700;padding:0 6px;line-height:17px}
+.lg-griglia{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:12px;align-items:start}
+@media (max-width:860px){.lg-griglia{grid-template-columns:minmax(0,1fr)}}
+.lg .chip{font:inherit;font-size:13px;padding:4px 12px;border-radius:999px;cursor:pointer}
+.lg-titolo{font-family:var(--serif);font-size:24px;line-height:1.2;color:var(--testo)}
+.lg-carica select{width:auto;max-width:100%}
+.lg-registro{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.lg-registro li{line-height:1.4}
+.lg-pareri{display:flex;flex-direction:column;gap:10px}
+.lg-parere{background:#fff;border:1px solid var(--bordo);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.lg-parere.nuovo{border-left:4px solid var(--primario)}
+.lg-parere-testa{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.lg-domanda{color:var(--tenue);font-style:italic}
+.lg-consiglio{line-height:1.5}
+.lg-fonti{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+.lg-fonte{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:baseline;min-width:0;overflow-wrap:anywhere}
+.lg-spunta{flex:none;width:18px;height:18px;border-radius:50%;display:inline-grid;place-items:center;font-size:11px;font-weight:700;background:var(--avv-b);color:var(--avv)}
+.lg-fonte.ok .lg-spunta{background:var(--ok-b);color:var(--ok)}
+.lg-fonte-blocco{padding:8px 0;border-bottom:1px solid var(--bordo);display:flex;flex-direction:column;gap:3px}
+.lg-fonte-blocco:last-child{border-bottom:0}
+.lg-elenco{display:flex;flex-direction:column;gap:8px}
+.lg-riga{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;background:#fff;border:1px solid var(--bordo);border-radius:14px;padding:12px 14px;font:inherit;color:inherit;cursor:pointer;width:100%}
+.lg-riga:hover{border-color:var(--primario)}
+.lg-riga-titolo{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lg-fasc-testa{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:6px 0 10px}
+.lg-fasc-testa h3{margin:0}
+.lg-suggeriti{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.lg-suggeriti .chip{cursor:pointer;font:inherit;font-size:13px;padding:4px 10px;border-radius:999px}
+.lg-incarico summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.lg-relazione{white-space:pre-wrap;line-height:1.55;margin-top:10px;overflow-wrap:anywhere}
+.lg-doc{border-bottom:1px solid var(--bordo);padding:8px 0}
+.lg-doc summary{cursor:pointer;overflow-wrap:anywhere}
+.lg-scheda{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.lg-scheda ul{margin:2px 0 0;padding-left:18px}
+.lg-gruppo{margin-bottom:10px}
+.lg-scadenze{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.lg-scadenze li.vicina b{color:var(--no)}
+.lg-domanda-aperta{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--bordo)}
+.lg-domanda-aperta:last-child{border-bottom:0}
+.lg-domanda-fatta{padding:6px 0;border-bottom:1px solid var(--bordo)}
+.lg-formazione{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.lg-comp-testa{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:4px}

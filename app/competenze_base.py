@@ -2,7 +2,7 @@
 Le regole comuni a tutti (non inventare, autonomia, concisione, precedenza di Aurora) sono in richieste.REGOLA e qui non si ripetono.
 Si applicano una sola volta per versione; il testo precedente di ogni agente resta in agenti_istruzioni_storico e si puo' ripristinare."""
 
-VERSIONE = "2.67.4"
+VERSIONE = "2.68.0"
 
 # nome agente -> istruzioni. Dove l'agente non esiste (o non c'e' in questa installazione) la voce e' ignorata.
 COMPETENZE: dict[str, str] = {}
@@ -461,9 +461,9 @@ def applica(conn) -> int:
     for nome, testo in COMPETENZE.items():
         if prec != (0, 0, 0) and _v(DAL.get(nome, "1.49.0")) <= prec:
             continue  # testo invariato dall'ultima applicazione: le modifiche a mano restano
-        r = conn.execute("SELECT id, livello, istruzioni FROM agenti WHERE nome = %s", (nome,)).fetchone()
+        r = conn.execute("SELECT id, livello, istruzioni FROM agenti WHERE nome = %s AND COALESCE(ruolo_speciale, '') NOT IN ('legale', 'ricercatore_legale')", (nome,)).fetchone()
         if r is None:
-            continue
+            continue   # (2.68) il nuovo legale ha istruzioni sue: le vecchie del Legal Master non lo riscrivono
         testo = con_blocchi(nome, r["livello"], testo)
         if r["istruzioni"] == testo:
             continue

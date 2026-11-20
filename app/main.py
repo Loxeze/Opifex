@@ -34,6 +34,7 @@ from .guardiano import router as router_guardiano
 from .analytics import router as router_analytics
 from .campagne import router as router_campagne
 from .preventivi import router as router_preventivi
+from .rotte_legale import router as router_legale
 from .sfondo_arte import router as router_arte
 from .stili_montaggio import router as router_contenuti
 from .monitor_social import router as router_monsoc
@@ -274,6 +275,26 @@ async def _scuola():
         await asyncio.sleep(5 if esito else 30)
 
 
+async def _legale():
+    """3.0: il legale lavora un passo alla volta (Drive, scadenze, pareri, fascicoli, vigilanza), senza fermare nessuno."""
+    import asyncio
+    from . import edizione, legale
+    if not edizione.tre():
+        return
+    await asyncio.sleep(120)
+    while True:
+        esito = None
+        try:
+            def passo():
+                with connessione() as c:
+                    return legale.giro(c)
+            esito = await asyncio.to_thread(passo)
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger("opifex").exception("legale")
+        await asyncio.sleep(10 if esito else 60)
+
+
 async def _trigger_orari():
     """Ogni minuto controlla i trigger a orario accesi e li avvia; poi invia le notifiche push."""
     import asyncio
@@ -329,6 +350,12 @@ async def ciclo_vita(app: FastAPI):
                     _sc3.ripara_note(conn)
                     __import__("app.redattore", fromlist=["x"]).assicura_agente(conn)
                     __import__("app.marchi", fromlist=["x"]).semina(conn)
+                    try:
+                        with conn.transaction():
+                            __import__("app.legale", fromlist=["x"]).assicura(conn)
+                    except Exception:  # noqa: BLE001 - il legale non deve impedire l'avvio
+                        import logging
+                        logging.getLogger("opifex").exception("legale: creazione degli agenti")
                 from . import prezzi as _pz3
                 _pz3.applica_listino(conn)
         except Exception:
@@ -356,7 +383,7 @@ async def ciclo_vita(app: FastAPI):
             _cc.riavvio(conn)
     except Exception:
         pass
-    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari()), asyncio.create_task(_filtro_posta()), asyncio.create_task(_scuola()), asyncio.create_task(_campagne())]
+    compiti = [asyncio.create_task(_controllo_aggiornamenti()), asyncio.create_task(_canale_telegram()), asyncio.create_task(_manutenzione()), asyncio.create_task(_trigger_orari()), asyncio.create_task(_filtro_posta()), asyncio.create_task(_scuola()), asyncio.create_task(_campagne()), asyncio.create_task(_legale())]
     yield
     for c in compiti:
         c.cancel()
@@ -422,6 +449,7 @@ app.include_router(router_guardiano)
 app.include_router(router_analytics)
 app.include_router(router_campagne)
 app.include_router(router_preventivi)
+app.include_router(router_legale)
 app.include_router(router_arte)
 app.include_router(router_contenuti)
 app.include_router(router_monsoc)

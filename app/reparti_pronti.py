@@ -92,7 +92,10 @@ def stato(conn) -> list[dict]:
     out = []
     for chiave, d in REPARTI.items():
         n_att = conn.execute("""SELECT count(*) AS n FROM agenti a JOIN divisioni dv ON dv.id = a.divisione_id WHERE dv.nome = %s""", (d["divisione"][0],)).fetchone()["n"]
-        out.append({"chiave": chiave, "nome": d["divisione"][0], "descrizione": d["divisione"][1], "attivo": n_att >= len(d["operativi"]) + 1, "agenti": n_att})
+        att = n_att >= len(d["operativi"]) + 1
+        if chiave == "legale" and __import__("app.edizione", fromlist=["x"]).tre():   # 3.0: il legale nuovo ha due agenti
+            att = bool(conn.execute("SELECT 1 FROM agenti WHERE ruolo_speciale='legale'").fetchone())
+        out.append({"chiave": chiave, "nome": d["divisione"][0], "descrizione": d["divisione"][1], "attivo": att, "agenti": n_att})
     return out
 
 
@@ -109,6 +112,11 @@ def attiva(conn, chiave: str, utente: dict | None = None) -> dict:
     d = REPARTI.get(chiave)
     if d is None:
         raise KeyError(chiave)
+    if chiave == "legale" and __import__("app.edizione", fromlist=["x"]).tre():   # 3.0: il legale nuovo (consiglia e non blocca)
+        from . import legale
+        r = legale.assicura(conn)
+        m = legale.master(conn)
+        return {"divisione_id": m["divisione_id"] if m else None, "creati": r["creati"], "spenti": []}
     nome_div, descr = d["divisione"]
     r = conn.execute("SELECT id FROM divisioni WHERE nome = %s", (nome_div,)).fetchone()
     div_id = r["id"] if r else conn.execute("INSERT INTO divisioni (nome, descrizione) VALUES (%s,%s) RETURNING id", (nome_div, descr)).fetchone()["id"]

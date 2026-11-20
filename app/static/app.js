@@ -151,7 +151,7 @@ function mostraAccesso(errore) {
 // ---------- Struttura ----------
 // Tutte le pagine raggiungibili dal titolare (servono a ricordare l'ultima pagina aperta)
 const VISTE = [["dashboard", "Plancia"], ["briefing", "Briefing"], ["task", "Task"], ["riunioni", "Riunioni"], ["chat", "Chat"], ["posta", "Posta"], ["email", "Email marketing"], ["progetti", "Progetti"], ["documenti", "Documenti"], ["crm", "Contatti"], ["social", "Social"],
-  ["finestre", "Finestre"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["scuola", "Padre Casati"], ["traffico", "Traffico dei siti"], ["campagne", "Campagne email"], ["computer", "Computer locali"], ["avvio", "Avvio guidato"], ["sez", "Sezione"], ["impostazioni", "Impostazioni"]];
+  ["finestre", "Finestre"], ["agenti", "Agenti"], ["ginnasio", "Ginnasio"], ["scuola", "Padre Casati"], ["traffico", "Traffico dei siti"], ["campagne", "Campagne email"], ["legale", "Legale"], ["computer", "Computer locali"], ["avvio", "Avvio guidato"], ["sez", "Sezione"], ["impostazioni", "Impostazioni"]];
 // Il menu del titolare (2.52): poche voci, ognuna con le sue schede in alto. Ogni scheda: [etichetta, vista, sezione?].
 // Le sezioni con vista "sez" sono le stesse di prima, solo spostate fuori dalle Impostazioni.
 const MENU = [
@@ -188,7 +188,7 @@ function schedeGruppo() {
   }));
   return barra;
 }
-const ICONE = { oggi: "M12 3v2M12 19v2M5 12H3M21 12h-2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M6.3 17.7l1.4-1.4M16.3 7.7l1.4-1.4M12 8a4 4 0 110 8 4 4 0 010-8z", posta: "M3 6h18v12H3zM3 7l9 6 9-6", lavoro: "M3 7h6l2 2h10v10H3z", contatti: "M9 4.5a3.5 3.5 0 110 7 3.5 3.5 0 010-7zM3 20c0-3.5 3-6 6-6s6 2.5 6 6M16 5a3.5 3.5 0 010 7", comunicazione: "M4 20V10M10 20V4M16 20v-7M22 20H2", conoscenza: "M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2zM4 21V5M8 7h7", officina: "M14 6l4 4-9 9H5v-4zM12 8l4 4", squadra: "M8 5a3 3 0 110 6 3 3 0 010-6zM16 6a2.5 2.5 0 110 5 2.5 2.5 0 010-5zM2 20c0-3.3 2.7-6 6-6s6 2.7 6 6M14 14.5c.6-.3 1.3-.5 2-.5 3 0 6 2 6 5", controllo: "M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z", finestre: "M3 5h18v14H3zM3 9h18M7 7h.01", dashboard: "M4 11l8-7 8 7v9H4z", chat: "M4 5h16v11H9l-5 4z", task: "M5 12l4 4 10-10", riunioni: "M12 3a3 3 0 013 3v5a3 3 0 01-6 0V6a3 3 0 013-3zM5 11a7 7 0 0014 0M12 18v3",
+const ICONE = { legale: "M12 3v18M7 21h10M5 7h14M5 7l-3 7a3 3 0 006 0zM19 7l-3 7a3 3 0 006 0z", oggi: "M12 3v2M12 19v2M5 12H3M21 12h-2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M6.3 17.7l1.4-1.4M16.3 7.7l1.4-1.4M12 8a4 4 0 110 8 4 4 0 010-8z", posta: "M3 6h18v12H3zM3 7l9 6 9-6", lavoro: "M3 7h6l2 2h10v10H3z", contatti: "M9 4.5a3.5 3.5 0 110 7 3.5 3.5 0 010-7zM3 20c0-3.5 3-6 6-6s6 2.5 6 6M16 5a3.5 3.5 0 010 7", comunicazione: "M4 20V10M10 20V4M16 20v-7M22 20H2", conoscenza: "M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2zM4 21V5M8 7h7", officina: "M14 6l4 4-9 9H5v-4zM12 8l4 4", squadra: "M8 5a3 3 0 110 6 3 3 0 010-6zM16 6a2.5 2.5 0 110 5 2.5 2.5 0 010-5zM2 20c0-3.3 2.7-6 6-6s6 2.7 6 6M14 14.5c.6-.3 1.3-.5 2-.5 3 0 6 2 6 5", controllo: "M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z", finestre: "M3 5h18v14H3zM3 9h18M7 7h.01", dashboard: "M4 11l8-7 8 7v9H4z", chat: "M4 5h16v11H9l-5 4z", task: "M5 12l4 4 10-10", riunioni: "M12 3a3 3 0 013 3v5a3 3 0 01-6 0V6a3 3 0 013-3zM5 11a7 7 0 0014 0M12 18v3",
   progetti: "M3 7h6l2 2h10v10H3z", documenti: "M7 3h8l4 4v14H7z", crm: "M9 4.5a3.5 3.5 0 110 7 3.5 3.5 0 010-7zM3 20c0-3.5 3-6 6-6s6 2.5 6 6M16 5a3.5 3.5 0 010 7", social: "M4 20V10M10 20V4M16 20v-7M22 20H2",
   briefing: "M5 4h14v16H5zM9 8h6M9 12h6M9 16h3", agenti: "M12 4a4 4 0 110 8 4 4 0 010-8zM4 21c0-4.4 3.6-7 8-7s8 2.6 8 7", ginnasio: "M3 9l9-5 9 5-9 5zM7 11.5V16c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.5",
   impostazioni: "M12 9a3 3 0 110 6 3 3 0 010-6zM12 3v3M12 18v3M3 12h3M18 12h3", iniziative: "M5 12l4 4 10-10", percorsi: "M3 7h6l2 2h10v10H3z", account: "M12 4a4 4 0 110 8 4 4 0 010-8zM4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" };
@@ -238,7 +238,7 @@ function cornice(contenuto) {
   radice.replaceChildren(
     h("header", {}, h("h1", {}, stato.edizione === 3 ? "Opifex 3" : "Opifex", h("small", {}, "la bottega degli agenti")),
       h("nav", { "aria-label": "Menu principale" }, nav),
-      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.14.4" : "2.67.4"))),
+      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.15.0" : "2.68.0"))),
     h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "organigramma" ? "largo" : "" }, stato.ruolo === "titolare" ? schedeGruppo() : null, contenuto));
 }
 
@@ -248,6 +248,7 @@ async function avvia() {
     stato.ruolo = io.ruolo_globale; stato.nome = io.nome || "";
     try { stato.edizione = (await api("GET", "/avvio")).edizione; } catch (e) { stato.edizione = 2; }
     if (stato.edizione === 3 && !MENU[0][2].some(t => t[1] === "avvio")) MENU[0][2].push(["Avvio guidato", "avvio"]);
+    if (stato.edizione === 3 && !MENU.some(g => g[0] === "legale")) MENU.splice(MENU.findIndex(g => g[0] === "conoscenza"), 0, ["legale", "Legale", [["Legale", "legale"]]]);   // 2.68: il legale
     if (stato.edizione === 3) {   // 3.0: al posto del Ginnasio, la scuola di Padre Casati
       const sq = MENU.find(m => m[0] === "squadra");
       if (sq) { const i = sq[2].findIndex(t => t[1] === "ginnasio"); if (i >= 0) sq[2][i] = ["Padre Casati", "scuola"]; }
@@ -290,7 +291,7 @@ function disegna() {
   if (stato.attesa) { clearTimeout(stato.attesa); stato.attesa = null; }
   if (stato.timer2) { clearInterval(stato.timer2); stato.timer2 = null; }
   if (typeof registraUso === "function") { const e = etichettaVista(); if (e !== stato.ultimaEtichetta) { chiudiVistaUso(stato.ultimaEtichetta); stato.ultimaEtichetta = e; registraUso(e, "vista"); } ricordaVista(); }
-  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, scuola: vistaScuola, traffico: vistaTraffico, campagne: vistaCampagne, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, avvio: vistaAvvio, posta: vistaPosta, computer: vistaComputer, sez: vistaSezione, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
+  const vista = { dashboard: vistaDashboard, task: vistaTask, impostazioni: vistaImpostazioni, account: vistaAccount, progetti: (stato.ruolo === "titolare" ? vistaProgetti : vistaProgettiMiei), progetto: vistaProgetto, contatto: vistaContatto, agenti: vistaAgenti, ginnasio: vistaGinnasio, scuola: vistaScuola, traffico: vistaTraffico, campagne: vistaCampagne, legale: vistaLegale, documenti: vistaDocumenti, richieste: vistaRichieste, dialoghi: vistaChat, chat: vistaChat, percorsi: vistaPercorsi, social: vistaSocial, finestre: vistaFinestre, email: vistaEmail, avvio: vistaAvvio, posta: vistaPosta, computer: vistaComputer, sez: vistaSezione, riunioni: vistaRiunioni, crm: vistaCrm, iniziative: vistaIniziative, briefing: vistaBriefing, organigramma: vistaOrganigrammaPagina }[stato.vista] || vistaDashboard;
   let contenuto;
   try { contenuto = vista(); }
   catch (e) {   // una schermata che si rompe non deve bloccare il menu: si mostra l'errore e si puo' andare altrove

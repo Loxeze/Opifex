@@ -323,6 +323,13 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             gi_ctx = ginnasio.contesto(conn, a_f, messaggio) if memoria._ok(a_f, "interno") else ""
         if gi_ctx:
             prefisso.append(gi_ctx); nomi_pref.append("competenze"); dim["competenze"] = len(gi_ctx)
+        if edizione.tre():   # 2.68: le condizioni dei contratti con chi compare nel messaggio (registro del legale)
+            try:
+                lg_ctx = __import__("app.legale", fromlist=["x"]).contesto(conn, messaggio) if memoria._ok(a_f, "interno") else ""
+            except Exception:  # noqa: BLE001
+                conn.rollback(); lg_ctx = ""
+            if lg_ctx:
+                prefisso.append(lg_ctx); nomi_pref.append("contratti"); dim["contratti"] = len(lg_ctx)
         kp_ctx = squadre.contesto_kpi(conn, a_f) if (memoria._ok(a_f, "interno") and not VELOCE.get()) else ""
         if kp_ctx:
             prefisso.append(kp_ctx); nomi_pref.append("kpi"); dim["kpi"] = len(kp_ctx)
@@ -432,6 +439,9 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             if edizione.tre():
                 form_tool = False   # nella 3.0 il vecchio Ginnasio lascia il posto a Padre Casati
             traffico_tool = bool(ok_int and a["fornitore"] != "locale" and conn.execute("SELECT 1 FROM siti_analytics WHERE attivo LIMIT 1").fetchone())
+            legale_tool = bool(edizione.tre() and ok_int and a["fornitore"] != "locale" and a["ruolo_speciale"] not in ("legale", "ricercatore_legale")
+                               and conn.execute("SELECT 1 FROM agenti WHERE ruolo_speciale='legale' AND attivo").fetchone())
+            legale_master = bool(edizione.tre() and ok_int and a["ruolo_speciale"] == "legale")
             prog_crea = bool(scheda_progetto.strumenti_abilitati() and ok_int and a["livello"] in ("manager", "referente") and not _sent)
             sq_pm = bool(form_tool and pm_tool)
             sq_val = bool(form_tool and not _sent)
@@ -445,7 +455,8 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 form_tool = prog_crea = sq_pm = sq_val = False
                 scuola_tool = False
                 traffico_tool = False
-            if ((a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get()) or creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val or scuola_tool or traffico_tool):
+                legale_tool = False
+            if ((a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get()) or creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val or scuola_tool or traffico_tool or legale_tool or legale_master):
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 uscita_extra, uscita_gestori, uscita_avviso = [], {}, []
                 extra, gestori = [], {}
@@ -638,6 +649,17 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                         extra.extend(scuola.STRUMENTI_CASATI)
                         for s_ in scuola.STRUMENTI_CASATI:
                             gestori[s_["name"]] = gsc
+                if legale_tool or legale_master:
+                    from . import legale as _lg
+                    glg = _lg.gestore(connessione, agente_id, a["fornitore"] == "locale")
+                    if legale_tool:
+                        extra.append(_lg.STRUMENTO_PARERE)
+                        avviso_extra += _lg.AVVISO_PARERE
+                        gestori[_lg.STRUMENTO_PARERE["name"]] = glg
+                    if legale_master:
+                        extra.extend(_lg.STRUMENTI_MASTER)
+                        for s_ in _lg.STRUMENTI_MASTER:
+                            gestori[s_["name"]] = glg
                 if traffico_tool:
                     from . import analytics as _an
                     extra.append(_an.STRUMENTO)
