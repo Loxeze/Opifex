@@ -9,6 +9,7 @@
 6. Ogni invio entra nella storia del contatto nel CRM; le risposte che arrivano in posta segnano il destinatario «ha risposto»;
    chi chiede di non ricevere piu' email esce da tutte le campagne future.
 """
+import json
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -449,6 +450,8 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
     c["mittente_email"] = next((m["email"] for m in mittenti(conn) if m["id"] == c["mittente"]), "")
     c["autonomia"] = flusso.autonomia(conn, cid)
     c["da_riscrivere"] = da_riscrivere(conn, cid)
+    c["blocco"] = flusso.blocco(conn, c) if not c["invio_automatico"] else None
+    c["fogli_extra"] = conn.execute("SELECT id, url, righe, errore, letto_il FROM campagne_fogli WHERE campagna_id=%s ORDER BY id", (cid,)).fetchall()
     c["correzioni"] = [dict(x, ente=_d(x["ente_cifrato"])) for x in conn.execute(
         """SELECT x.id, x.contatto_id, x.campo, x.valore, x.motivo, k.ente_cifrato, k.comune FROM crm_correzioni x JOIN crm_contatti k ON k.id=x.contatto_id
            WHERE x.stato='proposta' AND x.contatto_id IN (SELECT contatto_id FROM campagne_posta_dest WHERE campagna_id=%s) ORDER BY x.id""", (cid,)).fetchall()]
@@ -732,12 +735,81 @@ def leggi_foglio(cid: int, u: dict = Depends(solo_titolare)):
             c = dict(campagna(conn, cid))
         except LookupError as e:
             _errore(e)
-        if not c["foglio"]:
+        if not c["foglio"] and not conn.execute("SELECT 1 FROM campagne_fogli WHERE campagna_id=%s", (cid,)).fetchone():
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Collega prima un foglio Google alla campagna")
         r = flusso.sincronizza_foglio(conn, c)
         if r.get("errore"):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, r["errore"])
         return r
+
+
+class Documento(BaseModel):
+    url: str = Field(min_length=10, max_length=300)
+
+
+@router.post("/{cid}/fogli")
+def aggiungi_documento(cid: int, d: Documento, u: dict = Depends(solo_titolare)):
+    """2.70: un altro documento di contatti nella stessa campagna (stesse impostazioni). Si legge subito."""
+    from . import flusso
+    url = d.url.strip()
+    if not flusso.id_foglio(url):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Indirizzo non valido: incolla il link del foglio Google o del file Excel su Drive")
+    with connessione() as conn:
+        try:
+            c = dict(campagna(conn, cid))
+        except LookupError as e:
+            _errore(e)
+        if not c["foglio"]:   # il primo documento diventa quello principale
+            conn.execute("UPDATE campagne_posta SET foglio=%s, foglio_letto_il=NULL, foglio_errore='' WHERE id=%s", (url, cid))
+        elif flusso.id_foglio(c["foglio"]) == flusso.id_foglio(url) or conn.execute(
+                "SELECT 1 FROM campagne_fogli WHERE campagna_id=%s AND url=%s", (cid, url)).fetchone():
+            raise HTTPException(status.HTTP_409_CONFLICT, "Questo documento e' gia' nella campagna")
+        else:
+            conn.execute("INSERT INTO campagne_fogli (campagna_id, url) VALUES (%s,%s)", (cid, url))
+        conn.commit()
+        r = flusso.sincronizza_foglio(conn, dict(campagna(conn, cid)))
+        if r.get("errore"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, r["errore"])
+        return r
+
+
+class Colonne(BaseModel):
+    documento: str = Field(min_length=10, max_length=300)
+    foglio: str = Field(min_length=1, max_length=200)
+    testa: int | None = Field(default=None, ge=0, le=200)
+    mappa: dict[str, int]
+
+
+@router.put("/{cid}/colonne")
+def correggi_colonne(cid: int, d: Colonne, u: dict = Depends(solo_titolare)):
+    """2.70: Lorenzo dice cosa c'e' in ogni colonna di un foglio (es. la prima e' un codice, il nome e' nella seconda). Il foglio si rilegge subito."""
+    from . import flusso
+    campi = {k: v for k, v in d.mappa.items() if k in flusso.COLONNE and 0 <= v < 200}
+    if len(set(campi.values())) != len(campi):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Ogni colonna puo' avere un solo significato")
+    if not ({"ente", "email", "sito"} & set(campi)):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Indica almeno la colonna del nome, dell'email o del sito")
+    with connessione() as conn:
+        try:
+            c = dict(campagna(conn, cid))
+        except LookupError as e:
+            _errore(e)
+        conn.execute("""INSERT INTO campagne_colonne (campagna_id, documento, foglio, mappa) VALUES (%s,%s,%s,%s)
+                        ON CONFLICT (campagna_id, documento, foglio) DO UPDATE SET mappa=EXCLUDED.mappa""",
+                     (cid, d.documento, d.foglio, json.dumps(dict(campi, testa=d.testa))))
+        conn.commit()
+        r = flusso.sincronizza_foglio(conn, c)
+        if r.get("errore"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, r["errore"])
+        return r
+
+
+@router.delete("/{cid}/fogli/{fid}")
+def togli_documento(cid: int, fid: int, u: dict = Depends(solo_titolare)):
+    """Il documento non si legge piu'; i contatti gia' entrati restano nella campagna."""
+    with connessione() as conn:
+        conn.execute("DELETE FROM campagne_fogli WHERE id=%s AND campagna_id=%s", (fid, cid))
+        return {"ok": True}
 
 
 @router.post("/{cid}/duplica")

@@ -181,6 +181,16 @@ function _blocchiFlusso(c, salva) {
   const accDrive = c.account_drive.length > 1 ? campo(_opz(c.account_drive, "— account Google —", a => "letto con " + a.email, c.foglio_account_id), "foglio_account_id", el => el.value ? Number(el.value) : null) : null;
   const leggiOra = c.foglio ? _btnCp("Leggi il foglio adesso", async () => { try { const r = await api("POST", "/gestione/campagne/" + c.id + "/foglio"); alert(r.righe + " righe lette: " + r.nuove + " contatti nuovi, " + r.destinatari + " destinatari aggiunti" + (r.senza_email ? ", " + r.senza_email + " senza email" : "") + "." +
           ((r.fogli || []).length > 1 || (r.fogli || []).some(f => f.nota) ? "\n\nFogli del file:\n" + r.fogli.map(f => "• " + f.nome + ": " + (f.righe ? f.righe + " righe" : "nessun contatto") + (f.nota ? " (" + f.nota + ")" : "")).join("\n") : "")); salva({}); } catch (e) { alert(e.message); } }, "s piccolo") : null;
+  // 2.70: altri documenti di contatti, con le stesse impostazioni
+  const nuovoDoc = h("input", { type: "url", placeholder: "Link di un altro foglio Google o Excel su Drive" });
+  const altriDoc = h("div", { class: "cp-docs" },
+    (c.fogli_extra || []).map(x => h("div", { class: "cp-doc" }, h("span", { class: "cp-doc-url", title: x.url }, "📄 " + x.url.replace(/^https?:\/\//, "").slice(0, 60) + (x.url.length > 68 ? "…" : "")),
+      x.errore ? avviso(x.errore, "no") : h("span", { class: "sotto" }, x.letto_il ? x.righe + " righe" : "non ancora letto"),
+      _btnCp("Togli", async () => { await api("DELETE", "/gestione/campagne/" + c.id + "/fogli/" + x.id); salva({}); }, "s piccolo"))),
+    h("div", { class: "cp-doc-nuovo" }, nuovoDoc, _btnCp(c.foglio ? "Aggiungi un altro documento" : "Collega il documento", async () => {
+      if (!nuovoDoc.value.trim()) return;
+      try { const r = await api("POST", "/gestione/campagne/" + c.id + "/fogli", { url: nuovoDoc.value.trim() }, { scadenzaMs: 180000 });
+        alert(r.righe + " righe lette in tutti i documenti: " + r.nuove + " contatti nuovi, " + r.destinatari + " destinatari aggiunti."); salva({}); } catch (e) { alert(e.message); } }, "s piccolo")));
   const statoFoglio = c.foglio ? (c.foglio_errore ? avviso(c.foglio_errore, "no") : h("span", { class: "sotto" }, c.foglio_letto_il ? c.foglio_righe + " righe · letto " + new Date(c.foglio_letto_il).toLocaleString("it-IT") : "non ancora letto")) : null;
   // studio
   const pers = h("input", { type: "checkbox" }); pers.checked = c.personalizza; campo(pers, "personalizza", el => el.checked);
@@ -197,11 +207,15 @@ function _blocchiFlusso(c, salva) {
   const opp = Object.fromEntries((c.opportunita || []).map(x => [x.stato, x.n]));
   return h("div", { class: "fl-flusso" },
     blocco("partenza", "Contatti", c.foglio ? "Righe nuove del foglio Google → contatti nel CRM (senza doppioni) e destinatari. Il foglio resta tuo: Opifex lo legge e basta." : "Contatti scelti dal CRM. Puoi collegare anche un foglio Google: le righe nuove entreranno da sole.",
-      [foglio, accDrive, leggiOra, statoFoglio].filter(Boolean), n.totale), freccia(),
+      [foglio, accDrive, leggiOra, statoFoglio, altriDoc, _colonneCp(c, salva)].filter(Boolean), n.totale), freccia(),
     blocco("azione", "Studio del sito", "Il Redattore legge il sito (o le note già raccolte, se hanno meno di 6 mesi), verifica la zona con il CRM e sceglie l'angolo d'attacco seguendo il brief. Riceve solo dati pubblici: mai email o nomi delle persone.",
       [h("label", { class: "spunta" }, pers, h("span", {}, "Personalizza con il sito")), h("label", {}, "Modello ", modello), h("label", {}, "Tetto di spesa ", tetto), h("span", { class: "sotto" }, "speso " + _euroCp(c.spesa) + " su " + _euroCp(c.tetto_spesa))],
       n.in_studio || null), freccia(),
-    blocco("azione", "Bozza", "Email personale con angolo e motivo; senza sito, il testo standard della campagna.", null, n.da_approvare), freccia(),
+    blocco("azione", "Bozza", "Email personale con angolo e motivo; senza sito, il testo standard della campagna, riscritto per ogni contatto." +
+      (c.blocco ? " Finché l'invio automatico è spento, il Redattore lavora a blocchi di " + c.blocco.dimensione + ": il blocco dopo parte quando hai approvato o scartato tutte le bozze di questo, così le tue correzioni arrivano prima." : ""),
+      c.blocco ? [h("span", { class: "sotto" + (c.blocco.in_attesa && c.blocco.da_approvare ? " cp-blocco-fermo" : "") },
+        c.blocco.in_attesa && c.blocco.da_approvare ? "Blocco completo: " + c.blocco.da_approvare + " bozze aspettano te prima delle prossime " + c.blocco.dimensione
+          : "Blocco in corso: " + Math.min(c.blocco.fatte, c.blocco.dimensione) + " di " + c.blocco.dimensione + " preparate")] : null, n.da_approvare), freccia(),
     blocco("decisione", "Approvazione", c.invio_automatico ? "Invio automatico acceso: le bozze partono senza passare da te. Le risposte agli interessati le approvi sempre tu." : "Approvi tu ogni email. L'invio automatico si può accendere dopo " + a.serve + " bozze di fila approvate senza correzioni.",
       [h("label", { class: "spunta" }, auto, h("span", {}, "Invio automatico")), h("span", { class: "sotto" }, a.di_fila + " di " + a.serve + " approvate di fila senza correzioni")], null), freccia(),
     blocco("azione", "Invio", "Dalla casella " + (c.mittente_email || "?") + ", piano, per non finire nello spam. Entra nella storia del contatto.", [h("label", {}, "Email all'ora ", ritmo)], n.partite), freccia(),
@@ -499,4 +513,26 @@ function cartaAllegatiCp(c, ricarica) {
       for (const f of [...scelta.files]) { const fd = new FormData(); fd.append("file", f);
         try { await api("POST", "/gestione/campagne/" + c.id + "/allegati", fd, { scadenzaMs: 120000 }); } catch (e) { esito.replaceChildren(avviso(f.name + ": " + e.message, "no")); return; } }
       ricarica(); }, "p")), esito);
+}
+
+// 2.70: cosa c'e' in ogni colonna dei fogli (riconosciuto da Opifex, correggibile da Lorenzo)
+const RUOLI_COL_CP = [["", "altri dati"], ["ente", "Nome"], ["email", "Email"], ["sito", "Sito"], ["telefono", "Telefono"], ["comune", "Comune / località"],
+  ["provincia", "Provincia"], ["regione", "Regione"], ["note", "Note"]];
+function _colonneCp(c, salva) {
+  const fogli = (c.foglio_resoconto || []).filter(f => f.colonne && f.colonne.length);
+  if (!fogli.length) return null;
+  return h("details", { class: "cp-colonne" }, h("summary", {}, "Cosa ho capito delle colonne (" + fogli.length + (fogli.length === 1 ? " foglio" : " fogli") + ")"),
+    h("p", { class: "sotto" }, "Per ogni foglio: che cosa c'è in ogni colonna. Le colonne senza un ruolo non si perdono: finiscono nelle note del contatto come «altri dati». Se qualcosa è sbagliato (per esempio la prima colonna è un codice e il nome è nella seconda), correggi e salva: il foglio si rilegge subito."),
+    fogli.map(f => {
+      const scelte = f.colonne.map(col => { const s = h("select", { "aria-label": "Ruolo della colonna " + col.lettera }, RUOLI_COL_CP.map(([v, t]) => h("option", { value: v, selected: col.ruolo === v }, t))); return [col, s]; });
+      const esito = h("div");
+      return h("div", { class: "cp-col-foglio" }, h("div", {}, h("b", {}, f.etichetta), h("span", { class: "sotto" }, " · " + f.righe + " righe" + (f.corretta ? " · corretto da te" : "") + (f.testa != null ? " · intestazione alla riga " + (f.testa + 1) : " · senza intestazione"))),
+        h("div", { class: "cp-col-tab" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Col."), h("th", {}, "Intestazione"), h("th", {}, "Esempio"), h("th", {}, "È…"))),
+          h("tbody", {}, scelte.map(([col, s]) => h("tr", {}, h("td", {}, col.lettera), h("td", {}, col.nome || "—"), h("td", { class: "sotto" }, col.esempio || "—"), h("td", {}, s)))))),
+        esito, h("div", { class: "azioni" }, _btnCp("Salva le colonne di questo foglio", async () => {
+          const mappa = {}; for (const [col, s] of scelte) if (s.value) { if (s.value in mappa) { esito.replaceChildren(avviso("«" + s.selectedOptions[0].text + "» è scelto per due colonne", "no")); return; } mappa[s.value] = col.indice; }
+          try { const r = await api("PUT", "/gestione/campagne/" + c.id + "/colonne", { documento: f.documento, foglio: f.foglio, testa: f.testa, mappa }, { scadenzaMs: 180000 });
+            alert("Foglio riletto: " + r.nuove + " contatti nuovi, " + r.aggiornate + " aggiornati."); salva({}); } catch (e) { esito.replaceChildren(avviso(e.message, "no")); }
+        }, "s piccolo")));
+    }));
 }

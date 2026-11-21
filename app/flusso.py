@@ -13,6 +13,7 @@ USCITE     la Posta (modello locale) legge le risposte: interessato -> opportuni
 """
 import csv
 import hashlib
+import json
 import io
 import re
 from datetime import datetime, timedelta, timezone
@@ -26,9 +27,12 @@ SERVE_PER_AUTONOMIA = 20
 PER_GIRO = 5
 FOGLIO_OGNI_MINUTI = 10
 
-COLONNE = {"ente": r"^(nome|hotel|struttura|ente|azienda|museo|organizzazione|denominazione|ragione|cliente|sponsor)",
-           "sito": r"(sito|web|url|internet)", "email": r"(e-?mail|posta|indirizzo email)", "comune": r"(localit|comune|citt|luogo|paese)",
-           "provincia": r"^prov", "regione": r"^region", "note": r"^note"}
+COLONNE = {"ente": r"^(nome|hotel|struttura|ente|azienda|museo|organizzazione|denominazione|ragione|cliente|sponsor|cantina|tenuta|fattoria|agriturismo|"
+                   r"impresa|ditta|societ|attivit|insegna|marchio|brand|produttore|casa vinicola|azienda agricola|esercizio|locale|ristorante|nominativo|titolo|soggetto)",
+           "sito": r"(sito|web|url|internet|homepage|home page|link)", "email": r"(e-?mail|posta|indirizzo email|mail\b|pec)",
+           "comune": r"(localit|comune|citt|luogo|paese|sede|zona|territorio)", "provincia": r"^(prov|pr\b|sigla prov)", "regione": r"^region",
+           "telefono": r"(telefono|tel\b|tel\.|cellulare|cell\b|mobile|phone|numero di telefono)", "note": r"^(note|annotazion|commenti)"}
+NON_NOME = r"^(cod|codice|id\b|n\.?$|n°|nr|num|numero|progressivo|#|prog|p\.? ?iva|partita|cf\b|codice fiscale|cap\b|indirizzo|via\b|data|anno|ettari|fatturato|stato|categoria|tipo)"
 
 ISTR_ESITO = """Leggi la risposta ricevuta a un'email di Lorenzo Zeppa e classificala.
 - "interessato": vuole saperne di piu', propone o accetta una chiamata, chiede prezzi o dettagli;
@@ -164,6 +168,7 @@ def scarica_fogli(conn, c: dict) -> list[tuple[str, list[list[str]]]]:
             raise ValueError(f"Google non risponde ({type(e).__name__})") from None
         except google.ErroreGoogle:
             continue   # collegamento scaduto per questo account
+        c["_account_usato"] = a["id"]
         if c.get("id") and c.get("foglio_account_id") != a["id"]:
             conn.execute("UPDATE campagne_posta SET foglio_account_id=%s WHERE id=%s", (a["id"], c["id"]))
         if tipo == XLSX:
@@ -191,55 +196,115 @@ _SITO_RE = re.compile(r"^(?:https?://)?(?:www\.)?[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-
 
 def _punti_testa(riga: list[str]) -> tuple[int, dict]:
     testa = [str(x or "").strip().lower() for x in riga]
+    if any(_EMAIL_RE.search(t) or _SITO_RE.match(t) for t in testa if t):   # una riga con email o siti e' fatta di dati, non e' l'intestazione
+        return 0, {}
     mappa = {}
     for campo, rx in COLONNE.items():
         for i, t in enumerate(testa):
-            if t and len(t) <= 60 and i not in mappa.values() and re.search(rx, t):
-                mappa[campo] = i
-                break
+            if not t or len(t) > 60 or i in mappa.values() or not re.search(rx, t):
+                continue
+            if campo == "ente" and re.search(NON_NOME, t):   # «Codice cantina», «N. azienda»: non e' il nome
+                continue
+            mappa[campo] = i
+            break
     return len(mappa) + sum(1 for k in ("ente", "email", "sito") if k in mappa), mappa
 
 
-def analizza_foglio(righe: list[list[str]]) -> tuple[dict, list[dict], int | None]:
-    """Legge un foglio in profondita': trova la riga di intestazione anche se non e' la prima (titoli, righe vuote sopra),
-    riconosce dal contenuto le colonne di email e siti senza intestazione e, riga per riga, cerca email e sito in tutte le celle."""
+def _sembra_codice(v: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z]{0,6}[-_/. ]?\d[\w\-_/.]{0,14}", v)) or bool(re.fullmatch(r"[\d\s.,/-]+", v))
+
+
+def _voto_nome(valori: list[str]) -> float:
+    """Quanto una colonna sembra contenere nomi (di cantine, hotel, enti): parole vere, pochi numeri, valori diversi tra loro."""
+    if not valori:
+        return 0.0
+    buoni = [v for v in valori if re.search(r"[a-zà-ù]{3}", v, re.I) and "@" not in v and not _SITO_RE.match(v) and not _sembra_codice(v)]
+    if len(buoni) < max(1, len(valori) // 2):
+        return 0.0
+    parole = sum(len(re.findall(r"[a-zà-ù]{2,}", v, re.I)) for v in buoni) / len(buoni)
+    diversi = len(set(v.lower() for v in buoni)) / len(buoni)
+    cifre = sum(sum(ch.isdigit() for ch in v) / max(1, len(v)) for v in buoni) / len(buoni)
+    return len(buoni) / len(valori) * diversi * min(parole, 4) * (1 - cifre)
+
+
+def _lettera(i: int) -> str:
+    s_ = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        s_ = chr(65 + r) + s_
+    return s_
+
+
+def analizza_foglio(righe: list[list[str]], forzata: dict | None = None) -> tuple[dict, list[dict], int | None]:
+    """Legge un foglio in profondita' e capisce cosa c'e' in ogni colonna:
+    - l'intestazione anche se non e' la prima riga; i nomi delle colonne anche diversi («Cantina», «Ragione sociale», «Codice»...);
+    - una colonna «Codice»/«ID» non e' mai il nome; senza intestazione il nome e' la colonna che sembra davvero fatta di nomi;
+    - email, siti e telefoni riconosciuti dal contenuto; riga per riga email e sito cercati in tutte le celle;
+    - le altre colonne non si perdono: diventano «altri dati» del contatto.
+    `forzata`: la scelta fatta da Lorenzo ({"testa": riga o None, "ente": colonna, ...})."""
     righe = [[str(x or "").strip() for x in r] for r in righe]
     migliore, mappa, testa = 0, {}, None
     for i, r in enumerate(righe[:25]):
         punti, m = _punti_testa(r)
-        if punti > migliore and ("ente" in m or "email" in m or "sito" in m):
+        if punti > migliore and ("ente" in m or "email" in m or "sito" in m or "telefono" in m):
             migliore, mappa, testa = punti, m, i
+    if forzata:
+        if "testa" in forzata:
+            testa = forzata["testa"]
+        mappa = {k: int(v) for k, v in forzata.items() if k in COLONNE and v is not None and str(v).lstrip("-").isdigit() and int(v) >= 0}
     dati = righe[(testa + 1) if testa is not None else 0:]
     larg = max((len(r) for r in dati), default=0)
     colonne = [[r[c] for r in dati if c < len(r) and r[c]] for c in range(larg)]
+    intest = righe[testa] if testa is not None else []
     usate = set(mappa.values())
-    for campo, prova in (("email", lambda v: bool(_EMAIL_RE.search(v))), ("sito", lambda v: bool(_SITO_RE.match(v)) and "@" not in v)):
-        if campo in mappa:
-            continue
-        for c, valori in enumerate(colonne):
-            if c not in usate and len(valori) >= 1 and sum(map(prova, valori)) >= max(1, len(valori) // 2):
-                mappa[campo] = c; usate.add(c)
-                break
-    if "ente" not in mappa:   # senza intestazione: il nome e' la prima colonna di testo che non e' email, sito o numero
-        for c, valori in enumerate(colonne):
-            if c not in usate and valori and sum(1 for v in valori if re.search(r"[a-zà-ù]{3}", v, re.I) and "@" not in v and not _SITO_RE.match(v)) >= max(1, len(valori) // 2):
-                mappa["ente"] = c; usate.add(c)
-                break
+    if not forzata:
+        for campo, prova in (("email", lambda v: bool(_EMAIL_RE.search(v))), ("sito", lambda v: bool(_SITO_RE.match(v)) and "@" not in v),
+                             ("telefono", lambda v: bool(re.fullmatch(r"\+?[\d\s./()-]{8,20}", v)) and sum(ch.isdigit() for ch in v) >= 8)):
+            if campo in mappa:
+                continue
+            for c, valori in enumerate(colonne):
+                if c not in usate and len(valori) >= 1 and sum(map(prova, valori)) >= max(1, len(valori) // 2) \
+                        and not (c < len(intest) and re.search(NON_NOME, intest[c].lower()) and campo == "telefono"):
+                    mappa[campo] = c; usate.add(c)
+                    break
+        if "ente" not in mappa:   # il nome: la colonna che sembra fatta di nomi, mai un codice
+            voti = [(_voto_nome(v), c) for c, v in enumerate(colonne) if c not in usate and not (c < len(intest) and re.search(NON_NOME, intest[c].lower()))]
+            voti = [x for x in voti if x[0] > 0]
+            if voti:
+                mappa["ente"] = max(voti)[1]; usate.add(mappa["ente"])
+    nomi_col = {c: (intest[c] if c < len(intest) and intest[c] else f"Colonna {_lettera(c)}") for c in range(larg)}
+    altre = [c for c in range(larg) if c not in set(mappa.values()) and colonne[c]]
     out = []
     for r in dati:
         if testa is not None and r == righe[testa]:
             continue   # intestazione ripetuta
         v = {k: (r[i] if i < len(r) else "") for k, i in mappa.items()}
-        e = _EMAIL_RE.search(v.get("email", "")) or next((m for m in (_EMAIL_RE.search(x) for x in r) if m), None)
+        e = _EMAIL_RE.search(v.get("email", "")) or (None if forzata else next((m for m in (_EMAIL_RE.search(x) for x in r) if m), None))
         if "email" in v or e:
             v["email"] = e.group(0) if e else ""
-        if not v.get("sito"):
+        if not v.get("sito") and not forzata:
             s_ = next((x for x in r if _SITO_RE.match(x) and "@" not in x and not re.fullmatch(r"[\d.,]+", x)), "")
             if s_:
                 v["sito"] = s_
-        if any(v.values()):
-            out.append(v)
+        if not any(v.values()):
+            continue
+        extra = [f"{nomi_col[c]}: {r[c]}" for c in altre if c < len(r) and r[c] and r[c] not in v.values()]
+        if extra:
+            v["altri"] = "; ".join(extra)[:1500]
+        out.append(v)
     return mappa, out, testa
+
+
+def descrivi_colonne(righe: list[list[str]], mappa: dict, testa: int | None) -> dict:
+    """Per la scheda della campagna: le colonne del foglio con un esempio e cosa ne ha capito Opifex."""
+    righe = [[str(x or "").strip() for x in r] for r in righe]
+    intest = righe[testa] if testa is not None and testa < len(righe) else []
+    dati = [r for r in righe[(testa + 1) if testa is not None else 0:] if any(r)][:3]
+    larg = max([len(intest)] + [len(r) for r in dati]) if (intest or dati) else 0
+    ruolo = {i: k for k, i in mappa.items()}
+    return {"testa": testa, "colonne": [{"indice": c, "lettera": _lettera(c), "nome": intest[c] if c < len(intest) else "",
+                                         "esempio": next((r[c] for r in dati if c < len(r) and r[c]), "")[:60], "ruolo": ruolo.get(c, "")} for c in range(min(larg, 40))]}
 
 
 def righe_foglio(testo_csv: str) -> tuple[dict, list[dict]]:
@@ -278,26 +343,52 @@ def _imposta_sito(conn, cid: int, sito: str):
             pass
 
 
+def _nota_foglio(v: dict) -> str:
+    return "\n".join(x for x in (v.get("note") or "", ("Dal foglio — " + v["altri"]) if v.get("altri") else "") if x)
+
+
 def sincronizza_foglio(conn, c: dict) -> dict:
     """Righe nuove -> contatti nuovi (o gia' esistenti) e destinatari. Righe corrette -> contatto aggiornato, senza ricominciare."""
     c = dict(c)
-    try:
-        fogli = scarica_fogli(conn, c)
-    except ValueError as e:
-        conn.execute("UPDATE campagne_posta SET foglio_errore=%s, foglio_letto_il=NOW() WHERE id=%s", (str(e)[:300], c["id"])); conn.commit()
-        return {"errore": str(e)}
-    righe, resoconto, mappa = [], [], {}
-    for nome, grezze in fogli:   # tutti i fogli del file, ognuno con la sua intestazione
-        m, r, testa = analizza_foglio(grezze)
-        if not r or not ({"ente", "sito", "email"} & set(m)) or (testa is None and not ({"sito", "email"} & set(m))):   # senza intestazione servono email o siti
-            resoconto.append({"nome": nome, "righe": 0, "colonne": [], "nota": "vuoto" if not any(any(x for x in g) for g in grezze) else "non ci sono contatti riconoscibili"})
+    # 2.70: il documento principale e quelli aggiunti dopo, con le stesse impostazioni della campagna
+    documenti = [(None, c)] if c.get("foglio") else []
+    for x in conn.execute("SELECT * FROM campagne_fogli WHERE campagna_id=%s ORDER BY id", (c["id"],)).fetchall():
+        documenti.append((x, dict(c, foglio=x["url"], foglio_account_id=x["account_id"], id=None)))
+    righe, resoconto, mappa, errori, errore_principale, colonne_doc = [], [], {}, [], "", []
+    for n_doc, (extra, cc) in enumerate(documenti, 1):
+        try:
+            fogli = scarica_fogli(conn, cc)
+        except ValueError as e:
+            errori.append(str(e))
+            if extra is None:
+                errore_principale = str(e)
+            else:
+                conn.execute("UPDATE campagne_fogli SET errore=%s, letto_il=NOW() WHERE id=%s", (str(e)[:300], extra["id"]))
             continue
-        righe += r
-        mappa.update(m)
-        resoconto.append({"nome": nome, "righe": len(r), "colonne": sorted(m), "nota": f"intestazione alla riga {testa + 1}" if testa else ""})
+        etichetta = "" if len(documenti) == 1 else f"documento {n_doc} › "
+        righe_doc = 0
+        url_doc = cc.get("foglio") or ""
+        forzate = {x["foglio"]: x["mappa"] for x in conn.execute("SELECT foglio, mappa FROM campagne_colonne WHERE campagna_id=%s AND documento=%s",
+                                                                    (c["id"], url_doc)).fetchall()}
+        for nome, grezze in fogli:   # tutti i fogli del file, ognuno con la sua intestazione
+            m, r, testa = analizza_foglio(grezze, forzate.get(nome))
+            colonne_doc.append(dict(descrivi_colonne(grezze, m, testa), documento=url_doc, foglio=nome, etichetta=etichetta + nome,
+                                    corretta=nome in forzate, righe=len(r)))
+            if not r or not ({"ente", "sito", "email"} & set(m)) or (testa is None and not ({"sito", "email"} & set(m))):   # senza intestazione servono email o siti
+                resoconto.append({"nome": etichetta + nome, "righe": 0, "colonne": [], "nota": "vuoto" if not any(any(x for x in g) for g in grezze) else "non ci sono contatti riconoscibili"})
+                continue
+            righe += r
+            righe_doc += len(r)
+            mappa.update(m)
+            resoconto.append({"nome": etichetta + nome, "righe": len(r), "colonne": sorted(m), "nota": f"intestazione alla riga {testa + 1}" if testa else ""})
+        if extra is not None:
+            conn.execute("UPDATE campagne_fogli SET errore='', letto_il=NOW(), righe=%s, account_id=COALESCE(%s, account_id) WHERE id=%s",
+                         (righe_doc, cc.get("_account_usato"), extra["id"]))
     if not righe:
-        msg = "In nessun foglio del file trovo contatti: servono almeno un nome, un sito o un'email (" + ", ".join(f["nome"] for f in resoconto) + ")"
-        conn.execute("UPDATE campagne_posta SET foglio_errore=%s, foglio_letto_il=NOW() WHERE id=%s", (msg[:300], c["id"])); conn.commit()
+        msg = errori[0] if errori and len(errori) == len(documenti) else \
+            "In nessun foglio trovo contatti: servono almeno un nome, un sito o un'email (" + ", ".join(f["nome"] for f in resoconto) + ")"
+        conn.execute("UPDATE campagne_posta SET foglio_errore=%s, foglio_letto_il=NOW(), foglio_resoconto=%s WHERE id=%s",
+                     ((errore_principale or msg)[:300], json.dumps(colonne_doc, ensure_ascii=False, default=str), c["id"])); conn.commit()
         return {"errore": msg}
     lista = _lista(conn, c)
     nuove = aggiornate = destinatari = senza_email = 0
@@ -317,7 +408,7 @@ def sincronizza_foglio(conn, c: dict) -> dict:
                                   VALUES (%s,%s,'organizzazione',%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()) RETURNING id""",
                                (lista, (c.get("categoria") or "altro")[:40], v.get("comune") or None, v.get("provincia") or None, v.get("regione") or None,
                                 cassaforte.cifra(ente) if ente else None, cassaforte.cifra(email) if "@" in email else None,
-                                crm.hash_email(email) if "@" in email else None, cassaforte.cifra(v["note"]) if v.get("note") else None,
+                                crm.hash_email(email) if "@" in email else None, cassaforte.cifra(_nota_foglio(v)) if _nota_foglio(v) else None,
                                 c.get("azienda_id"), "foglio Google della campagna")).fetchone()["id"]
             nuove += 1
         else:   # contatto gia' noto: si aggiornano i dati che il foglio porta
@@ -333,6 +424,17 @@ def sincronizza_foglio(conn, c: dict) -> dict:
                 conn.execute(f"UPDATE crm_contatti SET {', '.join(sets)} WHERE id=%s", par + [kid])
             aggiornate += 1 if gia else 0
         _imposta_sito(conn, kid, sito)
+        if v.get("telefono"):
+            from . import crm_modello
+            try:
+                crm_modello.aggiungi_recapito(conn, kid, "telefono", v["telefono"], fonte="foglio della campagna")
+            except Exception:  # noqa: BLE001 - gia' presente o non valido
+                pass
+        if gia is None and v.get("altri"):   # contatto gia' noto: gli altri dati del foglio si aggiungono alle note se mancano
+            r_ = conn.execute("SELECT note_cifrate FROM crm_contatti WHERE id=%s", (kid,)).fetchone()
+            vecchia = _d(r_["note_cifrate"]) if r_ and r_["note_cifrate"] else ""
+            if v["altri"] not in vecchia:
+                conn.execute("UPDATE crm_contatti SET note_cifrate=%s WHERE id=%s", (cassaforte.cifra((vecchia + "\n" if vecchia else "") + "Dal foglio — " + v["altri"]), kid))
         conn.execute("""INSERT INTO campagne_foglio_righe (campagna_id, chiave, impronta, contatto_id) VALUES (%s,%s,%s,%s)
                         ON CONFLICT (campagna_id, chiave) DO UPDATE SET impronta=EXCLUDED.impronta, contatto_id=EXCLUDED.contatto_id, letta_il=NOW()""",
                      (c["id"], chiave, impronta, kid))
@@ -340,10 +442,11 @@ def sincronizza_foglio(conn, c: dict) -> dict:
             destinatari += 1 if aggiungi_destinatario(conn, c["id"], kid, email) else 0
         else:
             senza_email += 1
-    conn.execute("UPDATE campagne_posta SET foglio_errore='', foglio_letto_il=NOW(), foglio_righe=%s WHERE id=%s", (len(righe), c["id"]))
+    conn.execute("UPDATE campagne_posta SET foglio_errore=%s, foglio_letto_il=NOW(), foglio_righe=%s, foglio_resoconto=%s WHERE id=%s",
+                 (errore_principale[:300], len(righe), json.dumps(colonne_doc, ensure_ascii=False, default=str), c["id"]))
     conn.commit()
     return {"righe": len(righe), "nuove": nuove, "aggiornate": aggiornate, "destinatari": destinatari, "senza_email": senza_email,
-            "colonne": sorted(mappa), "fogli": resoconto}
+            "colonne": sorted(mappa), "fogli": resoconto, "errori": errori}
 
 
 # ---------- spesa ----------
@@ -700,15 +803,40 @@ def autonomia(conn, cid: int) -> dict:
 
 
 # ---------- il giro ----------
+BLOCCO = 50
+
+
+def blocco(conn, c: dict) -> dict:
+    """Finche' l'invio automatico e' spento il Redattore prepara le prime email a blocchi di 50: il blocco dopo parte solo quando quelle
+    del blocco sono tutte approvate o scartate, cosi' le tue correzioni arrivano prima che scriva le altre."""
+    pend = conn.execute("""SELECT count(*) AS n, min(id) AS prima FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna='primo'
+                           AND stato IN ('da_approvare','errore')""", (c["id"],)).fetchone()
+    dal = c.get("blocco_dal_id")
+    if dal is None:   # prima volta: il blocco comprende le bozze gia' in attesa di approvazione
+        dal = (pend["prima"] - 1) if pend["prima"] else conn.execute("SELECT COALESCE(max(id), 0) AS m FROM email_in_uscita").fetchone()["m"]
+        conn.execute("UPDATE campagne_posta SET blocco_dal_id=%s WHERE id=%s", (dal, c["id"]))
+    fatte = conn.execute("""SELECT count(*) AS n FROM email_in_uscita WHERE campagna_id=%s AND tipo_campagna='primo' AND id > %s
+                            AND NOT (stato='rifiutata' AND errore='riscritta dal Redattore')""", (c["id"], dal)).fetchone()["n"]
+    if pend["n"] == 0 and fatte:   # tutto quello che aveva preparato e' deciso (approvato o scartato): si apre il blocco dopo
+        dal = conn.execute("SELECT COALESCE(max(id), 0) AS m FROM email_in_uscita").fetchone()["m"]
+        conn.execute("UPDATE campagne_posta SET blocco_dal_id=%s WHERE id=%s", (dal, c["id"]))
+        fatte = 0
+    c["blocco_dal_id"] = dal
+    spazio = 0 if pend["n"] >= BLOCCO else max(0, BLOCCO - fatte)
+    return {"dimensione": BLOCCO, "fatte": max(fatte, pend["n"]), "da_approvare": pend["n"], "spazio": spazio, "in_attesa": spazio == 0}
+
+
 def giro(conn) -> dict:
     """Ogni 5 minuti: foglio, studio e bozze, solleciti, risposte. Solo le campagne «in corso»."""
     fatto = {"fogli": 0, "bozze": 0, "solleciti": 0, "risposte": 0}
     for c in conn.execute("SELECT c.*, z.nome AS impresa FROM campagne_posta c LEFT JOIN aziende z ON z.id=c.azienda_id WHERE c.stato='in_corso' ORDER BY c.id").fetchall():
         c = dict(c)
-        if c["foglio"] and (c["foglio_letto_il"] is None or c["foglio_letto_il"] < _ora() - timedelta(minutes=FOGLIO_OGNI_MINUTI)):
+        ha_doc = bool(c["foglio"]) or bool(conn.execute("SELECT 1 FROM campagne_fogli WHERE campagna_id=%s LIMIT 1", (c["id"],)).fetchone())
+        if ha_doc and (c["foglio_letto_il"] is None or c["foglio_letto_il"] < _ora() - timedelta(minutes=FOGLIO_OGNI_MINUTI)):
             sincronizza_foglio(conn, c)
             fatto["fogli"] += 1
-        for d in conn.execute("SELECT * FROM campagne_posta_dest WHERE campagna_id=%s AND stato='in_attesa' AND nota='' ORDER BY id LIMIT %s", (c["id"], PER_GIRO)).fetchall():
+        quante = PER_GIRO if c["invio_automatico"] else min(PER_GIRO, blocco(conn, c)["spazio"])   # 2.70: a blocchi di 50 finche' approvi tu
+        for d in conn.execute("SELECT * FROM campagne_posta_dest WHERE campagna_id=%s AND stato='in_attesa' AND nota='' ORDER BY id LIMIT %s", (c["id"], quante)).fetchall():
             c = dict(conn.execute("SELECT c.*, z.nome AS impresa FROM campagne_posta c LEFT JOIN aziende z ON z.id=c.azienda_id WHERE c.id=%s", (c["id"],)).fetchone())
             if c["stato"] != "in_corso":
                 break

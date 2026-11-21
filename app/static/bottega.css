@@ -531,3 +531,18 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .cp-allegato.campagna{background:var(--ok-b)}
 .cp-x{border:0;background:transparent;font-size:16px;line-height:1;padding:0 6px;cursor:pointer;color:var(--tenue)}
 .cp-all-riga{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:6px 0;border-bottom:1px solid var(--bordo)}
+
+/* 2.70: piu' documenti di contatti, blocchi di bozze */
+.cp-docs{display:flex;flex-direction:column;gap:6px;width:100%}
+.cp-doc{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-width:0}
+.cp-doc-url{overflow-wrap:anywhere;min-width:0}
+.cp-doc-nuovo{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.cp-doc-nuovo input{flex:1 1 240px;min-width:0}
+.cp-blocco-fermo{color:var(--avv);font-weight:600}
+.cp-colonne{width:100%}
+.cp-colonne summary{cursor:pointer;font-weight:600}
+.cp-col-foglio{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--bordo)}
+.cp-col-tab{overflow-x:auto;max-width:100%}
+.cp-col-tab table{border-collapse:collapse;font-size:13px;min-width:420px}
+.cp-col-tab th,.cp-col-tab td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--bordo);vertical-align:middle}
+.cp-col-tab td.sotto{max-width:220px;overflow-wrap:anywhere}
