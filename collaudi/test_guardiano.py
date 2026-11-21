@@ -94,6 +94,20 @@ with TestClient(app) as c:
     sql("INSERT INTO task (titolo, stato, assegnato_agente_id, aggiornata_il) VALUES ('Piano editoriale Renovatio','in_corso',%s, NOW() - INTERVAL '9 hours')", (aid,))
     ok("compito «in corso» da ore senza novita': attenzione", any(x["chiave"].startswith("task_") and "Piano editoriale" in x["messaggio"] for x in guardiano.controlla(k)))
 
+    # campagne: il tetto giornaliero non e' un fermo
+    from app import campagne
+    cp = sql("INSERT INTO campagne_posta (nome, mittente, stato) VALUES ('Cantine', 'gmail:1', 'in_corso') RETURNING id")[0][0]
+    sql("""INSERT INTO email_in_uscita (canale, account_id, mittente, destinatari, oggetto, testo, campagna_id, tipo_campagna, stato, decisa_il)
+           SELECT 'gmail', 1, 'l@p.it', 'x'||g||'@c.it', 'o', 't', %s, 'primo', 'approvata', NOW() - INTERVAL '3 hours' FROM generate_series(1,5) g""", (cp,))
+    ok("campagne: approvate ferme da ore, niente partito oggi: fermo", esiti(k)["campagne"]["stato"] == "fermo")
+    campagne.MAX_GIORNO, vecchio = 3, campagne.MAX_GIORNO
+    sql("""INSERT INTO email_in_uscita (canale, account_id, mittente, destinatari, oggetto, testo, campagna_id, tipo_campagna, stato, decisa_il)
+           SELECT 'gmail', 1, 'l@p.it', 'y'||g||'@c.it', 'o', 't', %s, 'primo', 'inviata', date_trunc('day', NOW()) + INTERVAL '1 minute' FROM generate_series(1,3) g""", (cp,))
+    e = esiti(k)["campagne"]
+    ok("campagne: tetto del giorno raggiunto: attenzione (niente notifica), dice che ripartono domani", e["stato"] == "attenzione" and "Tetto di oggi" in e["messaggio"] and "domani" in e["messaggio"], e)
+    campagne.MAX_GIORNO = vecchio
+    sql("UPDATE campagne_posta SET stato='bozza' WHERE id=%s", (cp,))
+
     # la schermata
     d = c.get("/gestione/guardiano", headers=H).json()
     ok("API: prima i fermi, con i conteggi e l'ultimo giro", d["esiti"][0]["stato"] == "fermo" and d["fermi"] >= 1 and d["attenzione"] >= 2 and d["ultimo_giro"])

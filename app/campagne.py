@@ -302,11 +302,16 @@ def dopo_invio(conn, riga: dict, ok: bool, errore: str = ""):
         conn.execute("UPDATE crm_contatti SET ultimo_contatto=CURRENT_DATE WHERE id=%s", (d["contatto_id"],))
 
 
+def inviate_oggi(conn) -> int:
+    """Email di campagna partite oggi (tutte le campagne insieme): servono per il tetto MAX_GIORNO."""
+    return conn.execute("""SELECT count(*) AS n FROM email_in_uscita WHERE campagna_id IS NOT NULL AND stato='inviata'
+                           AND decisa_il > date_trunc('day', NOW())""").fetchone()["n"]
+
+
 def invia_in_coda(conn) -> int:
     """Ogni minuto: per ogni campagna in corso, al massimo un'email approvata se e' passato abbastanza tempo dall'ultima (per_ora)."""
     from . import invio_posta
-    oggi = conn.execute("""SELECT count(*) AS n FROM email_in_uscita WHERE campagna_id IS NOT NULL AND stato='inviata'
-                           AND decisa_il > date_trunc('day', NOW())""").fetchone()["n"]
+    oggi = inviate_oggi(conn)
     inviate = 0
     for c in conn.execute("SELECT id, per_ora FROM campagne_posta WHERE stato='in_corso' ORDER BY id").fetchall():
         if oggi + inviate >= MAX_GIORNO:
