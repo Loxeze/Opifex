@@ -33,4 +33,13 @@ fornitori.invia("https://api.openai.com/v1/chat/completions", {}, {"messages": [
 ok("Anthropic riceve la cache", visti[0][1]["system"][0]["cache_control"])
 ok("altri fornitori invariati", visti[1][1] == {"messages": [{"role": "user", "content": "x"}]})
 ok("token riletti contati una volta sola", fornitori.CACHE_LETTA.get() == 4000, str(fornitori.CACHE_LETTA.get()))
+# 2.70.1: il brief della campagna sta nelle istruzioni fisse del Redattore (uguali per tutti i contatti -> lette dalla cache)
+from app import redattore
+fisse = redattore.istruzioni_con_brief("Obiettivo: video per cantine\nTono: garbato")
+ok("Redattore: brief nelle istruzioni fisse, dopo le regole", fisse.startswith(redattore.ISTRUZIONI) and "BRIEF DELLA CAMPAGNA" in fisse and "video per cantine" in fisse)
+ok("Redattore: i compiti per il singolo contatto non ripetono il brief",
+   all("{brief}" not in t and "BRIEF DELLA CAMPAGNA" not in t for t in (redattore.COMPITO_PRIMA, redattore.COMPITO_VARIA, redattore.COMPITO_SOLLECITO)))
+ok("Redattore: senza brief restano le sole regole", redattore.istruzioni_con_brief("") == redattore.ISTRUZIONI)
+src = open("app/flusso.py").read() + open("app/imbuto.py").read()
+ok("tutte le chiamate del Redattore passano il brief a parte", src.count("redattore.chiedi(") == src.count("brief=_brief(conn, c))") + src.count("brief=brief)") + src.count("brief=redattore.testo_brief(c))"))
 print("TOTALE", sum(ris), "/", len(ris))

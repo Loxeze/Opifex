@@ -34,10 +34,7 @@ ISTR_QUADRO = """Sei l'analista di Lorenzo Zeppa. Dalle esigenze emerse nelle ca
 cosa chiedono di piu', quali problemi hanno senza dirlo, quali servizi conviene proporre, quali angoli funzionano nelle email.
 150-300 parole, in italiano, concreto, con le proporzioni quando si vedono (es. «7 su 10»). Nessun nome di persona o di ente."""
 
-ISTR_RIPRESA = """BRIEF DELLA CAMPAGNA
-{brief}
-
-DESTINATARIO: {ente}
+ISTR_RIPRESA = """DESTINATARIO: {ente}
 Ci aveva risposto il {quando}: «{sintesi}». Ci aveva chiesto di risentirci adesso.
 
 Scrivi l'email per riprendere il discorso (80-130 parole, curata e garbata), personale, che ricorda in mezza frase lo scambio precedente e ripropone la
@@ -141,9 +138,9 @@ def richiami(conn) -> int:
             link = (c.get("link_prenotazione") or "").strip()
             try:
                 j, spesa = redattore.chiedi(conn, c["modello"], ISTR_RIPRESA.format(
-                    brief=redattore.testo_brief(c), ente=k["ente"] or "(senza nome)", quando=d["risposta_il"].strftime("%d/%m") if d["risposta_il"] else "",
+                    ente=k["ente"] or "(senza nome)", quando=d["risposta_il"].strftime("%d/%m") if d["risposta_il"] else "",
                     sintesi=d["richiamo_nota"] or d["risposta_sintesi"] or "", link=(", con questo link per prenotarla: " + link) if link else "",
-                    firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 900)
+                    firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 900, brief=redattore.testo_brief(c))
                 flusso._spendi(conn, c, spesa)
             except ErroreFornitore:
                 j = None

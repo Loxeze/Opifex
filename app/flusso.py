@@ -512,10 +512,11 @@ def _diversifica(conn, c: dict, k: dict, oggetto: str, testo: str, tipo: str, d_
     altre = "\n\n".join(f"- Oggetto: {r['oggetto']}\n{_senza_saluto(r['testo'])[:600]}" for r in recenti[:4]) or "(nessuna ancora)"
     n = redattore.note(conn, k["id"])
     ancora, base, base_o = "", testo, oggetto
+    brief = _brief(conn, c)
     for giro in range(2):
         j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_VARIA.format(
-            brief=_brief(conn, c), oggetto=oggetto, testo=testo, ente=k["ente"] or "(senza nome)", categoria=c.get("categoria") or "(non indicata)",
-            localita=_localita(k), note=(n["sintesi"] if n else "(nessuna)"), altre=altre, ancora=ancora), 2000)
+            oggetto=oggetto, testo=testo, ente=k["ente"] or "(senza nome)", categoria=c.get("categoria") or "(non indicata)",
+            localita=_localita(k), note=(n["sintesi"] if n else "(nessuna)"), altre=altre, ancora=ancora), 2000, brief=brief)
         _spendi(conn, c, spesa)
         if not (isinstance(j, dict) and str(j.get("testo") or "").strip() and str(j.get("oggetto") or "").strip()):
             break
@@ -556,9 +557,9 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
         if sito_testo or redattore.note_fresche(n):
             firma = f"\n{c['impresa']}" if c.get("impresa") else ""
             j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_PRIMA.format(
-                brief=_brief(conn, c), ente=k["ente"] or "(senza nome)", localita=_localita(k),
+                ente=k["ente"] or "(senza nome)", localita=_localita(k),
                 note=n["sintesi"] if n else "(nessuna)", sito=k["sito"], testo=sito_testo or "(non riletto: valgono le note qui sopra)",
-                firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 2200)
+                firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 2200, brief=_brief(conn, c))
             _spendi(conn, c, spesa)
             if isinstance(j, dict) and j.get("oggetto") and j.get("testo"):
                 personalizzata = True
@@ -634,9 +635,9 @@ def sollecito(conn, c: dict, d: dict) -> str:
         if x:
             testo_prima = testo_prima.replace(x, "{nome}" if x == k["nome"] else "")
     j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_SOLLECITO.format(
-        brief=_brief(conn, c), ente=k["ente"] or "(senza nome)", note=(n["sintesi"] if n else "(nessuna)"),
+        ente=k["ente"] or "(senza nome)", note=(n["sintesi"] if n else "(nessuna)"),
         quando=prima["decisa_il"].strftime("il %d/%m") if prima["decisa_il"] else "", oggetto=prima["oggetto"], testo_prima=testo_prima[:2500],
-        compito=compito, firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 1200)
+        compito=compito, firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 1200, brief=_brief(conn, c))
     _spendi(conn, c, spesa)
     if not isinstance(j, dict) or (prossimo == 3 and not j.get("novita")) or not j.get("testo"):
         if prossimo == 2 and not (isinstance(j, dict) and j.get("testo")):   # risposta illeggibile: si riprova al giro dopo

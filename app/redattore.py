@@ -40,10 +40,7 @@ ISTRUZIONI = (
     "Nel testo che consegni non deve mai restare una parentesi quadra. REGOLA FISSA: ogni email e' diversa dalle altre della campagna "
     "(apertura, frasi, ordine, oggetto): email identiche finiscono nello spam. Mai copiare un testo cosi' com'e'.")
 
-COMPITO_PRIMA = """BRIEF DELLA CAMPAGNA
-{brief}
-
-DESTINATARIO
+COMPITO_PRIMA = """DESTINATARIO
 Ente: {ente}
 Localita' secondo il nostro CRM: {localita}
 
@@ -68,10 +65,7 @@ Fai quattro cose:
 Rispondi SOLO con JSON:
 {{"note": "...", "comune": "... o vuoto", "provincia": "sigla o vuoto", "angolo": "...", "motivo": "...", "oggetto": "...", "testo": "..."}}"""
 
-COMPITO_SOLLECITO = """BRIEF DELLA CAMPAGNA
-{brief}
-
-DESTINATARIO: {ente}
+COMPITO_SOLLECITO = """DESTINATARIO: {ente}
 NOTE SU QUESTO ENTE: {note}
 
 PRIMA EMAIL MANDATA {quando} (nessuna risposta):
@@ -109,10 +103,7 @@ Non cambiare NIENT'ALTRO: stesse parole, stesso tono, stessa lunghezza. Lascia c
 Nell'oggetto e nel testo non deve restare nessuna parentesi quadra. Rispondi SOLO con JSON: {{"oggetto": "...", "testo": "..."}}"""
 
 
-COMPITO_VARIA = """BRIEF DELLA CAMPAGNA
-{brief}
-
-TESTO BASE APPROVATO DA LORENZO — contenuto da rispettare; le parti tra [parentesi quadre] sono spazi da personalizzare
+COMPITO_VARIA = """TESTO BASE APPROVATO DA LORENZO — contenuto da rispettare; le parti tra [parentesi quadre] sono spazi da personalizzare
 Oggetto: {oggetto}
 <<<TESTO
 {testo}
@@ -344,16 +335,22 @@ def costo(conn, modello: str, tin: int, tout: int) -> float:
     return (tin or 0) * pi / 1e6 + (tout or 0) * po / 1e6
 
 
-def chiedi(conn, modello: str, compito: str, max_token: int = 1500) -> tuple[dict | None, float]:
-    """Una chiamata al modello della campagna. Restituisce (JSON, costo) e registra i token a nome del Redattore."""
+def chiedi(conn, modello: str, compito: str, max_token: int = 1500, brief: str = "") -> tuple[dict | None, float]:
+    """Una chiamata al modello della campagna. Restituisce (JSON, costo) e registra i token a nome del Redattore.
+    Il brief (con lo stile di Lorenzo) e' uguale per tutti i contatti della campagna: sta nelle istruzioni fisse, dopo le regole,
+    cosi' istruzioni+brief vengono riletti dalla cache di Anthropic (10% del prezzo) per ogni contatto; i dati del contatto vanno nel messaggio."""
     from .marchi import _fornitore
     forn = _fornitore(conn, modello)
     conn.commit()
-    r = fornitori.chiama_modello(forn, modello, ISTRUZIONI, compito, max_token)
+    r = fornitori.chiama_modello(forn, modello, istruzioni_con_brief(brief), compito, max_token)
     c = costo(conn, modello, r.token_input, r.token_output)
     conn.execute("INSERT INTO costi_api (agente_id, modello, token_input, token_output, costo_stimato) VALUES (%s,%s,%s,%s,%s)",
                  (agente(conn), modello, r.token_input or 0, r.token_output or 0, round(c, 6)))
     return _json(r.testo), c
+
+
+def istruzioni_con_brief(brief: str) -> str:
+    return ISTRUZIONI + (f"\n\nBRIEF DELLA CAMPAGNA (vale per tutti i destinatari)\n{brief.strip()}" if (brief or "").strip() else "")
 
 
 def testo_brief(c: dict, conn=None) -> str:
