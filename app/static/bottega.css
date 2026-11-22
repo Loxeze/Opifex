@@ -546,3 +546,11 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .cp-col-tab table{border-collapse:collapse;font-size:13px;min-width:420px}
 .cp-col-tab th,.cp-col-tab td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--bordo);vertical-align:middle}
 .cp-col-tab td.sotto{max-width:220px;overflow-wrap:anywhere}
+
+/* 2.74: campagne — da chiamare, prova A/B, classifica */
+.cp-chiama { display: grid; gap: 6px; margin-top: 8px; }
+.cp-chiama-riga { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+.cp-punti { flex: 0 0 auto; min-width: 2.2em; text-align: center; font-weight: 700; border-radius: 999px; padding: 1px 8px; background: var(--evid, #e7f1fb); color: var(--testo, #1d2b36); }
+.cp-ab { display: grid; gap: 4px; margin-top: 8px; }
+.cp-tab-scorre { overflow-x: auto; max-width: 100%; }
+.cp-tab-scorre table { min-width: 560px; }

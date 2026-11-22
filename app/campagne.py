@@ -188,8 +188,11 @@ def prepara(conn, cid: int, limite: int = 300) -> dict:
             continue
         nome, ente = _d(r["nome_cifrato"]).strip(), _d(r["ente_cifrato"]).strip()
         persona = (r.get("genere") or "organizzazione") == "persona" or bool(nome and ente)
+        from . import analisi_campagne   # 2.74: prova dei due oggetti
+        var = analisi_campagne.variante(c, r["id"])
         testo = _componi(c["testo"], nome, ente, persona) + PIEDE
-        oggetto = _componi(c["oggetto"], nome, ente, persona)[:200]
+        oggetto = _componi(analisi_campagne.oggetto_base(c, var), nome, ente, persona)[:200]
+        conn.execute("UPDATE campagne_posta_dest SET variante=%s WHERE id=%s", (var, r["id"]))
         eid = conn.execute("""INSERT INTO email_in_uscita (agente_id, canale, account_id, mittente, destinatari, oggetto, testo, campagna_id, destinatario_id)
                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                            (c["agente_id"], canale, acc, mitt, email, oggetto, testo, cid, r["id"])).fetchone()["id"]
@@ -502,6 +505,11 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
     c["partite_oggi"] = inviate_oggi(conn, _can, int(_acc)) if _acc.isdigit() else 0
     c["non_parte"] = regole_invio.perche_non_parte(c)
     c["ore_suggerite"] = regole_invio.ore_migliori(conn, c.get("categoria") or "")
+    from . import analisi_campagne   # 2.74
+    c["ab"] = analisi_campagne.risultati_ab(conn, cid)
+    stati_opp = {r["id"]: r["stato"] for r in conn.execute("SELECT id, stato FROM crm_opportunita WHERE id = ANY(%s)",
+                                                         ([x["opportunita_id"] for x in c["destinatari"] if x["opportunita_id"]],)).fetchall()}
+    c["da_chiamare"] = analisi_campagne.da_chiamare(c["destinatari"], stati_opp)
     c["respinte"] = conn.execute("""SELECT count(*) FILTER (WHERE ricerca_email='trovata') AS trovate,
                                            count(*) FILTER (WHERE ricerca_email IN ('da_cercare','in_corso')) AS in_ricerca
                                     FROM campagne_posta_dest WHERE campagna_id=%s""", (cid,)).fetchone()
@@ -582,6 +590,14 @@ class Stile(BaseModel):
     regole: str = Field(max_length=4000)
 
 
+@router.get("/classifica")
+def classifica(u: dict = Depends(solo_titolare)):
+    """2.74: quali campagne, angoli e liste portano piu' risposte e call, e quanto costano."""
+    from . import analisi_campagne
+    with connessione() as conn:
+        return analisi_campagne.classifica(conn)
+
+
 @router.get("/stile")
 def leggi_stile(_: dict = Depends(solo_titolare)):
     """«Come scrivo io»: le regole ricavate dalle correzioni di Lorenzo."""
@@ -658,6 +674,7 @@ class Modifica(BaseModel):
     link_prenotazione: str | None = Field(default=None, max_length=400)
     invio_automatico: bool | None = None
     cerca_email_nuova: bool | None = None
+    oggetto_b: str | None = Field(default=None, max_length=200)
     ore_dal: int | None = Field(default=None, ge=0, le=23)
     ore_al: int | None = Field(default=None, ge=1, le=24)
     solo_feriali: bool | None = None
@@ -683,7 +700,7 @@ def modifica(cid: int, d: Modifica, u: dict = Depends(solo_titolare)):
             if not a_["puo"]:
                 raise HTTPException(status.HTTP_409_CONFLICT, f"L'invio automatico si accende dopo {a_['serve']} bozze di fila approvate senza correzioni: per ora sono {a_['di_fila']}")
         for k in ("nome", "obiettivo", "oggetto", "testo", "per_ora", "categoria", "foglio", "personalizza", "modello", "tetto_spesa", "sollecito_giorni",
-                  "solleciti", "link_prenotazione", "invio_automatico", "cerca_email_nuova", "ore_dal", "ore_al", "solo_feriali", "evita_dal", "evita_al"):
+                  "solleciti", "link_prenotazione", "invio_automatico", "cerca_email_nuova", "oggetto_b", "ore_dal", "ore_al", "solo_feriali", "evita_dal", "evita_al"):
             v = getattr(d, k)
             if v is not None:
                 conn.execute(f"UPDATE campagne_posta SET {k}=%s WHERE id=%s", (v.strip() if isinstance(v, str) else v, cid))

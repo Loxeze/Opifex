@@ -547,7 +547,10 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
         _spendi(conn, c, 0)
         conn.commit()
         return "in_attesa"
-    conn.execute("UPDATE campagne_posta_dest SET stato='in_studio', aggiornato_il=NOW() WHERE id=%s", (d["id"],)); conn.commit()
+    from . import analisi_campagne   # 2.74: prova dei due oggetti
+    var = analisi_campagne.variante(c, d["id"])
+    base_ogg = analisi_campagne.oggetto_base(c, var)
+    conn.execute("UPDATE campagne_posta_dest SET stato='in_studio', variante=%s, aggiornato_il=NOW() WHERE id=%s", (var, d["id"])); conn.commit()
     oggetto = testo = angolo = motivo = zona = ""
     personalizzata = False
     if c["personalizza"] and k["sito"] and tetto_ok(conn, c["id"]):
@@ -564,7 +567,8 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
             j, spesa = redattore.chiedi(conn, c["modello"], redattore.COMPITO_PRIMA.format(
                 ente=k["ente"] or "(senza nome)", localita=_localita(k),
                 note=n["sintesi"] if n else "(nessuna)", sito=k["sito"], testo=sito_testo or "(non riletto: valgono le note qui sopra)",
-                firma=(" — " + c["impresa"]) if c.get("impresa") else ""), 2200, brief=_brief(conn, c))
+                firma=(" — " + c["impresa"]) if c.get("impresa") else "") + (
+                    f"\nOGGETTO: costruiscilo partendo da questa idea, adattata a questo destinatario: «{base_ogg}»" if var else ""), 2200, brief=_brief(conn, c))
             _spendi(conn, c, spesa)
             if isinstance(j, dict) and j.get("oggetto") and j.get("testo"):
                 personalizzata = True
@@ -589,7 +593,7 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
                          ("manca il testo standard della campagna" + (f" ({zona})" if zona else ""), d["id"]))
             conn.commit()
             return "in_attesa"
-        oggetto, testo = c["oggetto"], c["testo"]
+        oggetto, testo = (base_ogg if var else c["oggetto"]), c["testo"]
         if not zona:
             zona = "Senza sito: testo standard." if not k["sito"] else "Personalizzazione spenta: testo standard."
     # regola fissa: nessuna email uguale alle altre. Il testo standard si riscrive sempre; quella personalizzata se somiglia troppo alle altre.
@@ -848,6 +852,9 @@ def giro(conn) -> dict:
         if ha_doc and (c["foglio_letto_il"] is None or c["foglio_letto_il"] < _ora() - timedelta(minutes=FOGLIO_OGNI_MINUTI)):
             sincronizza_foglio(conn, c)
             fatto["fogli"] += 1
+        from . import analisi_campagne
+        if analisi_campagne.valuta_ab(conn, c):   # 2.74: la prova dei due oggetti ha un vincitore
+            c = dict(conn.execute("SELECT c.*, z.nome AS impresa FROM campagne_posta c LEFT JOIN aziende z ON z.id=c.azienda_id WHERE c.id=%s", (c["id"],)).fetchone())
         quante = PER_GIRO if c["invio_automatico"] else min(PER_GIRO, blocco(conn, c)["spazio"])   # 2.70: a blocchi di 50 finche' approvi tu
         for d in conn.execute("SELECT * FROM campagne_posta_dest WHERE campagna_id=%s AND stato='in_attesa' AND nota='' ORDER BY id LIMIT %s", (c["id"], quante)).fetchall():
             c = dict(conn.execute("SELECT c.*, z.nome AS impresa FROM campagne_posta c LEFT JOIN aziende z ON z.id=c.azienda_id WHERE c.id=%s", (c["id"],)).fetchone())

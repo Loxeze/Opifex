@@ -39,6 +39,7 @@ function crmCampagne() {
       h("div", { class: "azioni" }, bNuova), nuova,
       d.campagne.length ? h("div", { class: "mq-classifica" }, d.campagne.map(riga)) : h("p", { class: "sotto" }, "Nessuna campagna ancora."),
       d.imbuto && d.imbuto[0].n ? h("div", { class: "carta" }, graficoImbutoCp(d.imbuto, "L'imbuto di tutte le campagne")) : null,
+      d.campagne.length ? cartaClassificaCp() : null,
       _quadri(d.quadri), cartaFattureInCloud()]);
   };
   carica();
@@ -403,7 +404,7 @@ async function apriCampagna(corpo, cid, torna) {
   riempi(corpo, [h("div", { class: "azioni" }, indietro), h("h2", { class: "cp-nome" }, c.nome, h("span", { class: "cp-stato" }, STATI_CP[c.stato])),
     h("div", { class: "azioni" }, ...[avvia, approvaTutte, riapriTutte, riscriviTutte, statoBtn, duplica, chiudi].filter(Boolean)), conferma, msg,
     c.imbuto && c.imbuto[0].n ? h("div", { class: "carta" }, graficoImbutoCp(c.imbuto, "L'imbuto della campagna")) : null,
-    abbinare, bloccoBrief, quadro, bloccoTesto,
+    abbinare, cartaDaChiamareCp(c), bloccoBrief, quadro, bloccoTesto, cartaProvaAbCp(c, salva),
     h("details", { class: "carta", open: true }, h("summary", {}, h("b", {}, "Il flusso")), _blocchiFlusso(c, salva)),
     correzioni, cartaAllegatiCp(c, ricarica), cartaStileCp(),
     h("div", { class: "azioni", style: "align-items:center" }, h("h3", { style: "margin:0" }, "Destinatari"), filtro), lista]);
@@ -538,6 +539,46 @@ function cartaAllegatiCp(c, ricarica) {
 // 2.70: cosa c'e' in ogni colonna dei fogli (riconosciuto da Opifex, correggibile da Lorenzo)
 const RUOLI_COL_CP = [["", "altri dati"], ["ente", "Nome"], ["email", "Email"], ["sito", "Sito"], ["telefono", "Telefono"], ["comune", "Comune / località"],
   ["provincia", "Provincia"], ["regione", "Regione"], ["note", "Note"]];
+// 2.74: i contatti piu' promettenti da chiamare per primi
+function cartaDaChiamareCp(c) {
+  if (!c.da_chiamare || !c.da_chiamare.length) return null;
+  return h("div", { class: "carta" }, h("b", {}, "Da chiamare prima"), h("p", { class: "sotto" }, "Chi ha risposto o è interessato, in ordine di punteggio (risposta, gradino dell'opportunità, sito studiato, indirizzo nominativo)."),
+    h("div", { class: "cp-chiama" }, c.da_chiamare.map(x => h("div", { class: "cp-chiama-riga" },
+      h("span", { class: "cp-punti", title: "punteggio" }, String(x.punteggio)),
+      h("span", {}, h("b", {}, x.ente || x.nome || "Contatto"), x.sintesi ? h("span", { class: "sotto" }, " — " + x.sintesi) : null,
+        x.opportunita ? h("span", { class: "sotto" }, " · " + x.opportunita.replace("_", " ")) : null)))));
+}
+
+// 2.74: prova dei due oggetti
+function cartaProvaAbCp(c, salva) {
+  const ogB = h("input", { type: "text", value: c.oggetto_b || "", maxlength: 200, placeholder: "Secondo oggetto da provare (lascia vuoto per non fare la prova)" });
+  const res = (c.ab || []).map(x => h("div", {}, h("b", {}, "Oggetto " + x.variante + ": "), x.partite + " partite, " + x.risposte + " risposte" + (x.tasso != null ? " (" + x.tasso + "%)" : "") + ", " + x.interessati + " interessati"));
+  return h("details", { class: "carta", open: !!c.oggetto_b }, h("summary", {}, h("b", {}, "Prova dei due oggetti"), h("span", { class: "sotto" }, " — metà dei contatti ricevono un oggetto, metà l'altro")),
+    h("p", { class: "sotto" }, "Oggetto A è quello della campagna. Il Redattore parte dall'idea dell'oggetto assegnato e la adatta a ogni contatto. Quando ognuna delle due metà ha almeno 50 email partite, Opifex tiene l'oggetto che ottiene più risposte e te lo dice."),
+    h("label", {}, "Oggetto B", ogB), _btnCp("Salva", () => salva({ oggetto_b: ogB.value.trim() }), "s piccolo"),
+    res.length ? h("div", { class: "cp-ab" }, res) : null, c.ab_esito ? avviso(c.ab_esito, "ok") : null);
+}
+
+// 2.74: classifica delle campagne
+function cartaClassificaCp() {
+  const corpo = h("div", {}, h("p", { class: "sotto" }, "Carico…"));
+  api("GET", "/gestione/campagne/classifica").then(d => {
+    if (!d.campagne.length) { corpo.replaceChildren(h("p", { class: "sotto" }, "Ancora nessuna email partita.")); return; }
+    const euro = v => v == null ? "—" : "€ " + _euroCp(v);
+    const tab = (testate, righe) => h("div", { class: "cp-tab-scorre" }, h("table", { class: "tabella" }, h("thead", {}, h("tr", {}, testate.map(t => h("th", {}, t)))), h("tbody", {}, righe)));
+    corpo.replaceChildren(
+      tab(["Campagna", "Partite", "Risposte", "Interessati", "Call", "Costo modelli", "Per risposta", "Per call", "Tuo tempo"],
+        d.campagne.map(x => h("tr", {}, h("td", {}, x.nome), h("td", {}, String(x.partite)), h("td", {}, x.risposte + (x.tasso != null ? " (" + x.tasso + "%)" : "")),
+          h("td", {}, String(x.interessati)), h("td", {}, String(x.call)), h("td", {}, euro(x.spesa)), h("td", {}, euro(x.costo_risposta)), h("td", {}, euro(x.costo_call)),
+          h("td", { title: "stima: 2 minuti per ogni bozza corretta, 12 secondi per ogni email approvata" }, "~" + x.minuti_tuoi + " min")))),
+      d.angoli.length ? h("div", {}, h("h4", {}, "Angoli d'attacco che funzionano"), tab(["Angolo", "Partite", "Risposte", "Interessati"],
+        d.angoli.map(x => h("tr", {}, h("td", {}, x.angolo), h("td", {}, String(x.partite)), h("td", {}, x.risposte + " (" + x.tasso + "%)"), h("td", {}, String(x.interessati)))))) : null,
+      d.liste.length ? h("div", {}, h("h4", {}, "Liste"), tab(["Lista", "Partite", "Risposte", "Interessati"],
+        d.liste.map(x => h("tr", {}, h("td", {}, x.lista), h("td", {}, String(x.partite)), h("td", {}, x.risposte + " (" + x.tasso + "%)"), h("td", {}, String(x.interessati)))))) : null);
+  }).catch(e => corpo.replaceChildren(avviso(e.message, "no")));
+  return h("details", { class: "carta" }, h("summary", {}, h("b", {}, "Classifica delle campagne"), h("span", { class: "sotto" }, " — quali portano più risposte e call, e quanto costano")), corpo);
+}
+
 function _colonneCp(c, salva) {
   const fogli = (c.foglio_resoconto || []).filter(f => f.colonne && f.colonne.length);
   if (!fogli.length) return null;
