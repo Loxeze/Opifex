@@ -179,6 +179,8 @@ function vistaSistema() {
             catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, "Salva i limiti"))),
         h("h3", {}, "Ore di silenzio"),
         bloccoSilenzio(),
+        h("h3", {}, "Connettore per Claude e ChatGPT"),
+        bloccoConnettoreMcp(),
         h("h3", {}, "Allarmi"),
         h("div", { class: "carta" },
           h("p", { class: "aiuto" }, "Ogni 10 minuti Opifex controlla disco del server, errori ripetuti dei fornitori AI e stato del backup. Se qualcosa non va ricevi un messaggio urgente su Telegram (e lo stesso allarme non si ripete prima di 6 ore)."),
@@ -586,4 +588,32 @@ function vistaScatolaNera() {
   return [h("h2", {}, "Scatola nera"),
     h("p", { class: "aiuto" }, "Per ogni lavoro di un agente: le chiamate al modello con token e tempi, gli strumenti usati con dati e risultati, gli adattamenti del prompt, i passaggi a Claude, i colleghi interpellati e gli errori. Clicca una riga per vedere tutto, e dai un voto: servirà agli esami. Le tracce restano 30 giorni. Dalla chat la apri con «Come ci è arrivato»."),
     corpo];
+}
+
+
+// 2.77: Opifex come connettore personalizzato in Claude e ChatGPT
+function bloccoConnettoreMcp() {
+  const corpo = h("div", { class: "carta" }, h("p", { class: "sotto" }, "Carico…"));
+  const carica = async () => {
+    let d; try { d = await api("GET", "/gestione/connettore"); } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); return; }
+    const ind = h("input", { type: "text", value: d.indirizzo, readonly: true, style: "width:100%" });
+    const copia = h("button", { class: "s", type: "button", onclick: async () => { try { await navigator.clipboard.writeText(d.indirizzo); copia.textContent = "Copiato"; } catch (e) { ind.select(); } } }, "Copia");
+    corpo.replaceChildren(
+      h("p", { class: "aiuto" }, "Collega Opifex a Claude o a ChatGPT: da lì potrai aggiungere contatti al CRM, preparare bozze di email e campagne, inviti del calendario, task e incarichi per gli agenti. Email e campagne restano da approvare qui; per gli inviti ti viene chiesto ogni volta se mandarli subito. Per collegarlo entri con il tuo account di Opifex e la verifica in due passaggi."),
+      h("label", {}, "Indirizzo del connettore"), h("div", { class: "riga" }, ind, copia),
+      h("p", { class: "sotto" }, "In Claude: Impostazioni → Connettori → Aggiungi connettore personalizzato, incolla l'indirizzo. In ChatGPT: Impostazioni → App e connettori → Avanzate → Modalità sviluppatore, poi Crea, incolla l'indirizzo con autenticazione OAuth."),
+      h("h4", {}, "Collegamenti attivi"),
+      d.collegamenti.length ? h("div", {}, d.collegamenti.map(x => h("div", { class: "azioni", style: "align-items:center" },
+        h("span", {}, h("b", {}, x.nome), " · dal " + new Date(x.dal).toLocaleDateString("it-IT") + (x.ultimo_uso ? " · ultimo uso " + new Date(x.ultimo_uso).toLocaleString("it-IT") : "")),
+        h("button", { class: "s piccolo", type: "button", onclick: async () => { await api("DELETE", "/gestione/connettore/" + encodeURIComponent(x.client_id)); carica(); } }, "Scollega"))))
+        : h("p", { class: "sotto" }, "Nessuno ancora."),
+      h("h4", {}, "Inviti del calendario da approvare"),
+      d.inviti.length ? h("div", {}, d.inviti.map(x => h("div", { class: "azioni", style: "align-items:center" },
+        h("span", {}, h("b", {}, x.titolo), " · " + new Date(x.inizio).toLocaleString("it-IT") + (x.invitati.length ? " · con " + x.invitati.join(", ") : "") + (x.da_cliente ? " · da " + x.da_cliente : "")),
+        h("button", { class: "p piccolo", type: "button", onclick: async () => { try { await api("POST", "/gestione/connettore/inviti/" + x.id + "?approva=true"); carica(); } catch (e) { alert(e.message); } } }, "Manda l'invito"),
+        h("button", { class: "s piccolo", type: "button", onclick: async () => { await api("POST", "/gestione/connettore/inviti/" + x.id + "?approva=false"); carica(); } }, "Scarta"))))
+        : h("p", { class: "sotto" }, "Nessuno."));
+  };
+  carica();
+  return corpo;
 }

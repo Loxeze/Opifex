@@ -92,6 +92,7 @@ from .rotte_crm_modello import router as router_crm_modello
 from .rotte_crm_imprese import router as router_crm_imprese
 from .crm_ricerca import router as router_crm_ricerca
 from .crm_doppioni import router as router_crm_doppioni
+from .mcp_server import router as router_mcp
 from .radar import router as router_radar
 from .scatola_nera import router as router_scatola_nera
 from .n8n import router as router_n8n
@@ -513,6 +514,7 @@ app.include_router(router_crm_modello)
 app.include_router(router_crm_imprese)
 app.include_router(router_crm_ricerca)
 app.include_router(router_crm_doppioni)
+app.include_router(router_mcp)
 app.include_router(router_radar)
 app.include_router(router_scatola_nera)
 app.include_router(router_n8n)

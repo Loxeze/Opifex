@@ -198,6 +198,17 @@ def _comando(conn, testo: str, r: dict) -> str | None:
             return str(e)
         except ErroreFornitore:
             return "Il Redattore non risponde adesso: riprova tra poco."
+    if cmd == "/invito":   # 2.77: invito del calendario preparato dal connettore, da approvare
+        if len(parti) < 2 or not parti[1].isdigit():
+            return "Uso: /invito NUMERO"
+        from . import mcp_server
+        try:
+            mcp_server.approva_invito(conn, int(parti[1]))
+            return "Invito creato nel calendario e mandato agli invitati."
+        except LookupError as e:
+            return str(e)
+        except mcp_server.ErroreStrumento as e:
+            return str(e)
     if cmd == "/ok":
         if len(parti) < 2 or not parti[1].isdigit():
             return "Uso: /ok NUMERO (il numero della bozza)"
