@@ -222,10 +222,15 @@ function _blocchiFlusso(c, salva) {
   const soll = campo(h("select", {}, [[0, "nessun sollecito"], [1, "solo la seconda email"], [2, "seconda email, e la terza se c'è una novità"]].map(([v, t]) => { const o = h("option", { value: v }, t); if (v === c.solleciti) o.selected = true; return o; })), "solleciti", el => Number(el.value));
   const link = campo(h("input", { type: "url", value: c.link_prenotazione || "", placeholder: "https://calendar.app.google/… (pagina di prenotazione, slot da 20 minuti)" }), "link_prenotazione");
   const cerca = h("input", { type: "checkbox" }); cerca.checked = !!c.cerca_email_nuova; campo(cerca, "cerca_email_nuova", el => el.checked);
+  const resp = h("input", { type: "checkbox" }); resp.checked = !!c.cerca_responsabile; campo(resp, "cerca_responsabile", el => el.checked);
+  const simili = h("input", { type: "checkbox" }); simili.checked = !!c.cerca_simili; campo(simili, "cerca_simili", el => el.checked);
+  const ricerche = [h("label", { class: "spunta" }, resp, h("span", {}, "Per le aziende con l'email generica (info@…), prima di scrivere cerca il responsabile")),
+    h("label", { class: "spunta" }, simili, h("span", {}, "Ogni settimana cerca contatti simili a chi ha risposto (li approvi tu, poi entrano nella campagna)")),
+    h("span", { class: "sotto" }, "Ricerche online del Ricercatore contatti: spente di serie, accendile per le liste che valgono la spesa.")];
   const opp = Object.fromEntries((c.opportunita || []).map(x => [x.stato, x.n]));
   return h("div", { class: "fl-flusso" },
     blocco("partenza", "Contatti", c.foglio ? "Righe nuove del foglio Google → contatti nel CRM (senza doppioni) e destinatari. Il foglio resta tuo: Opifex lo legge e basta." : "Contatti scelti dal CRM. Puoi collegare anche un foglio Google: le righe nuove entreranno da sole.",
-      [foglio, accDrive, leggiOra, statoFoglio, altriDoc, _colonneCp(c, salva)].filter(Boolean), n.totale), freccia(),
+      [foglio, accDrive, leggiOra, statoFoglio, altriDoc, _colonneCp(c, salva)].filter(Boolean).concat(ricerche), n.totale), freccia(),
     blocco("azione", "Studio del sito", "Il Redattore legge il sito (o le note già raccolte, se hanno meno di 6 mesi), verifica la zona con il CRM e sceglie l'angolo d'attacco seguendo il brief. Riceve solo dati pubblici: mai email o nomi delle persone.",
       [h("label", { class: "spunta" }, pers, h("span", {}, "Personalizza con il sito")), h("label", {}, "Modello ", modello), h("label", {}, "Tetto di spesa ", tetto), h("span", { class: "sotto" }, "speso " + _euroCp(c.spesa) + " su " + _euroCp(c.tetto_spesa))],
       n.in_studio || null), freccia(),

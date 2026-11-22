@@ -539,6 +539,10 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
     k = contatto(conn, d["contatto_id"])
     if "@" not in k["email"]:
         conn.execute("UPDATE campagne_posta_dest SET stato='scartata', nota='senza email', aggiornato_il=NOW() WHERE id=%s", (d["id"],)); return "scartata"
+    if c.get("cerca_responsabile") and not d.get("ricerca_resp") and not k["nome"] and re.match(r"^(info|contatti?|segreteria|amministrazione|ufficio|office|mail|posta|hello|sales|vendite|commerciale|booking|reception|enoteca|cantina|wine|wines)@", k["email"], re.I):
+        conn.execute("UPDATE campagne_posta_dest SET ricerca_resp='da_cercare', nota='cerco il responsabile', aggiornato_il=NOW() WHERE id=%s", (d["id"],))
+        conn.commit()   # 2.76: prima si cerca chi decide, poi si scrive
+        return "in_attesa"
     from . import regole_invio   # 2.72: dominio che non riceve posta, o gia' contattato altrove: niente token spesi
     saltato = regole_invio.prima_di_scrivere(conn, c, d, k["email"])
     if saltato:

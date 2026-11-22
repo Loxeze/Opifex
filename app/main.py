@@ -91,6 +91,7 @@ from .rotte_crm_schede import router as router_crm_schede
 from .rotte_crm_modello import router as router_crm_modello
 from .rotte_crm_imprese import router as router_crm_imprese
 from .crm_ricerca import router as router_crm_ricerca
+from .crm_doppioni import router as router_crm_doppioni
 from .radar import router as router_radar
 from .scatola_nera import router as router_scatola_nera
 from .n8n import router as router_n8n
@@ -210,6 +211,8 @@ async def _manutenzione():
         _passo("campagne email: risposte", lambda c: __import__("app.campagne", fromlist=["x"]).risposte(c))
         _passo("campagne email: respinte", lambda c: __import__("app.respinte", fromlist=["x"]).giro(c))
         _passo("campagne email: ricerca di email nuove", lambda c: __import__("app.crm_ricerca", fromlist=["x"]).giro_email_nuove(c))
+        _passo("campagne email: ricerca dei responsabili", lambda c: __import__("app.crm_ricerca", fromlist=["x"]).giro_responsabili(c))
+        _passo("campagne email: contatti simili", lambda c: __import__("app.crm_ricerca", fromlist=["x"]).giro_simili(c))
         _passo("campagne email: riepiloghi su Telegram", lambda c: __import__("app.campagne_telegram", fromlist=["x"]).giro(c))
         _passo("preventivi senza risposta", lambda c: __import__("app.dopo_call", fromlist=["x"]).promemoria_proposte(c))
         _passo("campagne email: flusso a blocchi", lambda c: __import__("app.flusso", fromlist=["x"]).giro(c))
@@ -509,6 +512,7 @@ app.include_router(router_crm_schede)
 app.include_router(router_crm_modello)
 app.include_router(router_crm_imprese)
 app.include_router(router_crm_ricerca)
+app.include_router(router_crm_doppioni)
 app.include_router(router_radar)
 app.include_router(router_scatola_nera)
 app.include_router(router_n8n)

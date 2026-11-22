@@ -700,6 +700,8 @@ class Modifica(BaseModel):
     invio_automatico: bool | None = None
     cerca_email_nuova: bool | None = None
     oggetto_b: str | None = Field(default=None, max_length=200)
+    cerca_responsabile: bool | None = None
+    cerca_simili: bool | None = None
     ore_dal: int | None = Field(default=None, ge=0, le=23)
     ore_al: int | None = Field(default=None, ge=1, le=24)
     solo_feriali: bool | None = None
@@ -725,7 +727,7 @@ def modifica(cid: int, d: Modifica, u: dict = Depends(solo_titolare)):
             if not a_["puo"]:
                 raise HTTPException(status.HTTP_409_CONFLICT, f"L'invio automatico si accende dopo {a_['serve']} bozze di fila approvate senza correzioni: per ora sono {a_['di_fila']}")
         for k in ("nome", "obiettivo", "oggetto", "testo", "per_ora", "categoria", "foglio", "personalizza", "modello", "tetto_spesa", "sollecito_giorni",
-                  "solleciti", "link_prenotazione", "invio_automatico", "cerca_email_nuova", "oggetto_b", "ore_dal", "ore_al", "solo_feriali", "evita_dal", "evita_al"):
+                  "solleciti", "link_prenotazione", "invio_automatico", "cerca_email_nuova", "oggetto_b", "cerca_responsabile", "cerca_simili", "ore_dal", "ore_al", "solo_feriali", "evita_dal", "evita_al"):
             v = getattr(d, k)
             if v is not None:
                 conn.execute(f"UPDATE campagne_posta SET {k}=%s WHERE id=%s", (v.strip() if isinstance(v, str) else v, cid))

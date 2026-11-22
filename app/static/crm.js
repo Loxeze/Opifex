@@ -2,7 +2,7 @@
 // Contatti (CRM): liste, importazione CSV, riepilogo aggregato e ricerca. I dati personali sono cifrati sul server; gli agenti vedono solo conteggi.
 
 function vistaCrm() {
-  const TAB = [["cruscotto", "Cruscotto"], ["schede", "Contatti"], ["ricontattare", "Da ricontattare"], ["pipeline", "Opportunità"], ["campagne", "Campagne email"], ["radar", "Radar"], ["ricerca", "Ricerca contatti"], ["campi", "Campi e categorie"], ["liste", "Liste"]];
+  const TAB = [["cruscotto", "Cruscotto"], ["schede", "Contatti"], ["ricontattare", "Da ricontattare"], ["pipeline", "Opportunità"], ["campagne", "Campagne email"], ["radar", "Radar"], ["ricerca", "Ricerca contatti"], ["campi", "Campi e categorie"], ["liste", "Liste"], ["doppioni", "Doppioni"]];
   if (!stato.crmTab) stato.crmTab = "cruscotto";
   const corpo = h("div");
   const tabs = h("div", { class: "azioni", style: "margin-bottom:12px;align-items:center" }, TAB.map(([id, nome]) => h("button", { class: stato.crmTab === id ? "p" : "s", onclick: () => { stato.crmTab = id; disegna(); } }, nome)));
@@ -22,6 +22,7 @@ function vistaCrm() {
   else if (stato.crmTab === "ricerca") corpo.append(...[].concat(crmRicerca()));
   else if (stato.crmTab === "radar") corpo.append(...[].concat(crmRadar(), crmRicerca(true)));
   else if (stato.crmTab === "campi") corpo.append(...[].concat(campiPersonalizzati()));
+  else if (stato.crmTab === "doppioni") corpo.append(crmDoppioni());
   else corpo.append(...[].concat(crmListe()));
   return [h("h2", {}, "CRM"), tabs, importa, corpo];
 }
@@ -178,4 +179,31 @@ function crmRadar() {
   return [h("h3", {}, "Radar"),
     h("p", { class: "aiuto" }, "Il Radar legge notizie, articoli di giornale, blog e comunicati e ti segnala potenziali clienti, collaboratori, partner e opportunità. Ogni tema ha la sua frequenza. Le segnalazioni arrivano qui sotto con l'articolo da cui nascono e il motivo: nulla entra nel CRM senza il tuo sì e nessuno viene contattato."),
     msg, box, h("h3", {}, "Segnalazioni e proposte da valutare")];
+}
+
+
+// 2.76: doppioni nel CRM — Opifex propone, Lorenzo sceglie quale tenere e conferma
+function crmDoppioni() {
+  const corpo = h("div", {}, h("p", { class: "sotto" }, "Cerco i doppioni…"));
+  const carica = async () => {
+    let d; try { d = await api("GET", "/gestione/crm/doppioni"); } catch (e) { corpo.replaceChildren(avviso(e.message, "no")); return; }
+    if (!d.gruppi.length) { corpo.replaceChildren(h("p", { class: "aiuto" }, "Nessun doppione trovato: ogni azienda e ogni persona compare una volta sola.")); return; }
+    corpo.replaceChildren(h("p", { class: "aiuto" }, "Contatti che sembrano la stessa azienda o persona, con il motivo. Scegli quale tenere: unendo, storia, opportunità, campagne, recapiti e preventivi degli altri passano a quello, i campi vuoti si completano e gli altri spariscono. Non si può annullare."),
+      ...d.gruppi.map(g => {
+        const nome = "tieni-" + g.contatti[0].id;
+        const scelte = g.contatti.map((x, i) => { const r = h("input", { type: "radio", name: nome, value: x.id }); if (i === 0) r.checked = true; return [r, x]; });
+        const esito = h("div");
+        return h("div", { class: "carta" }, h("p", { class: "sotto" }, "Perché: " + g.motivo),
+          scelte.map(([r, x]) => h("label", { class: "spunta" }, r, h("span", {}, h("b", {}, x.ente || x.nome || "(senza nome)"),
+            " " + [x.nome && x.ente ? x.nome : "", x.email, x.telefono, x.comune || x.provincia].filter(Boolean).join(" · ")))),
+          h("div", { class: "azioni" }, h("button", { class: "p", type: "button", onclick: async (ev) => {
+            const tieni = Number(scelte.find(([r]) => r.checked)[0].value);
+            const altri = g.contatti.map(x => x.id).filter(i => i !== tieni);
+            if (ev.target.dataset.conferma !== "1") { ev.target.dataset.conferma = "1"; ev.target.textContent = "Confermi? Unisci " + altri.length + " in quello scelto"; return; }
+            try { const r = await api("POST", "/gestione/crm/doppioni/unisci", { tieni, altri }); esito.replaceChildren(avviso("Uniti: " + r.uniti + " contatti, " + r.righe_spostate + " dati spostati.", "ok")); setTimeout(carica, 1200); }
+            catch (e) { esito.replaceChildren(avviso(e.message, "no")); } } }, "Unisci in quello scelto")), esito);
+      }));
+  };
+  carica();
+  return corpo;
 }

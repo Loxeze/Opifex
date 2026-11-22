@@ -563,6 +563,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                         extra.append(crm_ricerca.STRUMENTO_EMAIL)
                         avviso_extra += crm_ricerca.AVVISO_EMAIL
                         gestori["crm_email_nuova"] = gcr
+                    if crm_ricerca.RESPONSABILI.get():   # 2.76: ricerca dei responsabili
+                        extra.append(crm_ricerca.STRUMENTO_RESP)
+                        avviso_extra += crm_ricerca.AVVISO_RESP
+                        gestori["crm_responsabile"] = gcr
                 if crm_nom_tool:
                     extra.extend(crm_contatti_agenti.STRUMENTI)
                     avviso_extra += crm_contatti_agenti.AVVISO
