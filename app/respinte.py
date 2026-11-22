@@ -11,6 +11,7 @@ I rifiuti temporanei (casella piena, server occupato, «riproveremo») NON blocc
 Se la campagna ha l'opzione «cerca un'email nuova» accesa (spenta di serie: per le liste di poco valore non conviene spendere),
 il Ricercatore contatti cerca online un altro indirizzo di lavoro per quell'ente, verifica che il dominio riceva posta,
 aggiorna il CRM e rimette il contatto in coda nella stessa campagna."""
+import os
 import re
 import socket
 
@@ -139,6 +140,8 @@ def dominio_ok(email: str) -> bool | None:
     dom = (email or "").rsplit("@", 1)[-1].strip().lower().rstrip(".")
     if not dom or "." not in dom:
         return False
+    if os.environ.get("OPIFEX_SENZA_DNS"):   # collaudi senza rete
+        return None
     if dom in _CACHE_DOMINI:
         return _CACHE_DOMINI[dom]
     esito = None

@@ -201,6 +201,21 @@ function _blocchiFlusso(c, salva) {
   const auto = h("input", { type: "checkbox", disabled: !a.puo && !c.invio_automatico }); auto.checked = c.invio_automatico; campo(auto, "invio_automatico", el => el.checked);
   // invio, attesa, solleciti
   const ritmo = campo(h("input", { type: "number", min: 1, max: 120, value: c.per_ora, style: "width:70px" }), "per_ora", el => Number(el.value));
+  // 2.72: fascia oraria, giorni feriali, periodo da evitare, riscaldamento della casella
+  const oreDal = campo(h("input", { type: "number", min: 0, max: 23, value: c.ore_dal ?? "", placeholder: "—", style: "width:60px" }), "ore_dal", el => el.value === "" ? null : Number(el.value));
+  const oreAl = campo(h("input", { type: "number", min: 1, max: 24, value: c.ore_al ?? "", placeholder: "—", style: "width:60px" }), "ore_al", el => el.value === "" ? null : Number(el.value));
+  const feriali = h("input", { type: "checkbox" }); feriali.checked = !!c.solo_feriali; campo(feriali, "solo_feriali", el => el.checked);
+  const evDal = campo(h("input", { type: "text", value: c.evita_dal || "", placeholder: "MM-GG", pattern: "\\d{2}-\\d{2}", style: "width:70px" }), "evita_dal");
+  const evAl = campo(h("input", { type: "text", value: c.evita_al || "", placeholder: "MM-GG", pattern: "\\d{2}-\\d{2}", style: "width:70px" }), "evita_al");
+  const scalda = h("input", { type: "checkbox" }); scalda.checked = !!c.riscalda_casella; campo(scalda, "riscalda_casella", el => el.checked);
+  const ore = c.ore_dal != null && c.ore_al != null ? Math.max(0, c.ore_al - c.ore_dal) : 24;
+  const regoleInvio = [h("label", {}, "Fascia oraria dalle ", oreDal, " alle ", oreAl), h("label", { class: "spunta" }, feriali, h("span", {}, "Solo giorni feriali")),
+    h("label", {}, "Periodo da evitare dal ", evDal, " al ", evAl),
+    h("label", { class: "spunta" }, scalda, h("span", {}, "Casella nuova: riscaldala (20 email il primo giorno, poi sale fino a 300 in 10 giorni)")),
+    h("span", { class: "sotto" }, "Oggi da questa casella: " + (c.partite_oggi || 0) + " di " + (c.tetto_oggi || 300) + " · al massimo " + Math.min(c.per_ora * ore, c.tetto_oggi || 300) + " al giorno con questo ritmo e questa fascia"),
+    c.non_parte ? h("span", { class: "sotto cp-blocco-fermo" }, "Adesso non parte: " + c.non_parte) : null,
+    c.ore_suggerite ? h("span", { class: "sotto" }, "Dai dati di questa categoria: rispondono di più tra le " + c.ore_suggerite.ore_dal + " e le " + c.ore_suggerite.ore_al + " (" + c.ore_suggerite.tasso + "% contro " + c.ore_suggerite.media + "% di media). ",
+      _btnCp("Usa questa fascia", () => salva({ ore_dal: c.ore_suggerite.ore_dal, ore_al: c.ore_suggerite.ore_al }), "s piccolo")) : null].filter(Boolean);
   const giorni = campo(h("input", { type: "number", min: 3, max: 60, value: c.sollecito_giorni, style: "width:70px" }), "sollecito_giorni", el => Number(el.value));
   const soll = campo(h("select", {}, [[0, "nessun sollecito"], [1, "solo la seconda email"], [2, "seconda email, e la terza se c'è una novità"]].map(([v, t]) => { const o = h("option", { value: v }, t); if (v === c.solleciti) o.selected = true; return o; })), "solleciti", el => Number(el.value));
   const link = campo(h("input", { type: "url", value: c.link_prenotazione || "", placeholder: "https://calendar.app.google/… (pagina di prenotazione, slot da 20 minuti)" }), "link_prenotazione");
@@ -219,7 +234,7 @@ function _blocchiFlusso(c, salva) {
           : "Blocco in corso: " + Math.min(c.blocco.fatte, c.blocco.dimensione) + " di " + c.blocco.dimensione + " preparate")] : null, n.da_approvare), freccia(),
     blocco("decisione", "Approvazione", c.invio_automatico ? "Invio automatico acceso: le bozze partono senza passare da te. Le risposte agli interessati le approvi sempre tu." : "Approvi tu ogni email. L'invio automatico si può accendere dopo " + a.serve + " bozze di fila approvate senza correzioni.",
       [h("label", { class: "spunta" }, auto, h("span", {}, "Invio automatico")), h("span", { class: "sotto" }, a.di_fila + " di " + a.serve + " approvate di fila senza correzioni")], null), freccia(),
-    blocco("azione", "Invio", "Dalla casella " + (c.mittente_email || "?") + ", piano, per non finire nello spam. Entra nella storia del contatto.", [h("label", {}, "Email all'ora ", ritmo)], n.partite), freccia(),
+    blocco("azione", "Invio", "Dalla casella " + (c.mittente_email || "?") + ", piano, per non finire nello spam. Entra nella storia del contatto.", [h("label", {}, "Email all'ora ", ritmo)].concat(regoleInvio), n.partite), freccia(),
     blocco("attesa", "Attesa della risposta", "La Posta legge le risposte con il modello del portatile (restano in casa) e le smista da sola.", [h("label", {}, "Giorni prima del sollecito ", giorni), h("label", {}, "Solleciti ", soll)], n.inviata), freccia(),
     h("div", { class: "fl-uscite" },
       blocco("uscita", "Interessato", "Opportunità al primo gradino, notifica, e la bozza di risposta con il link per prenotare la call. Anche i «mi richiami più avanti» contano come interessati.", [link], n.interessato),

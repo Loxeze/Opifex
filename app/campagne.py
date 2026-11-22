@@ -127,6 +127,9 @@ def crea(conn, d: dict) -> int:
                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                        (d["nome"].strip(), (d.get("obiettivo") or "").strip(), d.get("azienda_id"), agente_posta(conn), d["mittente"], Jsonb(filtri),
                         int(d.get("per_ora") or 20), foglio, (d.get("categoria") or "").strip()[:40], d.get("personalizza", True) is not False)).fetchone()["id"]
+    from . import regole_invio   # 2.72: fascia oraria e periodo da evitare di serie per la categoria (le cantine: la mattina, mai in vendemmia)
+    v = regole_invio.di_serie(d.get("categoria") or "")
+    conn.execute("UPDATE campagne_posta SET ore_dal=%s, ore_al=%s, evita_dal=%s, evita_al=%s, solo_feriali=TRUE WHERE id=%s", (v["ore_dal"], v["ore_al"], v["evita_dal"], v["evita_al"], cid))
     conn.commit()
     if not foglio or d.get("anche_crm"):   # con il foglio, i destinatari arrivano dal foglio (salvo richiesta esplicita)
         calcola_destinatari(conn, cid)
@@ -173,13 +176,16 @@ def prepara(conn, cid: int, limite: int = 300) -> dict:
     if not c["oggetto"].strip() or not c["testo"].strip():
         raise ErroreCampagna("Manca il testo: fallo scrivere alla Posta o scrivilo tu")
     canale, acc, mitt = _mittente(conn, c["mittente"])
-    righe = conn.execute("""SELECT d.id, k.nome_cifrato, k.ente_cifrato, k.email_cifrata, k.genere FROM campagne_posta_dest d JOIN crm_contatti k ON k.id = d.contatto_id
+    righe = conn.execute("""SELECT d.id, d.contatto_id, k.nome_cifrato, k.ente_cifrato, k.email_cifrata, k.genere FROM campagne_posta_dest d JOIN crm_contatti k ON k.id = d.contatto_id
                             WHERE d.campagna_id=%s AND d.stato='in_attesa' ORDER BY d.id LIMIT %s""", (cid, limite)).fetchall()
     fatte = 0
     for r in righe:
         email = _d(r["email_cifrata"]).strip()
         if "@" not in email:
             conn.execute("UPDATE campagne_posta_dest SET stato='scartata', aggiornato_il=NOW() WHERE id=%s", (r["id"],)); continue
+        from . import regole_invio   # 2.72
+        if regole_invio.prima_di_scrivere(conn, c, dict(r), email):
+            continue
         nome, ente = _d(r["nome_cifrato"]).strip(), _d(r["ente_cifrato"]).strip()
         persona = (r.get("genere") or "organizzazione") == "persona" or bool(nome and ente)
         testo = _componi(c["testo"], nome, ente, persona) + PIEDE
@@ -317,7 +323,9 @@ def inviate_oggi(conn, canale: str | None = None, account_id: int | None = None)
 
 def tetto_casella(conn, canale: str, account_id: int) -> int:
     """Quante email puo' mandare oggi questa casella (2.72: le caselle nuove si scaldano piano)."""
-    return MAX_GIORNO
+    from . import regole_invio
+    r = regole_invio.riscaldamento(conn, f"{canale}:{account_id}")
+    return min(MAX_GIORNO, r) if r is not None else MAX_GIORNO
 
 
 def caselle_piene(conn) -> list[dict]:
@@ -339,7 +347,10 @@ def invia_in_coda(conn) -> int:
     from . import invio_posta
     inviate = 0
     usate: dict = {}   # casella -> (partite oggi, tetto)
-    for c in conn.execute("SELECT id, per_ora, mittente FROM campagne_posta WHERE stato='in_corso' ORDER BY id").fetchall():
+    from . import regole_invio
+    for c in conn.execute("SELECT id, per_ora, mittente, ore_dal, ore_al, solo_feriali, evita_dal, evita_al FROM campagne_posta WHERE stato='in_corso' ORDER BY id").fetchall():
+        if regole_invio.perche_non_parte(c):   # 2.72: periodo da evitare (vendemmia) o fuori dalla fascia oraria
+            continue
         canale, _, n = (c["mittente"] or "").partition(":")
         if n.isdigit():   # 2.71: il tetto e' della casella, non di tutte le campagne insieme
             if c["mittente"] not in usate:
@@ -484,6 +495,13 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
             "richiamo_il": r["richiamo_il"], "richiamo_nota": r["richiamo_nota"], "richiamo_fatto": r["richiamo_fatto"],
             "preventivo": prev.get(r["opportunita_id"])})
     c["numeri"] = _conta(conn, cid)
+    from . import regole_invio
+    c["riscalda_casella"] = regole_invio.riscaldamento(conn, c["mittente"] or "") is not None
+    _can, _, _acc = (c["mittente"] or "").partition(":")
+    c["tetto_oggi"] = tetto_casella(conn, _can, int(_acc)) if _acc.isdigit() else MAX_GIORNO
+    c["partite_oggi"] = inviate_oggi(conn, _can, int(_acc)) if _acc.isdigit() else 0
+    c["non_parte"] = regole_invio.perche_non_parte(c)
+    c["ore_suggerite"] = regole_invio.ore_migliori(conn, c.get("categoria") or "")
     c["respinte"] = conn.execute("""SELECT count(*) FILTER (WHERE ricerca_email='trovata') AS trovate,
                                            count(*) FILTER (WHERE ricerca_email IN ('da_cercare','in_corso')) AS in_ricerca
                                     FROM campagne_posta_dest WHERE campagna_id=%s""", (cid,)).fetchone()
@@ -640,6 +658,12 @@ class Modifica(BaseModel):
     link_prenotazione: str | None = Field(default=None, max_length=400)
     invio_automatico: bool | None = None
     cerca_email_nuova: bool | None = None
+    ore_dal: int | None = Field(default=None, ge=0, le=23)
+    ore_al: int | None = Field(default=None, ge=1, le=24)
+    solo_feriali: bool | None = None
+    evita_dal: str | None = Field(default=None, pattern=r"^(\d{2}-\d{2})?$")
+    evita_al: str | None = Field(default=None, pattern=r"^(\d{2}-\d{2})?$")
+    riscalda_casella: bool | None = None
 
 
 @router.put("/{cid}")
@@ -659,10 +683,18 @@ def modifica(cid: int, d: Modifica, u: dict = Depends(solo_titolare)):
             if not a_["puo"]:
                 raise HTTPException(status.HTTP_409_CONFLICT, f"L'invio automatico si accende dopo {a_['serve']} bozze di fila approvate senza correzioni: per ora sono {a_['di_fila']}")
         for k in ("nome", "obiettivo", "oggetto", "testo", "per_ora", "categoria", "foglio", "personalizza", "modello", "tetto_spesa", "sollecito_giorni",
-                  "solleciti", "link_prenotazione", "invio_automatico", "cerca_email_nuova"):
+                  "solleciti", "link_prenotazione", "invio_automatico", "cerca_email_nuova", "ore_dal", "ore_al", "solo_feriali", "evita_dal", "evita_al"):
             v = getattr(d, k)
             if v is not None:
                 conn.execute(f"UPDATE campagne_posta SET {k}=%s WHERE id=%s", (v.strip() if isinstance(v, str) else v, cid))
+        for k in ("ore_dal", "ore_al"):   # fascia tolta: si manda a qualsiasi ora
+            if k in d.model_fields_set and getattr(d, k) is None:
+                conn.execute(f"UPDATE campagne_posta SET {k}=NULL WHERE id=%s", (cid,))
+        if d.riscalda_casella is not None:
+            from . import regole_invio
+            m = conn.execute("SELECT mittente FROM campagne_posta WHERE id=%s", (cid,)).fetchone()["mittente"]
+            if m:
+                regole_invio.imposta_riscaldamento(conn, m, d.riscalda_casella)
         if d.brief is not None:
             b = {k: str(d.brief.get(k) or "")[:1500] for k in ("destinatari", "occasione", "offerta", "cercare", "angoli", "evitare", "tono")}
             conn.execute("UPDATE campagne_posta SET brief=%s WHERE id=%s", (Jsonb(b), cid))

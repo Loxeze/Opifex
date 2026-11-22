@@ -25,6 +25,7 @@ def sql(q, p=None):
 def K():
     return psycopg.connect(DSN, row_factory=dict_row)
 scuola.giro = lambda *a, **k: None
+import app.regole_invio as _ri; _ri.perche_non_parte = lambda c, quando=None: ""   # 2.72: fascia oraria e feriali provati in test_regole_invio
 cf = cassaforte.cifra
 
 # ---- finti: il sito, il modello online, il modello locale, il foglio, l'invio
@@ -233,6 +234,8 @@ with TestClient(app) as c:
     cp = sql("SELECT nome, foglio, brief->>'occasione', link_prenotazione, invio_automatico, stato FROM campagne_posta WHERE id=%s", (r["id"],))[0]
     ok("duplica: brief e impostazioni, senza foglio e senza invio automatico", cp == ("Hotel Sharm (copia)", "", "A marzo siamo a Sharm per un lavoro", "https://calendar.app.google/abc123", False, "bozza"), cp)
     # note riusate: la copia sul contatto gia' studiato non rilegge il sito
+    # 2.72: chi ha ricevuto un'email da poco da un'altra campagna viene saltato; qui fingiamo che sia passato tempo
+    sql("UPDATE campagne_posta_dest SET inviata_il = inviata_il - INTERVAL '200 days', risposta_il = risposta_il - INTERVAL '200 days' WHERE campagna_id=%s", (cid,))
     sql("UPDATE campagne_posta SET stato='in_corso', testo='{saluto}\nx', oggetto='o' WHERE id=%s", (r["id"],))
     with K() as k:
         flusso.aggiungi_destinatario(k, r["id"], coral, "direzione@coralbay.com"); k.commit()

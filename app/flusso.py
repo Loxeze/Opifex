@@ -539,6 +539,10 @@ def prepara_uno(conn, c: dict, d: dict) -> str:
     k = contatto(conn, d["contatto_id"])
     if "@" not in k["email"]:
         conn.execute("UPDATE campagne_posta_dest SET stato='scartata', nota='senza email', aggiornato_il=NOW() WHERE id=%s", (d["id"],)); return "scartata"
+    from . import regole_invio   # 2.72: dominio che non riceve posta, o gia' contattato altrove: niente token spesi
+    saltato = regole_invio.prima_di_scrivere(conn, c, d, k["email"])
+    if saltato:
+        return saltato
     if not tetto_ok(conn, c["id"]):   # tetto raggiunto: la campagna si ferma e avvisa, il contatto aspetta (niente email identiche al posto di quelle scritte)
         _spendi(conn, c, 0)
         conn.commit()

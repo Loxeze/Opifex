@@ -26,6 +26,7 @@ def sql(q, p=None, dsn=None):
     with psycopg.connect(dsn or DSN, autocommit=True) as c:
         cur = c.execute(q, p); return cur.fetchall() if cur.description else None
 scuola.giro = lambda *a, **k: None
+import app.regole_invio as _ri; _ri.perche_non_parte = lambda c, quando=None: ""   # 2.72: fascia oraria e feriali provati in test_regole_invio
 cf = cassaforte.cifra
 
 # ---------- la 2: un'impresa con la sua scheda, tre contatti, un affare, la storia ----------
@@ -144,6 +145,8 @@ with TestClient(app) as c:
     cid2 = r.json()["id"]
     ok("senza testo non si prepara", c.post(f"/gestione/campagne/{cid2}/prepara", headers=H).status_code == 422)
     c.put(f"/gestione/campagne/{cid2}", headers=H, json={"oggetto": "Prova", "testo": "{saluto}\nTesto"})
+    # 2.72: chi ha ricevuto un'email da poco da un'altra campagna viene saltato; qui fingiamo che sia passato tempo
+    sql("UPDATE campagne_posta_dest SET inviata_il = inviata_il - INTERVAL '200 days', risposta_il = risposta_il - INTERVAL '200 days' WHERE campagna_id=%s", (cid,))
     c.post(f"/gestione/campagne/{cid2}/prepara", headers=H)
     e2 = sql("SELECT id FROM email_in_uscita WHERE campagna_id=%s", (cid2,))[0][0]
     c.post(f"/gestione/campagne/{cid2}/approva", headers=H, json={"ids": [e2]})
