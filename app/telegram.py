@@ -22,6 +22,8 @@ from .fornitori import ErroreFornitore
 from .navigatore import ErroreNavigazione
 
 FASCE = ("pubblico", "interno", "riservato")
+import re as _re
+TAG_CAMPAGNA = _re.compile(r"\[#C(\d+)\]")
 MAX_MSG = 3800
 
 
@@ -105,6 +107,8 @@ AIUTO = ("Scrivimi normalmente: ti risponde l'agente con cui stai parlando (all'
          "/richieste - cosa serve agli agenti\n/rispondi NUMERO testo - rispondi a una richiesta\n"
          "/briefing - l'ultimo briefing\n/stato - situazione in breve\n"
          "/voce on|off - rispondi anche a voce quando ti scrivo con un vocale\n"
+         "/campagne - il punto delle campagne email di oggi\n"
+         "/r NUMERO testo - risposta a un contatto interessato (o rispondi all'avviso con un vocale)\n/ok NUMERO - manda la bozza\n"
          "/fascia pubblico|interno|riservato - che dati possono uscire verso l'AI in questa chat")
 
 
@@ -180,6 +184,25 @@ def _comando(conn, testo: str, r: dict) -> str | None:
             return "Prima collega ElevenLabs in Impostazioni → Voce."
         ve._set(conn, "elevenlabs_telegram_voce", "1" if parti[1].lower() == "on" else "0")
         return "Risposte vocali " + ("attivate: quando mi scrivi con un vocale ti rispondo anche a voce." if parti[1].lower() == "on" else "spente.")
+    if cmd == "/campagne":   # 2.73: il punto delle campagne di oggi
+        from . import campagne_telegram as ct
+        o = ct.adesso()
+        return ct.testo_riepilogo(conn, o.replace(hour=0, minute=0, second=0, microsecond=0), f"📬 Campagne email di oggi ({o:%d/%m})") or "Oggi nelle campagne non e' successo niente."
+    if cmd == "/r":   # /r NUMERO testo: risposta dettata a un contatto delle campagne
+        if len(parti) < 3 or not parti[1].lstrip("#C").isdigit():
+            return "Uso: /r NUMERO testo (oppure rispondi all'avviso con un vocale)"
+        from . import campagne_telegram as ct
+        try:
+            return ct.risposta_dettata(conn, int(parti[1].lstrip("#C")), parti[2])[1]
+        except LookupError as e:
+            return str(e)
+        except ErroreFornitore:
+            return "Il Redattore non risponde adesso: riprova tra poco."
+    if cmd == "/ok":
+        if len(parti) < 2 or not parti[1].isdigit():
+            return "Uso: /ok NUMERO (il numero della bozza)"
+        from . import campagne_telegram as ct
+        return ct.approva_da_telegram(conn, int(parti[1]))
     if cmd == "/fascia":
         if len(parti) < 2 or parti[1].lower() not in FASCE:
             return "Uso: /fascia pubblico | interno | riservato. Ora: " + r["fascia_dati"]
@@ -319,6 +342,16 @@ def gestisci_messaggio(conn, token: str, upd: dict):
             return
     if not testo:
         invia(token, cid, "Gestisco messaggi di testo e vocali.")
+        return
+    rif = TAG_CAMPAGNA.search(((m.get("reply_to_message") or {}).get("text") or ""))
+    if rif and not testo.startswith("/"):   # 2.73: risposta (anche a voce) all'avviso di un interessato -> email da approvare
+        from . import campagne_telegram as ct
+        try:
+            invia(token, cid, ct.risposta_dettata(conn, int(rif.group(1)), testo)[1])
+        except LookupError as e:
+            invia(token, cid, str(e))
+        except ErroreFornitore:
+            invia(token, cid, "Il Redattore non risponde adesso: riprova tra poco (il tuo dettato e' qui sopra).")
         return
     risp = _comando(conn, testo, r)
     if risp is None:

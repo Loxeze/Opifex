@@ -214,7 +214,7 @@ with TestClient(app) as c:
     rsp = sql("SELECT tipo_campagna, stato, testo, rispondi_a, oggetto FROM email_in_uscita WHERE destinatari='direzione@coralbay.com' AND tipo_campagna='risposta'")
     ok("bozza di risposta con il link per prenotare, nel filo della loro email", rsp and rsp[0][1] == "da_approvare" and "https://calendar.app.google/abc123" in rsp[0][2]
        and rsp[0][3] == "r1" and rsp[0][4].startswith("Re: "), rsp)
-    ok("notifica solo per l'interessato", sql("SELECT count(*) FROM notifiche WHERE testo LIKE 'Interessato alla campagna%%'") == [(1,)] and sql("SELECT count(*) FROM notifiche")[0][0] == n_prima + 1)
+    ok("notifica solo per l'interessato", sql("SELECT count(*) FROM notifiche WHERE testo LIKE '🔥%%interessato alla campagna%%'") == [(1,)] and sql("SELECT count(*) FROM notifiche")[0][0] == n_prima + 1)
     ok("non interessato: chiuso senza notifica, storia nel CRM", sql("SELECT d.stato FROM campagne_posta_dest d JOIN crm_contatti k ON k.id=d.contatto_id WHERE d.campagna_id=%s AND k.email_hash=%s",
                                                                      (cid, crm.hash_email("direzione@senzasito.com"))) == [("non_interessato",)])
     r = c.post(f"/gestione/campagne/{cid}/approva", headers=H, json={"tutte": True})

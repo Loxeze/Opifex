@@ -349,8 +349,7 @@ def invia_in_coda(conn) -> int:
     usate: dict = {}   # casella -> (partite oggi, tetto)
     from . import regole_invio
     for c in conn.execute("SELECT id, per_ora, mittente, ore_dal, ore_al, solo_feriali, evita_dal, evita_al FROM campagne_posta WHERE stato='in_corso' ORDER BY id").fetchall():
-        if regole_invio.perche_non_parte(c):   # 2.72: periodo da evitare (vendemmia) o fuori dalla fascia oraria
-            continue
+        fuori = bool(regole_invio.perche_non_parte(c))   # 2.72: periodo da evitare (vendemmia) o fuori fascia: partono solo le risposte agli interessati
         canale, _, n = (c["mittente"] or "").partition(":")
         if n.isdigit():   # 2.71: il tetto e' della casella, non di tutte le campagne insieme
             if c["mittente"] not in usate:
@@ -360,7 +359,8 @@ def invia_in_coda(conn) -> int:
         ultimo = conn.execute("SELECT max(inviata_il) AS t FROM campagne_posta_dest WHERE campagna_id=%s", (c["id"],)).fetchone()["t"]
         if ultimo and datetime.now(timezone.utc) - ultimo < timedelta(seconds=3600 / max(1, c["per_ora"]) - 5):
             continue
-        e = conn.execute("SELECT id FROM email_in_uscita WHERE campagna_id=%s AND stato='approvata' ORDER BY id LIMIT 1", (c["id"],)).fetchone()
+        e = conn.execute(f"""SELECT id FROM email_in_uscita WHERE campagna_id=%s AND stato='approvata'
+                             {"AND tipo_campagna IN ('risposta','ripresa')" if fuori else ""} ORDER BY (tipo_campagna IN ('risposta','ripresa')) DESC, id LIMIT 1""", (c["id"],)).fetchone()
         if e is None:
             continue
         conn.commit()

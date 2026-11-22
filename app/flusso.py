@@ -709,10 +709,17 @@ def segna_interessato(conn, d: dict, sintesi: str = "", utente_id: int | None = 
             rif = v["msg_id"] if v and v["origine"] == "gmail" and c["mittente"] == f"gmail:{v['casella_id']}" else None
             _crea_email(conn, dict(c), d["id"], k["email"], ("Re: " + (d.get("risposta_oggetto") or c["oggetto"] or "")).replace("Re: Re: ", "Re: ")[:200],
                         testo, "risposta", automatica=False, rispondi_a=rif)
+    chi, tel = "", ""   # 2.73: avviso «caldo», con ente e telefono per richiamarlo subito; rispondendo su Telegram con un vocale si detta la risposta
+    if d.get("contatto_id"):
+        kk = conn.execute("SELECT ente_cifrato, nome_cifrato, telefono_cifrato FROM crm_contatti WHERE id=%s", (d["contatto_id"],)).fetchone()
+        if kk:
+            chi = _d(kk["ente_cifrato"]) or _d(kk["nome_cifrato"])
+            tel = _d(kk["telefono_cifrato"])
     conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, TRUE)",
-                 (f"Interessato alla campagna «{c['nome']}»" + (f": {sintesi}" if sintesi else "") +
+                 ("🔥 " + (f"{chi} e' interessato" if chi else "Interessato") + f" alla campagna «{c['nome']}»" + (f" (tel. {tel})" if tel else "") + (f": {sintesi}" if sintesi else "") +
                   (f". Ha chiesto di risentirsi {quando or ''} ({richiamo:%d/%m/%Y}): promemoria nel CRM, e quel giorno ti preparo l'email." if richiamo
-                   else ". Ti ho preparato la risposta con il link per la call (Campagne email)."),))
+                   else ". Ti ho preparato la risposta con il link per la call (Campagne email).") +
+                  f" Su Telegram puoi rispondere a questo messaggio con un vocale: preparo l'email da approvare. [#C{d['id']}]",))
     conn.commit()
     return opp
 

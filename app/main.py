@@ -210,6 +210,7 @@ async def _manutenzione():
         _passo("campagne email: risposte", lambda c: __import__("app.campagne", fromlist=["x"]).risposte(c))
         _passo("campagne email: respinte", lambda c: __import__("app.respinte", fromlist=["x"]).giro(c))
         _passo("campagne email: ricerca di email nuove", lambda c: __import__("app.crm_ricerca", fromlist=["x"]).giro_email_nuove(c))
+        _passo("campagne email: riepiloghi su Telegram", lambda c: __import__("app.campagne_telegram", fromlist=["x"]).giro(c))
         _passo("campagne email: flusso a blocchi", lambda c: __import__("app.flusso", fromlist=["x"]).giro(c))
         _passo("preventivi: fatture nate in Fatture in Cloud", lambda c: __import__("app.preventivi", fromlist=["x"]).controlla_fatture(c))
         _passo("archivio NAS", lambda c: __import__("app.archivio_nas", fromlist=["x"]).giro(c))
