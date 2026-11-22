@@ -739,8 +739,9 @@ def _bozza_risposta(conn, c, d) -> str:
     try:
         v = conn.execute("SELECT * FROM posta_vaglio WHERE id=%s", (d["risposta_vaglio_id"],)).fetchone()
         loro = posta_vaglio._anteprima(conn, v)[:2000] if v else ""
-        t = posta_vaglio._chiedi(conn, ISTR_RISPOSTA.format(link=f"indicando questo link per prenotarla: {link}" if link else "chiedendo due orari comodi"),
-                                 f"LA SUA RISPOSTA:\n{loro}", 600)   # modello locale: la risposta del cliente resta in casa
+        from . import dopo_call   # 2.75: le risposte pronte di Lorenzo alle domande frequenti
+        t = posta_vaglio._chiedi(conn, ISTR_RISPOSTA.format(link=f"indicando questo link per prenotarla: {link}" if link else "chiedendo due orari comodi")
+                                 + dopo_call.per_la_bozza(conn, loro), f"LA SUA RISPOSTA:\n{loro}", 900)   # modello locale: la risposta del cliente resta in casa
         j = redattore._json(t)
         if isinstance(j, dict) and j.get("testo") and (not link or link in j["testo"]):
             testo = str(j["testo"]).strip()

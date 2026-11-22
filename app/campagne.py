@@ -590,6 +590,31 @@ class Stile(BaseModel):
     regole: str = Field(max_length=4000)
 
 
+class RispostaPronta(BaseModel):
+    domanda: str = Field(min_length=3, max_length=300)
+    risposta: str = Field(min_length=3, max_length=3000)
+
+
+@router.get("/risposte-pronte")
+def vedi_risposte_pronte(u: dict = Depends(solo_titolare)):
+    """2.75: come rispondi alle domande frequenti (prezzi, tempi...): le bozze di risposta le usano."""
+    with connessione() as conn:
+        return conn.execute("SELECT id, domanda, risposta FROM risposte_pronte WHERE attiva ORDER BY id").fetchall()
+
+
+@router.post("/risposte-pronte")
+def nuova_risposta_pronta(d: RispostaPronta, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return conn.execute("INSERT INTO risposte_pronte (domanda, risposta) VALUES (%s,%s) RETURNING id", (d.domanda.strip(), d.risposta.strip())).fetchone()
+
+
+@router.delete("/risposte-pronte/{rid}")
+def togli_risposta_pronta(rid: int, u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        conn.execute("UPDATE risposte_pronte SET attiva=FALSE WHERE id=%s", (rid,))
+    return {"ok": True}
+
+
 @router.get("/classifica")
 def classifica(u: dict = Depends(solo_titolare)):
     """2.74: quali campagne, angoli e liste portano piu' risposte e call, e quanto costano."""

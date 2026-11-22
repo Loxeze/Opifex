@@ -145,6 +145,10 @@ def prepara(conn, opp_id: int) -> int:
     if a:
         materiale.append(f"Idea del cliente: {a['idea']}\nEsigenze dette: {'; '.join(a['esigenze_dette'])}\nEsigenze non dette: {'; '.join(a['esigenze_non_dette'])}"
                          f"\nAngoli per l'upselling: {'; '.join(a['upselling'])}\nProssimo passo: {a['prossimo_passo']}")
+    from . import dopo_call   # 2.75: i servizi e i prezzi che Lorenzo usa di solito
+    usuali = dopo_call.prezzi_usuali(conn)
+    if usuali and materiale:
+        materiale.append("SERVIZI GIA' PROPOSTI IN ALTRI PREVENTIVI (se uno risponde alle esigenze, usa lo STESSO nome):\n" + "\n".join(f"- {u['nome']}" for u in usuali[:30]))
     voci, oggetto, note = [], (o["titolo"] or "Preventivo")[:200], ""
     if materiale:
         modello = _modello_buono(conn)
@@ -154,7 +158,7 @@ def prepara(conn, opp_id: int) -> int:
                      (redattore.agente(conn), modello, r.token_input or 0, r.token_output or 0, round(redattore.costo(conn, modello, r.token_input, r.token_output), 6)))
         j = redattore._json(r.testo)
         if isinstance(j, dict):
-            voci = _pulisci_voci(j.get("voci"))
+            voci = dopo_call.applica_prezzi(_pulisci_voci(j.get("voci")), usuali)
             oggetto = str(j.get("oggetto") or oggetto)[:200]
             note = str(j.get("note") or "")[:2000]
     pid = conn.execute("""INSERT INTO preventivi (opportunita_id, contatto_id, oggetto, voci, note) VALUES (%s,%s,%s,%s,%s) RETURNING id""",

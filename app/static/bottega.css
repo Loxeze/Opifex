@@ -554,3 +554,6 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .cp-ab { display: grid; gap: 4px; margin-top: 8px; }
 .cp-tab-scorre { overflow-x: auto; max-width: 100%; }
 .cp-tab-scorre table { min-width: 560px; }
+.cp-pronte { display: grid; gap: 8px; margin: 8px 0; }
+.cp-pronta { display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; min-width: 0; }
+.cp-pronta > div { min-width: 0; }

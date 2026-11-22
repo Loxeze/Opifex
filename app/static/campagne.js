@@ -40,6 +40,7 @@ function crmCampagne() {
       d.campagne.length ? h("div", { class: "mq-classifica" }, d.campagne.map(riga)) : h("p", { class: "sotto" }, "Nessuna campagna ancora."),
       d.imbuto && d.imbuto[0].n ? h("div", { class: "carta" }, graficoImbutoCp(d.imbuto, "L'imbuto di tutte le campagne")) : null,
       d.campagne.length ? cartaClassificaCp() : null,
+      cartaRispostePronteCp(),
       _quadri(d.quadri), cartaFattureInCloud()]);
   };
   carica();
@@ -557,6 +558,20 @@ function cartaProvaAbCp(c, salva) {
     h("p", { class: "sotto" }, "Oggetto A è quello della campagna. Il Redattore parte dall'idea dell'oggetto assegnato e la adatta a ogni contatto. Quando ognuna delle due metà ha almeno 50 email partite, Opifex tiene l'oggetto che ottiene più risposte e te lo dice."),
     h("label", {}, "Oggetto B", ogB), _btnCp("Salva", () => salva({ oggetto_b: ogB.value.trim() }), "s piccolo"),
     res.length ? h("div", { class: "cp-ab" }, res) : null, c.ab_esito ? avviso(c.ab_esito, "ok") : null);
+}
+
+// 2.75: risposte pronte alle domande frequenti
+function cartaRispostePronteCp() {
+  const elenco = h("div", { class: "cp-pronte" }, h("p", { class: "sotto" }, "Carico…"));
+  const dom = h("input", { type: "text", maxlength: 300, placeholder: "La domanda (es. Quanto costa un video?)" });
+  const ris = h("textarea", { rows: 3, maxlength: 3000, placeholder: "Come rispondi di solito" });
+  const carica = () => api("GET", "/gestione/campagne/risposte-pronte").then(r => elenco.replaceChildren(...(r.length ? r.map(x => h("div", { class: "cp-pronta" },
+    h("div", {}, h("b", {}, x.domanda), h("div", { class: "sotto" }, x.risposta)), _btnCp("Togli", async () => { await api("DELETE", "/gestione/campagne/risposte-pronte/" + x.id); carica(); }, "s piccolo")))
+    : [h("p", { class: "sotto" }, "Nessuna risposta pronta: aggiungi le domande che ti fanno più spesso.")]))).catch(e => elenco.replaceChildren(avviso(e.message, "no")));
+  carica();
+  return h("details", { class: "carta" }, h("summary", {}, h("b", {}, "Risposte pronte"), h("span", { class: "sotto" }, " — come rispondi alle domande frequenti: le bozze di risposta le usano")),
+    elenco, h("label", {}, "Domanda", dom), h("label", {}, "Risposta", ris),
+    _btnCp("Aggiungi", async () => { if (!dom.value.trim() || !ris.value.trim()) return; try { await api("POST", "/gestione/campagne/risposte-pronte", { domanda: dom.value.trim(), risposta: ris.value.trim() }); dom.value = ""; ris.value = ""; carica(); } catch (e) { alert(e.message); } }, "s"));
 }
 
 // 2.74: classifica delle campagne
