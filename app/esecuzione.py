@@ -559,6 +559,10 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     avviso_extra += crm_ricerca.AVVISO
                     gcr = crm_ricerca.gestore(connessione, agente_id)
                     gestori["crm_proponi_contatto"] = gcr
+                    if crm_ricerca.EMAIL_NUOVE.get():   # 2.71: ricerca delle email nuove per i respinti
+                        extra.append(crm_ricerca.STRUMENTO_EMAIL)
+                        avviso_extra += crm_ricerca.AVVISO_EMAIL
+                        gestori["crm_email_nuova"] = gcr
                 if crm_nom_tool:
                     extra.extend(crm_contatti_agenti.STRUMENTI)
                     avviso_extra += crm_contatti_agenti.AVVISO

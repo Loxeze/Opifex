@@ -139,6 +139,12 @@ def invia_riga(conn, email_id: int, utente_id: int | None) -> dict:
     r = conn.execute("SELECT * FROM email_in_uscita WHERE id = %s AND stato IN ('da_approvare', 'approvata', 'errore') FOR UPDATE", (email_id,)).fetchone()
     if r is None:
         raise LookupError("L'email non e' piu' in attesa")
+    if r.get("campagna_id"):   # 2.71: a un indirizzo respinto non parte piu' nulla
+        from . import respinte
+        if any(respinte.bloccata(conn, x) for x in re.split(r"[,;\s]+", r["destinatari"] or "") if "@" in x):
+            conn.execute("UPDATE email_in_uscita SET stato='rifiutata', errore='indirizzo respinto in precedenza' WHERE id=%s", (email_id,))
+            conn.commit()
+            raise ValueError("Indirizzo respinto in precedenza: email non inviata")
     try:
         _spedisci(conn, r)
     except (ErroreGoogle, strumenti_posta.ErrorePosta, ValueError) as e:

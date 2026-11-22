@@ -21,7 +21,7 @@ from . import cassaforte, crm, crm_schede as cs, crm_segmenti, fornitori, scheda
 from .db import connessione
 from .permessi import solo_titolare
 
-MAX_GIORNO = 300            # tetto di invii di campagna al giorno, tutte le campagne insieme (Gmail personale: circa 500)
+MAX_GIORNO = 300            # tetto di invii al giorno PER CASELLA (2.71: prima era per tutte le campagne insieme; Gmail personale: circa 500)
 PIEDE = ""   # 2.69: niente piu' riga «RIMUOVI» in fondo: sono email personali di Lorenzo, non una newsletter
 RIMUOVI = re.compile(r"\b(rimuovi|rimuovimi|cancella|cancellami|disiscriv|unsubscribe|stop)\b", re.I)
 SEGNAPOSTO = ("{saluto}", "{nome}", "{ente}")
@@ -82,7 +82,8 @@ def _mittente(conn, m: str) -> tuple[str, int, str]:
 def _esclusi(conn) -> set:
     """Chi ha chiesto di non ricevere piu' email (in qualsiasi campagna) o ha il consenso al marketing negato nel CRM."""
     a = {r["email_hash"] for r in conn.execute("SELECT DISTINCT email_hash FROM campagne_posta_dest WHERE stato='rimosso'").fetchall()}
-    return a
+    from . import respinte   # 2.71: gli indirizzi respinti non ricevono piu' nulla, in nessuna campagna
+    return a | respinte.hash_bloccati(conn)
 
 
 def calcola_destinatari(conn, cid: int) -> dict:
@@ -285,6 +286,9 @@ def dopo_invio(conn, riga: dict, ok: bool, errore: str = ""):
     if not riga.get("destinatario_id"):
         return
     if not ok:
+        from . import respinte
+        if respinte.dopo_errore_invio(conn, riga, errore):   # 2.71: indirizzo rifiutato in modo definitivo -> bloccato
+            return
         if riga.get("tipo_campagna") not in ("risposta", "ripresa"):
             conn.execute("UPDATE campagne_posta_dest SET stato='errore', aggiornato_il=NOW() WHERE id=%s", (riga["destinatario_id"],))
         return
@@ -302,20 +306,46 @@ def dopo_invio(conn, riga: dict, ok: bool, errore: str = ""):
         conn.execute("UPDATE crm_contatti SET ultimo_contatto=CURRENT_DATE WHERE id=%s", (d["contatto_id"],))
 
 
-def inviate_oggi(conn) -> int:
-    """Email di campagna partite oggi (tutte le campagne insieme): servono per il tetto MAX_GIORNO."""
-    return conn.execute("""SELECT count(*) AS n FROM email_in_uscita WHERE campagna_id IS NOT NULL AND stato='inviata'
-                           AND decisa_il > date_trunc('day', NOW())""").fetchone()["n"]
+def inviate_oggi(conn, canale: str | None = None, account_id: int | None = None) -> int:
+    """Email partite oggi da una casella (tutte, campagne e no: il limite della casella e' uno solo). Senza casella: le email di campagna di tutte."""
+    if canale is None:
+        return conn.execute("""SELECT count(*) AS n FROM email_in_uscita WHERE campagna_id IS NOT NULL AND stato='inviata'
+                               AND decisa_il > date_trunc('day', NOW())""").fetchone()["n"]
+    return conn.execute("""SELECT count(*) AS n FROM email_in_uscita WHERE canale=%s AND account_id=%s AND stato='inviata'
+                           AND decisa_il > date_trunc('day', NOW())""", (canale, account_id)).fetchone()["n"]
+
+
+def tetto_casella(conn, canale: str, account_id: int) -> int:
+    """Quante email puo' mandare oggi questa casella (2.72: le caselle nuove si scaldano piano)."""
+    return MAX_GIORNO
+
+
+def caselle_piene(conn) -> list[dict]:
+    """Le caselle delle campagne in corso che oggi hanno raggiunto il loro tetto."""
+    out = []
+    for m in {r["mittente"] for r in conn.execute("SELECT DISTINCT mittente FROM campagne_posta WHERE stato='in_corso' AND mittente LIKE '%%:%%'").fetchall()}:
+        canale, _, n = m.partition(":")
+        if not n.isdigit():
+            continue
+        oggi, tetto = inviate_oggi(conn, canale, int(n)), tetto_casella(conn, canale, int(n))
+        if oggi >= tetto:
+            em = next((x["email"] for x in mittenti(conn) if x["id"] == m), m)
+            out.append({"mittente": m, "email": em, "oggi": oggi, "tetto": tetto})
+    return out
 
 
 def invia_in_coda(conn) -> int:
     """Ogni minuto: per ogni campagna in corso, al massimo un'email approvata se e' passato abbastanza tempo dall'ultima (per_ora)."""
     from . import invio_posta
-    oggi = inviate_oggi(conn)
     inviate = 0
-    for c in conn.execute("SELECT id, per_ora FROM campagne_posta WHERE stato='in_corso' ORDER BY id").fetchall():
-        if oggi + inviate >= MAX_GIORNO:
-            break
+    usate: dict = {}   # casella -> (partite oggi, tetto)
+    for c in conn.execute("SELECT id, per_ora, mittente FROM campagne_posta WHERE stato='in_corso' ORDER BY id").fetchall():
+        canale, _, n = (c["mittente"] or "").partition(":")
+        if n.isdigit():   # 2.71: il tetto e' della casella, non di tutte le campagne insieme
+            if c["mittente"] not in usate:
+                usate[c["mittente"]] = [inviate_oggi(conn, canale, int(n)), tetto_casella(conn, canale, int(n))]
+            if usate[c["mittente"]][0] >= usate[c["mittente"]][1]:
+                continue
         ultimo = conn.execute("SELECT max(inviata_il) AS t FROM campagne_posta_dest WHERE campagna_id=%s", (c["id"],)).fetchone()["t"]
         if ultimo and datetime.now(timezone.utc) - ultimo < timedelta(seconds=3600 / max(1, c["per_ora"]) - 5):
             continue
@@ -326,6 +356,8 @@ def invia_in_coda(conn) -> int:
         try:
             invio_posta.invia_riga(conn, e["id"], None)
             inviate += 1
+            if c["mittente"] in usate:
+                usate[c["mittente"]][0] += 1
         except Exception:  # noqa: BLE001 - l'errore resta sull'email (stato «errore»), la campagna prosegue
             conn.rollback()
     return inviate
@@ -390,7 +422,7 @@ def esito(conn, did: int, nuovo: str, crea_affare: bool, utente_id: int) -> dict
     return {"stato": nuovo, "affare": affare}
 
 
-CONTEGGI = ("in_attesa", "in_studio", "da_approvare", "approvata", "inviata", "scartata", "errore", "risposto", "interessato", "non_interessato", "rimosso",
+CONTEGGI = ("respinto", "in_attesa", "in_studio", "da_approvare", "approvata", "inviata", "scartata", "errore", "risposto", "interessato", "non_interessato", "rimosso",
             "nessuna_risposta")
 
 
@@ -452,6 +484,9 @@ def dettaglio(conn, cid: int, utente_id: int | None = None) -> dict:
             "richiamo_il": r["richiamo_il"], "richiamo_nota": r["richiamo_nota"], "richiamo_fatto": r["richiamo_fatto"],
             "preventivo": prev.get(r["opportunita_id"])})
     c["numeri"] = _conta(conn, cid)
+    c["respinte"] = conn.execute("""SELECT count(*) FILTER (WHERE ricerca_email='trovata') AS trovate,
+                                           count(*) FILTER (WHERE ricerca_email IN ('da_cercare','in_corso')) AS in_ricerca
+                                    FROM campagne_posta_dest WHERE campagna_id=%s""", (cid,)).fetchone()
     c["mittente_email"] = next((m["email"] for m in mittenti(conn) if m["id"] == c["mittente"]), "")
     c["autonomia"] = flusso.autonomia(conn, cid)
     c["da_riscrivere"] = da_riscrivere(conn, cid)
@@ -604,6 +639,7 @@ class Modifica(BaseModel):
     solleciti: int | None = Field(default=None, ge=0, le=2)
     link_prenotazione: str | None = Field(default=None, max_length=400)
     invio_automatico: bool | None = None
+    cerca_email_nuova: bool | None = None
 
 
 @router.put("/{cid}")
@@ -623,7 +659,7 @@ def modifica(cid: int, d: Modifica, u: dict = Depends(solo_titolare)):
             if not a_["puo"]:
                 raise HTTPException(status.HTTP_409_CONFLICT, f"L'invio automatico si accende dopo {a_['serve']} bozze di fila approvate senza correzioni: per ora sono {a_['di_fila']}")
         for k in ("nome", "obiettivo", "oggetto", "testo", "per_ora", "categoria", "foglio", "personalizza", "modello", "tetto_spesa", "sollecito_giorni",
-                  "solleciti", "link_prenotazione", "invio_automatico"):
+                  "solleciti", "link_prenotazione", "invio_automatico", "cerca_email_nuova"):
             v = getattr(d, k)
             if v is not None:
                 conn.execute(f"UPDATE campagne_posta SET {k}=%s WHERE id=%s", (v.strip() if isinstance(v, str) else v, cid))

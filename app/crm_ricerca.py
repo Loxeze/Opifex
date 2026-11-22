@@ -34,6 +34,17 @@ STRUMENTI = [{
         "fonte_url": {"type": "string"}, "motivo": {"type": "string"},
         "segnale": {"type": "string", "description": "solo in modalita' radar: che cosa dice la notizia o l'articolo, in una frase, con la data"}},
         "required": ["ente", "fonte_url", "motivo"]}}]
+EMAIL_NUOVE: contextvars.ContextVar = contextvars.ContextVar("crm_ricerca_email_nuove", default=None)   # 2.71: id dei destinatari respinti da sistemare
+STRUMENTO_EMAIL = {
+    "name": "crm_email_nuova",
+    "description": "Registra l'email NUOVA trovata per un contatto la cui email e' stata respinta (indirizzo inesistente). Obbligatori: rif (il numero tra parentesi quadre "
+                   "nell'elenco), email (indirizzo di lavoro pubblicato dall'ente, diverso da quello respinto) e fonte_url (la pagina in cui l'hai vista). "
+                   "Il sistema verifica che il dominio riceva posta, aggiorna il CRM e rimette il contatto in coda.",
+    "input_schema": {"type": "object", "properties": {"rif": {"type": "integer"}, "email": {"type": "string"}, "fonte_url": {"type": "string"}},
+                     "required": ["rif", "email", "fonte_url"]}}
+AVVISO_EMAIL = ("\n\nEMAIL NUOVE. In questa ricerca NON proponi contatti nuovi: per ogni ente dell'elenco trovi un indirizzo email di lavoro diverso da quello che e' stato "
+                "respinto, sul sito ufficiale dell'ente (pagina contatti, chi siamo, staff, footer) o in elenchi pubblici ufficiali, e lo registri con crm_email_nuova. "
+                "Mai indovinare un indirizzo dal formato del dominio; se non lo trovi, passa al successivo e dillo nel riepilogo.")
 AVVISO = ("\n\nRICERCA CONTATTI. Il tuo unico scopo e' trovare contatti MOLTO SPECIFICI: persone o uffici che rispondono esattamente ai criteri ricevuti (ruolo preciso, tipo di ente, zona, settore). "
           "Meglio 8 contatti centrati che 40 generici: se un risultato risponde solo in parte, NON proporlo. METODO: 1) riformula i criteri in 3-5 ricerche diverse (ruolo + tipo di ente + zona; pagine 'chi siamo', 'organigramma', 'contatti', "
           "'staff', elenchi ufficiali); 2) apri la pagina dell'ente e verifica ruolo, nome ed email sulla pagina stessa; 3) per ogni contatto verificato chiama crm_proponi_contatto con la fonte_url esatta e un motivo che citi il criterio. "
@@ -73,6 +84,16 @@ def crea_agente(conn) -> int | None:
     for nome in COMPETENZE:
         conn.execute("INSERT INTO competenze_necessarie (agente_id, nome) VALUES (%s,%s) ON CONFLICT DO NOTHING", (aid, nome))
     return aid
+
+
+def assicura_agente(conn) -> int | None:
+    """Il Ricercatore con il suo reparto (nella 3.0 il reparto CRM puo' non esserci ancora), sotto Aurora se non ha un capo."""
+    if conn.execute("SELECT 1 FROM divisioni WHERE nome='CRM'").fetchone() is None:
+        conn.execute("INSERT INTO divisioni (nome, descrizione) VALUES ('CRM', 'Contatti e Radar')")
+    rid = crea_agente(conn)
+    if rid:
+        conn.execute("UPDATE agenti SET superiore_id=(SELECT id FROM agenti WHERE nome='Aurora' ORDER BY id LIMIT 1) WHERE id=%s AND superiore_id IS NULL", (rid,))
+    return rid
 
 
 # ---------- strumento dell'agente ----------
@@ -124,6 +145,45 @@ def proponi(conn, agente_id: int, d: dict, stato: dict) -> str:
     return f"OK: proposta registrata ({stato['n']}){avv}."
 
 
+def email_nuova(conn, d: dict, stato: dict) -> str:
+    """2.71: email trovata per un destinatario respinto -> CRM aggiornato, destinatario di nuovo in coda nella stessa campagna."""
+    from . import respinte
+    ids = EMAIL_NUOVE.get() or []
+    try:
+        rif = int(d.get("rif"))
+    except (TypeError, ValueError):
+        return "ERRORE: rif deve essere il numero tra parentesi quadre."
+    email, fonte = (d.get("email") or "").strip().lower(), (d.get("fonte_url") or "").strip()
+    if rif not in ids:
+        return "ERRORE: questo rif non e' nell'elenco della ricerca."
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return "ERRORE: email non valida."
+    if not _url_ok(fonte):
+        return "ERRORE: serve la fonte (http/https) della pagina in cui l'hai vista."
+    dest = conn.execute("SELECT * FROM campagne_posta_dest WHERE id=%s", (rif,)).fetchone()
+    if dest is None or dest["ricerca_email"] not in ("in_corso", "da_cercare"):
+        return "ERRORE: per questo contatto la ricerca e' gia' chiusa."
+    h = crm.hash_email(email)
+    if h == dest["email_hash"] or respinte.bloccata(conn, h):
+        return "SCARTATO: e' un indirizzo gia' respinto. Cercane un altro o passa al successivo."
+    if respinte.dominio_ok(email) is False:
+        return "SCARTATO: il dominio di questo indirizzo non riceve posta. Cercane un altro o passa al successivo."
+    altro = conn.execute("SELECT id FROM crm_contatti WHERE email_hash=%s AND id<>%s", (h, dest["contatto_id"])).fetchone()
+    if altro or conn.execute("SELECT 1 FROM campagne_posta_dest WHERE campagna_id=%s AND email_hash=%s", (dest["campagna_id"], h)).fetchone():
+        return "SCARTATO: questo indirizzo appartiene gia' a un altro contatto. Passa al successivo."
+    c = crm._c
+    conn.execute("UPDATE crm_contatti SET email_cifrata=%s, email_hash=%s WHERE id=%s", (c(email), h, dest["contatto_id"]))
+    conn.execute("""INSERT INTO crm_recapiti (contatto_id, tipo, valore_cifrato, valore_hash, fonte, verificato_il) VALUES (%s,'email',%s,%s,%s,CURRENT_DATE)
+                    ON CONFLICT (contatto_id, tipo, valore_hash) DO NOTHING""", (dest["contatto_id"], c(email), h, fonte[:500]))
+    conn.execute("""UPDATE campagne_posta_dest SET email_hash=%s, stato='in_attesa', email_id=NULL, prossimo_il=NULL, ricerca_email='trovata',
+                      nota='', aggiornato_il=NOW() WHERE id=%s""", (h, rif))
+    conn.execute("INSERT INTO crm_interazioni (contatto_id, canale, direzione, oggetto, esito, note_cifrate) VALUES (%s,'email','uscita',%s,'altro',%s)",
+                 (dest["contatto_id"], "Email nuova trovata dopo un respingimento", c(f"Fonte: {fonte[:300]}")))
+    stato["n"] += 1
+    _conta(conn, stato, "proposte")
+    return f"OK: email aggiornata nel CRM e contatto rimesso in coda ({stato['n']})."
+
+
 def _conta(conn, stato, colonna):
     rid = RICERCA_ID.get()
     if rid:
@@ -138,6 +198,8 @@ def gestore(conn_factory, agente_id: int):
             with conn_factory() as c:
                 if nome == "crm_proponi_contatto":
                     return proponi(c, agente_id, d or {}, stato)
+                if nome == "crm_email_nuova":
+                    return email_nuova(c, d or {}, stato)
                 return "ERRORE: strumento sconosciuto"
         except cassaforte.CassaforteNonConfigurata as e:
             return "ERRORE: " + str(e)
@@ -159,6 +221,7 @@ def _esegui(rid: int):
             r = conn.execute("SELECT * FROM crm_ricerche WHERE id = %s", (rid,)).fetchone()
         RICERCA_ID.set(rid)
         RADAR.set(bool(r.get("tema_id")))
+        EMAIL_NUOVE.set(list(r["dest_ids"]) if r.get("dest_ids") else None)
         ris = esegui_agente(r["agente_id"], _prompt(r), "interno", None, max_token=2500)
         with connessione() as conn:
             conn.execute("UPDATE crm_ricerche SET stato='conclusa', esito=%s, conclusa_il=NOW() WHERE id=%s", ((ris.get("risposta") or "")[:3000], rid))
@@ -167,6 +230,10 @@ def _esegui(rid: int):
                 t = conn.execute("SELECT nome FROM radar_temi WHERE id=%s", (r["tema_id"],)).fetchone()
                 if n:   # il Radar avvisa solo quando trova qualcosa
                     conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"Radar «{t['nome'] if t else 'tema'}»: {n} segnalazioni nuove da valutare nel CRM (con l'articolo da cui nascono).",))
+            elif r.get("dest_ids"):   # 2.71: chi non ha trovato resta respinto, una volta sola
+                conn.execute("UPDATE campagne_posta_dest SET ricerca_email='non_trovata' WHERE id = ANY(%s) AND ricerca_email='in_corso'", (list(r["dest_ids"]),))
+                if n:
+                    conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"Email respinte: trovati {n} indirizzi nuovi, i contatti sono di nuovo in coda nelle loro campagne.",))
             else:
                 conn.execute("INSERT INTO notifiche (testo, urgente) VALUES (%s, FALSE)", (f"Ricerca contatti conclusa: {n} proposte da approvare nel CRM.",))
     except Exception as e:  # noqa: BLE001
@@ -175,6 +242,7 @@ def _esegui(rid: int):
     finally:
         RICERCA_ID.set(None)
         RADAR.set(False)
+        EMAIL_NUOVE.set(None)
 
 
 def avvia(conn, criteri: str, quantita: int, tema_id: int | None = None) -> int:
@@ -190,6 +258,44 @@ def avvia(conn, criteri: str, quantita: int, tema_id: int | None = None) -> int:
     else:
         threading.Thread(target=_esegui, args=(rid,), daemon=True).start()
     return rid
+
+
+PER_RICERCA_EMAIL = 10
+
+
+def giro_email_nuove(conn) -> int:
+    """2.71: per le campagne con «cerca un'email nuova» accesa, una ricerca alla volta su al massimo 10 destinatari respinti."""
+    righe = conn.execute("""SELECT d.id, d.contatto_id, d.campagna_id FROM campagne_posta_dest d JOIN campagne_posta c ON c.id=d.campagna_id
+                            WHERE d.ricerca_email='da_cercare' AND c.cerca_email_nuova AND c.stato <> 'chiusa' ORDER BY d.aggiornato_il LIMIT %s""",
+                         (PER_RICERCA_EMAIL,)).fetchall()
+    if not righe:
+        return 0
+    ag = conn.execute("SELECT id FROM agenti WHERE nome = %s AND attivo", (NOME_AGENTE,)).fetchone()
+    if ag is None and not conn.execute("SELECT 1 FROM agenti WHERE nome = %s", (NOME_AGENTE,)).fetchone():   # 3.0: nasce quando serve (non se l'hai spento)
+        assicura_agente(conn)
+        ag = conn.execute("SELECT id FROM agenti WHERE nome = %s AND attivo", (NOME_AGENTE,)).fetchone()
+    if ag is None or conn.execute("SELECT 1 FROM crm_ricerche WHERE stato='in_corso' AND creata_il > NOW() - interval '1 hour'").fetchone():
+        return 0
+    from . import flusso
+    elenco = []
+    for r in righe:
+        if not r["contatto_id"]:
+            continue
+        k = flusso.contatto(conn, r["contatto_id"])
+        luogo = ", ".join(x for x in (k["comune"], k["provincia"], k["regione"]) if x)
+        elenco.append(f"[{r['id']}] {k['ente'] or '(senza nome)'}" + (f" — sito: {k['sito']}" if k["sito"] else "") + (f" — {luogo}" if luogo else ""))
+    ids = [r["id"] for r in righe]
+    criteri = ("Email respinte: per ognuno di questi enti l'indirizzo che avevamo non esiste piu'. Trova un'altra email di lavoro pubblicata dall'ente e registrala "
+               "con crm_email_nuova (rif = numero tra parentesi quadre).\n" + "\n".join(elenco))
+    rid = conn.execute("INSERT INTO crm_ricerche (criteri, quantita, agente_id, dest_ids) VALUES (%s,%s,%s,%s) RETURNING id",
+                       (criteri, len(ids), ag["id"], ids)).fetchone()["id"]
+    conn.execute("UPDATE campagne_posta_dest SET ricerca_email='in_corso' WHERE id = ANY(%s)", (ids,))
+    conn.commit()
+    if SINCRONO:
+        _esegui(rid)
+    else:
+        threading.Thread(target=_esegui, args=(rid,), daemon=True).start()
+    return len(ids)
 
 
 # ---------- rotte ----------

@@ -149,11 +149,7 @@ def radar(_: dict = Depends(solo_titolare)):
     """Passo 8: il Radar ha bisogno del suo ricercatore; nella 3.0 nasce solo quando lo chiedi. Propone un primo tema dalle tue attivita'."""
     from . import crm_ricerca
     with connessione() as conn:
-        if conn.execute("SELECT 1 FROM divisioni WHERE nome='CRM'").fetchone() is None:
-            conn.execute("INSERT INTO divisioni (nome, descrizione) VALUES ('CRM', 'Contatti e Radar')")
-        rid = crm_ricerca.crea_agente(conn)
-        if rid:
-            conn.execute("UPDATE agenti SET superiore_id=(SELECT id FROM agenti WHERE nome='Aurora' ORDER BY id LIMIT 1) WHERE id=%s AND superiore_id IS NULL", (rid,))
+        crm_ricerca.assicura_agente(conn)
         if conn.execute("SELECT count(*) AS n FROM radar_temi").fetchone()["n"] == 0:
             az = conn.execute("SELECT nome, profilo, criteri_interesse, territorio FROM aziende ORDER BY id LIMIT 3").fetchall()
             if az:

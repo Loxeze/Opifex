@@ -193,12 +193,17 @@ def _campagne(conn) -> dict | None:
     if not conn.execute("SELECT 1 FROM campagne_posta WHERE stato='in_corso' LIMIT 1").fetchone():
         return None
     ultimo = conn.execute("SELECT max(inviata_il) AS t FROM campagne_posta_dest").fetchone()["t"]
-    from .campagne import MAX_GIORNO, inviate_oggi
-    oggi = inviate_oggi(conn)
-    if c["ferme"] and oggi >= MAX_GIORNO:   # non e' un blocco: e' il tetto di sicurezza contro lo spam, domani riparte da sola
-        return _esito("campagne", "Campagne email", "invia le email approvate", "attenzione",
-                      f"Tetto di oggi raggiunto: {oggi} email partite (massimo {MAX_GIORNO} al giorno, per non finire nello spam). "
-                      f"Le altre {c['ferme']} approvate partono da sole domani.", "Non devi fare niente.", "campagne", {"partite oggi": oggi, "in attesa": c["ferme"]})
+    from .campagne import caselle_piene
+    piene = {x["mittente"]: x for x in caselle_piene(conn)}
+    if c["ferme"] and piene:   # 2.71: il tetto e' per casella; ferme solo per caselle piene = nessun allarme
+        per_casella = conn.execute("""SELECT c.mittente, count(*) AS n FROM email_in_uscita e JOIN campagne_posta c ON c.id=e.campagna_id
+                                      WHERE c.stato='in_corso' AND e.stato='approvata' AND e.decisa_il < NOW() - INTERVAL '2 hours' GROUP BY c.mittente""").fetchall()
+        if all(r["mittente"] in piene for r in per_casella):
+            elenco = "; ".join(f"{x['email']}: {x['oggi']} partite (massimo {x['tetto']})" for x in piene.values())
+            return _esito("campagne", "Campagne email", "invia le email approvate", "attenzione",
+                          f"Tetto di oggi raggiunto per {'la casella' if len(piene) == 1 else 'le caselle'} {elenco}, per non finire nello spam. "
+                          f"Le altre {c['ferme']} approvate partono da sole domani; le campagne da altre caselle continuano.", "Non devi fare niente.", "campagne",
+                          {"in attesa": c["ferme"]})
     if c["ferme"] and (not ultimo or ultimo < datetime.now(timezone.utc) - timedelta(hours=2)):
         return _esito("campagne", "Campagne email", "invia le email approvate", "fermo", f"{c['ferme']} email approvate aspettano da piu' di 2 ore e non ne parte nessuna.",
                       "Apri Comunicazione → Campagne email: guarda gli errori e prova la casella da cui partono.", "campagne", {"ferme": c["ferme"]})

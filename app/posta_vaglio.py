@@ -138,6 +138,20 @@ def _massiva(intest) -> bool:
     return bool(re.match(r"(no-?reply|do-?not-?reply|notifications?|mailer-daemon|newsletter|news|marketing|info@.*mailchimp)", _indirizzo(intest("From")).split("@")[0] + "@"))
 
 
+CALENDARIO = re.compile(r"^\s*(invito|invitation|invito aggiornato|updated invitation|accettato|accepted|rifiutato|declined|forse|tentative|tentativo|"
+                        r"proposta di nuovo orario|new time proposed|evento annullato|canceled event|cancelled event|annullato|promemoria|reminder|notification)"
+                        r"\b.*(@|\d{1,2}[:.]\d{2}|\(\w{3}\)|ora dell|gmt|cet|cest|\bpm\b|\bam\b)", re.I)
+
+
+def e_calendario(oggetto: str, allegati: str = "", mittente: str = "") -> bool:
+    """2.71: inviti del calendario, risposte agli inviti, spostamenti e annullamenti: finiscono gia' nel calendario, Lorenzo non vuole vederli."""
+    if re.search(r"(^|[,\s])(invite|invito)\.ics\b|\.ics\b", allegati or "", re.I):
+        return True
+    if _indirizzo(mittente).startswith(("calendar-notification@", "calendar@", "noreply-calendar")):
+        return True
+    return bool(CALENDARIO.search(oggetto or ""))
+
+
 def _filo_da(msgid: str, in_reply: str, refs: str, oggetto: str) -> str:
     """La conversazione a cui appartiene un'email: il primo messaggio della catena (References), altrimenti la risposta, altrimenti se stessa."""
     ids = re.findall(r"<[^>]+>", refs or "")
@@ -551,6 +565,8 @@ def raccogli(conn, giorni: int | None = None, per_casella: int = PER_CASELLA, av
         for e in elenco:
             da_me = e.get("inviata") or _indirizzo(e["da"]) in mie
             cat, imparata = ("mia", "") if da_me else (("scartabile", "") if e.get("massiva") else ("da_vagliare", ""))
+            if not da_me and e_calendario(e["oggetto"], e.get("allegati") or "", e["da"]):
+                cat, imparata = "scartabile", "invito del calendario (va gia' nel calendario)"
             voto = 0 if da_me else voto_mittente(prof, e["da"])
             if cat == "da_vagliare" and voto <= -2:
                 cat, imparata = "scartabile", "non ti interessa (imparato da te)"

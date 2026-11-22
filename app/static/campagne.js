@@ -4,7 +4,7 @@
 
 const STATI_DEST = { in_attesa: "da preparare", in_studio: "il Redattore ci lavora", da_approvare: "da approvare", approvata: "approvata, in partenza", inviata: "inviata",
   scartata: "scartata", errore: "errore", risposto: "ha risposto (in lettura)", interessato: "interessato", non_interessato: "non interessato",
-  rimosso: "non vuole altre email", nessuna_risposta: "chiuso: nessuna risposta" };
+  rimosso: "non vuole altre email", nessuna_risposta: "chiuso: nessuna risposta", respinto: "email respinta: indirizzo bloccato" };
 const STATI_CP = { bozza: "da avviare", in_corso: "in corso", in_pausa: "in pausa", chiusa: "chiusa" };
 const CAMPI_BRIEF = [["destinatari", "Destinatari", "chi sono (es. hotel 4-5 stelle a Sharm, direttori o proprietari)"], ["occasione", "Occasione", "perché scrivi adesso (es. a marzo siamo in zona per…)"],
   ["offerta", "Cosa offri", "partecipare, servizi a prezzo ridotto perché siete in zona…"], ["cercare", "Cosa cercare sui siti", "novità, eventi, servizi, cosa manca…"],
@@ -204,6 +204,7 @@ function _blocchiFlusso(c, salva) {
   const giorni = campo(h("input", { type: "number", min: 3, max: 60, value: c.sollecito_giorni, style: "width:70px" }), "sollecito_giorni", el => Number(el.value));
   const soll = campo(h("select", {}, [[0, "nessun sollecito"], [1, "solo la seconda email"], [2, "seconda email, e la terza se c'è una novità"]].map(([v, t]) => { const o = h("option", { value: v }, t); if (v === c.solleciti) o.selected = true; return o; })), "solleciti", el => Number(el.value));
   const link = campo(h("input", { type: "url", value: c.link_prenotazione || "", placeholder: "https://calendar.app.google/… (pagina di prenotazione, slot da 20 minuti)" }), "link_prenotazione");
+  const cerca = h("input", { type: "checkbox" }); cerca.checked = !!c.cerca_email_nuova; campo(cerca, "cerca_email_nuova", el => el.checked);
   const opp = Object.fromEntries((c.opportunita || []).map(x => [x.stato, x.n]));
   return h("div", { class: "fl-flusso" },
     blocco("partenza", "Contatti", c.foglio ? "Righe nuove del foglio Google → contatti nel CRM (senza doppioni) e destinatari. Il foglio resta tuo: Opifex lo legge e basta." : "Contatti scelti dal CRM. Puoi collegare anche un foglio Google: le righe nuove entreranno da sole.",
@@ -223,7 +224,11 @@ function _blocchiFlusso(c, salva) {
     h("div", { class: "fl-uscite" },
       blocco("uscita", "Interessato", "Opportunità al primo gradino, notifica, e la bozza di risposta con il link per prenotare la call. Anche i «mi richiami più avanti» contano come interessati.", [link], n.interessato),
       blocco("uscita", "Non interessato", "Chiuso senza avvisarti, mai cancellato: resta nelle statistiche.", null, n.non_interessato + n.rimosso),
-      blocco("uscita", "Nessuna risposta", "Dopo i solleciti il contatto si chiude come «nessuna risposta».", null, n.nessuna_risposta)),
+      blocco("uscita", "Nessuna risposta", "Dopo i solleciti il contatto si chiude come «nessuna risposta».", null, n.nessuna_risposta),
+      blocco("uscita", "Respinte", "Indirizzo inesistente: bloccato in tutte le campagne, niente solleciti e niente token spesi. La casella resta pulita.",
+        [h("label", { class: "spunta" }, cerca, h("span", {}, "Cerca un'email nuova online e rimetti il contatto in coda")),
+         h("span", { class: "sotto" }, "Spenta di serie: accendila solo per le liste che valgono la spesa della ricerca." +
+           (c.respinte && c.respinte.trovate ? " Email nuove trovate: " + c.respinte.trovate + "." : "") + (c.respinte && c.respinte.in_ricerca ? " In ricerca: " + c.respinte.in_ricerca + "." : ""))], n.respinto)),
     (opp.interessato || opp.call_fissata || opp.call_fatta || opp.proposta || opp.vinta) ? h("p", { class: "sotto" }, "Opportunità nate da questa campagna: " +
       [["interessato", "interessati", "interessato"], ["call_fissata", "call fissate", "call fissata"], ["call_fatta", "call fatte", "call fatta"], ["proposta", "proposte", "proposta"], ["vinta", "vinte", "vinta"], ["persa", "perse", "persa"]].filter(([k]) => opp[k]).map(([k, t, t1]) => opp[k] + " " + (opp[k] === 1 ? t1 : t)).join(" · ")) : null);
 }
@@ -370,7 +375,7 @@ async function apriCampagna(corpo, cid, torna) {
   const lista = h("div");
   const mostra = () => {
     const f = filtro.value; stato.campagnaFiltro = f;
-    const sel = c.destinatari.filter(x => !f || (f === "chiusi" ? ["non_interessato", "rimosso", "nessuna_risposta", "scartata"].includes(x.stato) : x.stato === f || (f === "interessato" && x.stato === "risposto")));
+    const sel = c.destinatari.filter(x => !f || (f === "chiusi" ? ["non_interessato", "rimosso", "nessuna_risposta", "scartata", "respinto"].includes(x.stato) : x.stato === f || (f === "interessato" && x.stato === "risposto")));
     riempi(lista, sel.length ? sel.slice(0, 200).map(dest) : h("p", { class: "sotto" }, c.destinatari.length ? "Nessuno in questo gruppo." : "Nessun destinatario ancora: aggiungi righe al foglio o scegli i contatti dal CRM."));
   };
   filtro.onchange = mostra; mostra();

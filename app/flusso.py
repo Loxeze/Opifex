@@ -77,7 +77,8 @@ def _localita(k: dict) -> str:
 
 
 def _esclusi(conn) -> set:
-    return {r["email_hash"] for r in conn.execute("SELECT DISTINCT email_hash FROM campagne_posta_dest WHERE stato='rimosso'").fetchall()}
+    from . import respinte   # 2.71: anche gli indirizzi respinti
+    return {r["email_hash"] for r in conn.execute("SELECT DISTINCT email_hash FROM campagne_posta_dest WHERE stato='rimosso'").fetchall()} | respinte.hash_bloccati(conn)
 
 
 def aggiungi_destinatario(conn, cid: int, contatto_id: int, email: str) -> bool:
@@ -89,8 +90,8 @@ def aggiungi_destinatario(conn, cid: int, contatto_id: int, email: str) -> bool:
         return False
     vecchio = conn.execute("SELECT id, email_hash, stato FROM campagne_posta_dest WHERE campagna_id=%s AND contatto_id=%s", (cid, contatto_id)).fetchone()
     if vecchio:
-        if vecchio["email_hash"] != h and vecchio["stato"] in ("in_attesa", "errore", "scartata"):   # email corretta nel foglio: si riparte da capo
-            conn.execute("UPDATE campagne_posta_dest SET email_hash=%s, stato='in_attesa', nota='', aggiornato_il=NOW() WHERE id=%s", (h, vecchio["id"]))
+        if vecchio["email_hash"] != h and vecchio["stato"] in ("in_attesa", "errore", "scartata", "respinto"):   # email corretta nel foglio: si riparte da capo
+            conn.execute("UPDATE campagne_posta_dest SET email_hash=%s, stato='in_attesa', nota='', ricerca_email='', email_id=NULL, aggiornato_il=NOW() WHERE id=%s", (h, vecchio["id"]))
         return False
     r = conn.execute("""INSERT INTO campagne_posta_dest (campagna_id, contatto_id, email_hash) VALUES (%s,%s,%s)
                         ON CONFLICT (campagna_id, email_hash) DO NOTHING""", (cid, contatto_id, h))
