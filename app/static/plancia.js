@@ -277,6 +277,7 @@ function vistaDashboard() {
   const lavoro = riquadroLavoro(); lavoro.ricarica();
   const marchiSoc = riquadroSocialPlancia(); marchiSoc.ricarica();
   const sitiPl = riquadroSitiPlancia(); sitiPl.ricarica();
+  const campPl = stato.ruolo === "titolare" ? riquadroCampagnePlancia() : null; if (campPl) campPl.ricarica();
   const daFare = pannelloDaFare();
   const garanzie = ((stato.opzioni && stato.opzioni.fornitori) || []).filter(f => !(f.non_conservazione_attiva && f.dpa_firmato));
 
@@ -356,6 +357,49 @@ function vistaDashboard() {
   return h("div", { class: "bt-plancia bt-fitta" },
     h("div", { class: "bt-intesta" }, h("div", {}, h("div", { class: "bt-cap" }, new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })), titolo),
       h("div", { class: "bt-azioni" }, h("button", { class: "s", onclick: apriOrganigramma }, "Organigramma 3D ↗"), bottoneAllinea(), h("button", { class: "s", onclick: () => vai("task") }, "Task"), h("button", { class: "p", onclick: () => vai("riunioni") }, "Avvia una riunione"))),
-    guardiano.el, lavoro.el, marchiSoc.el, sitiPl.el, locale, kpi, riga1, riga2,
+    guardiano.el, lavoro.el, campPl ? campPl.el : null, marchiSoc.el, sitiPl.el, locale, kpi, riga1, riga2,
     garanzie.length ? h("p", { class: "bt-nota" }, "Dati interni e riservati bloccati verso: " + garanzie.map(f => f.nome).join(", ") + ". ", h("a", { href: "#", onclick: (e) => { e.preventDefault(); vai("impostazioni", "sicurezza"); } }, "Dichiara le garanzie")) : null);
+}
+
+
+// 2.79: le campagne email a colpo d'occhio — chi aspetta, chi ha risposto, l'imbuto e le schede delle ultime risposte
+function riquadroCampagnePlancia() {
+  const corpo = h("div", {}, h("p", { class: "bt-sotto" }, "Carico le campagne…"));
+  const el = h("section", { class: "bt-card bt-campagne" }, h("div", { class: "bt-testa" }, h("div", { class: "bt-cap" }, "Campagne email · come vanno i lead"),
+    h("button", { class: "s", onclick: () => vai("campagne") }, "Apri")), corpo);
+  const apri = (cid) => { stato.campagnaAperta = cid; stato.campagnaRisposte = "tutte"; vai("campagne"); };
+  const STATI = { interessato: ["Interessato", "verde"], risposto: ["Ha risposto", ""], non_interessato: ["Non interessato", "grigio"], rimosso: ["Non scrivere più", "grigio"] };
+  const quando = (iso) => { const d = new Date(iso), min = Math.round((Date.now() - d) / 60000);
+    return min < 60 ? min + " min fa" : min < 1440 ? Math.round(min / 60) + " ore fa" : d.toLocaleDateString("it-IT", { day: "numeric", month: "short" }); };
+  const ricarica = async () => {
+    let d; try { d = await api("GET", "/gestione/campagne/cruscotto"); } catch (e) { mostraErrore(corpo, e, ricarica, true); return; }
+    if (!d.partite && !d.campagne.length) { riempi(corpo, h("p", { class: "bt-sotto" }, "Nessuna campagna in corso.")); return; }
+    const tess = (titolo, valore, sotto, evid, click) => h(click ? "button" : "div", { class: "bt-cp-tessera" + (evid ? " evid" : ""), onclick: click || null, type: click ? "button" : null },
+      h("div", { class: "bt-sotto" }, titolo), h("div", { class: "bt-num piccolo" }, valore), sotto ? h("div", { class: "bt-sotto" }, sotto) : null);
+    const primaDaGestire = d.ultime.find(x => x.da_gestire);
+    const numeri = h("div", { class: "bt-cp-numeri" },
+      tess("In attesa di risposta", nIt(d.in_attesa), "email partite, nessuna risposta ancora"),
+      tess("Hanno risposto", nIt(d.risposte), d.tasso != null ? nIt(d.tasso, 1) + "% delle " + nIt(d.partite) + " partite" : ""),
+      tess("Interessati", nIt(d.interessati), d.non_interessati ? nIt(d.non_interessati) + " non interessati" : "nessun no"),
+      tess("Risposte da gestire", nIt(d.da_gestire), d.da_gestire ? "aspettano te: apri" : "tutto gestito", d.da_gestire > 0, d.da_gestire && primaDaGestire ? () => { stato.campagnaAperta = primaDaGestire.campagna_id; stato.campagnaRisposte = "gestire"; vai("campagne"); } : null),
+      tess("In preparazione", nIt(d.da_preparare + d.da_approvare), nIt(d.da_approvare) + " bozze da approvare o in partenza"));
+    const schede = d.ultime.length ? h("div", { class: "bt-cp-schede" }, d.ultime.slice(0, 8).map(x => {
+      const [et, col] = STATI[x.stato] || [x.stato, ""];
+      return h("button", { class: "bt-cp-scheda" + (x.da_gestire ? " da-gestire" : ""), type: "button", onclick: () => apri(x.campagna_id), title: "Apri la campagna" },
+        h("div", { class: "bt-riga-tag" }, h("b", {}, x.chi), h("span", { class: "bt-tag " + col }, et), x.da_gestire ? h("span", { class: "bt-tag rosso" }, "da gestire") : null),
+        x.sintesi ? h("div", { class: "bt-cp-sintesi" }, x.sintesi) : null,
+        h("div", { class: "bt-sotto" }, x.campagna + " · " + quando(x.quando) + (x.opportunita ? " · " + x.opportunita.replace("_", " ") : "")));
+    })) : h("p", { class: "bt-sotto" }, "Ancora nessuna risposta.");
+    const g = d.giorni, etich = g.map(x => pbData(x.giorno));
+    const andamento = h("div", {}, h("div", { class: "bt-cap" }, "Ultimi 14 giorni: email partite e risposte"),
+      graficoBarreDoppie(g.map(x => x.partite), g.map(x => x.risposte), etich, PB.blu, PB.verde, (v) => nIt(v), "Email partite e risposte negli ultimi 14 giorni"),
+      h("div", {}, h("span", { class: "bt-leg" }, h("b", { style: "background:" + PB.blu }), "partite"), h("span", { class: "bt-leg" }, h("b", { style: "background:" + PB.verde }), "risposte")));
+    const perCamp = d.campagne.length ? h("div", { class: "bt-cp-elenco" }, d.campagne.map(c => h("button", { class: "bt-cp-riga", type: "button", onclick: () => apri(c.id) },
+      h("b", {}, c.nome), h("span", { class: "bt-sotto" }, nIt(c.partite) + (c.partite === 1 ? " partita · " : " partite · ") + nIt(c.in_attesa) + " in attesa · " + nIt(c.risposte) + (c.risposte === 1 ? " risposta" : " risposte") + (c.tasso != null ? " (" + nIt(c.tasso, 1) + "%)" : "") + " · " + nIt(c.interessati) + (c.interessati === 1 ? " interessato" : " interessati"))))) : null;
+    riempi(corpo, [numeri,
+      h("div", { class: "bt-cp-due" }, h("div", { class: "bt-cp-col" }, graficoImbutoCp(d.imbuto, "L'imbuto: dal contatto alla vendita")),
+        h("div", { class: "bt-cp-col" }, h("div", { class: "bt-cap" }, "Chi ha risposto"), schede)),
+      h("div", { class: "bt-cp-due" }, h("div", { class: "bt-cp-col" }, andamento), h("div", { class: "bt-cp-col" }, h("div", { class: "bt-cap" }, "Campagne in corso"), perCamp))]);
+  };
+  return { el, ricarica };
 }

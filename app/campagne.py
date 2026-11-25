@@ -615,6 +615,52 @@ def togli_risposta_pronta(rid: int, u: dict = Depends(solo_titolare)):
     return {"ok": True}
 
 
+RISPOSTO = ("risposto", "interessato", "non_interessato", "rimosso")
+
+
+def cruscotto(conn) -> dict:
+    """2.79: il colpo d'occhio sulle campagne per la Plancia: chi aspetta, chi ha risposto, l'imbuto, le ultime risposte."""
+    from . import imbuto as imb
+    vive = "c.stato IN ('in_corso','in_pausa')"
+    st = {r["stato"]: r["n"] for r in conn.execute(f"""SELECT d.stato, count(*) AS n FROM campagne_posta_dest d JOIN campagne_posta c ON c.id=d.campagna_id
+                                                      WHERE {vive} GROUP BY d.stato""").fetchall()}
+    partite = sum(st.get(k, 0) for k in ("inviata", "nessuna_risposta") + RISPOSTO)
+    risposte = sum(st.get(k, 0) for k in RISPOSTO)
+    da_gestire = conn.execute(f"""SELECT count(*) AS n FROM campagne_posta_dest d JOIN campagne_posta c ON c.id=d.campagna_id
+           WHERE {vive} AND d.risposta_il IS NOT NULL AND d.stato IN {RISPOSTO} AND (
+             (d.stato='risposto' AND NOT EXISTS (SELECT 1 FROM email_in_uscita e WHERE e.destinatario_id=d.id AND e.tipo_campagna IN ('risposta','ripresa')))
+             OR EXISTS (SELECT 1 FROM email_in_uscita e WHERE e.destinatario_id=d.id AND e.tipo_campagna IN ('risposta','ripresa') AND e.stato IN ('da_approvare','errore')))""").fetchone()["n"]
+    ultime = []
+    for r in conn.execute(f"""SELECT d.id, d.campagna_id, c.nome AS campagna, d.stato, d.risposta_il, d.risposta_sintesi, k.ente_cifrato, k.nome_cifrato, o.stato AS opp,
+                                     EXISTS (SELECT 1 FROM email_in_uscita e WHERE e.destinatario_id=d.id AND e.tipo_campagna IN ('risposta','ripresa') AND e.stato IN ('da_approvare','errore')) AS bozza
+                              FROM campagne_posta_dest d JOIN campagne_posta c ON c.id=d.campagna_id LEFT JOIN crm_contatti k ON k.id=d.contatto_id
+                              LEFT JOIN crm_opportunita o ON o.id=d.opportunita_id
+                              WHERE d.risposta_il IS NOT NULL AND d.stato IN {RISPOSTO} ORDER BY d.risposta_il DESC LIMIT 12""").fetchall():
+        ultime.append({"id": r["id"], "campagna_id": r["campagna_id"], "campagna": r["campagna"], "stato": r["stato"], "quando": r["risposta_il"],
+                       "chi": _d(r["ente_cifrato"]) or _d(r["nome_cifrato"]) or "Contatto", "sintesi": r["risposta_sintesi"] or "", "opportunita": r["opp"],
+                       "da_gestire": bool(r["bozza"]) or r["stato"] == "risposto"})
+    per = conn.execute(f"""SELECT c.id, c.nome, c.stato, count(*) FILTER (WHERE d.inviata_il IS NOT NULL) AS partite,
+                                  count(*) FILTER (WHERE d.stato='inviata') AS in_attesa,
+                                  count(*) FILTER (WHERE d.stato IN {RISPOSTO}) AS risposte, count(*) FILTER (WHERE d.stato='interessato') AS interessati
+                           FROM campagne_posta c LEFT JOIN campagne_posta_dest d ON d.campagna_id=c.id WHERE {vive} GROUP BY c.id ORDER BY c.id DESC""").fetchall()
+    giorni = conn.execute(f"""SELECT g::date AS giorno,
+               (SELECT count(*) FROM campagne_posta_dest d WHERE (d.inviata_il AT TIME ZONE 'Europe/Rome')::date = g::date) AS partite,
+               (SELECT count(*) FROM campagne_posta_dest d WHERE d.stato IN {RISPOSTO} AND (d.risposta_il AT TIME ZONE 'Europe/Rome')::date = g::date) AS risposte
+           FROM generate_series((NOW() AT TIME ZONE 'Europe/Rome')::date - 13, (NOW() AT TIME ZONE 'Europe/Rome')::date, interval '1 day') g ORDER BY 1""").fetchall()
+    return {"in_attesa": st.get("inviata", 0), "da_preparare": st.get("in_attesa", 0) + st.get("in_studio", 0), "da_approvare": st.get("da_approvare", 0) + st.get("approvata", 0),
+            "partite": partite, "risposte": risposte, "interessati": st.get("interessato", 0), "non_interessati": st.get("non_interessato", 0) + st.get("rimosso", 0),
+            "senza_risposta": st.get("nessuna_risposta", 0), "respinte": st.get("respinto", 0), "tasso": round(risposte * 100 / partite, 1) if partite else None,
+            "da_gestire": da_gestire, "imbuto": imb.numeri(conn), "ultime": ultime,
+            "campagne": [dict(x, tasso=round(x["risposte"] * 100 / x["partite"], 1) if x["partite"] else None) for x in per],
+            "giorni": [{"giorno": g["giorno"].isoformat(), "partite": g["partite"], "risposte": g["risposte"]} for g in giorni]}
+
+
+@router.get("/cruscotto")
+def vedi_cruscotto(u: dict = Depends(solo_titolare)):
+    with connessione() as conn:
+        return cruscotto(conn)
+
+
 @router.get("/classifica")
 def classifica(u: dict = Depends(solo_titolare)):
     """2.74: quali campagne, angoli e liste portano piu' risposte e call, e quanto costano."""

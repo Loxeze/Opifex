@@ -567,3 +567,19 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .cp-lettera > summary { cursor: pointer; }
 .cp-lettera-testo .cp-testo { white-space: pre-wrap; margin-top: 8px; }
 .cp-sintesi { margin: 6px 0 0; }
+
+/* 2.79: Plancia — campagne email a colpo d'occhio */
+.bt-campagne { display: grid; gap: 14px; }
+.bt-cp-numeri { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.bt-cp-tessera { text-align: left; border: 1px solid var(--bordo, rgba(0,0,0,.1)); border-radius: 10px; padding: 10px 12px; background: transparent; font: inherit; color: inherit; min-width: 0; }
+button.bt-cp-tessera { cursor: pointer; }
+.bt-cp-tessera.evid { border: 2px solid #C4502A; }
+.bt-cp-due { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; margin-top: 6px; }
+.bt-cp-col { min-width: 0; display: grid; gap: 8px; align-content: start; }
+.bt-cp-schede { display: grid; gap: 8px; }
+.bt-cp-scheda, .bt-cp-riga { text-align: left; font: inherit; color: inherit; background: transparent; border: 1px solid var(--bordo, rgba(0,0,0,.1)); border-radius: 10px; padding: 8px 12px; cursor: pointer; display: grid; gap: 3px; min-width: 0; }
+.bt-cp-scheda.da-gestire { border-left: 4px solid #C4502A; }
+.bt-cp-scheda:hover, .bt-cp-riga:hover { border-color: currentColor; }
+.bt-cp-sintesi { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-cp-elenco { display: grid; gap: 6px; }
+.bt-tag.grigio { opacity: .7; }
