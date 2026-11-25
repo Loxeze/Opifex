@@ -382,6 +382,11 @@ def esegui(bid: int):
             scheda.update({"modello": m, "token_input": r.token_input, "token_output": r.token_output, "letto_il": datetime.now().isoformat(timespec="minutes")})
             conn.execute("""UPDATE faro_bandi SET scheda=%s::jsonb, scheda_stato='pronta', scheda_il=NOW(), scheda_errore=NULL, scheda_costo=scheda_costo+%s, aggiornato_il=NOW()
                             WHERE id=%s""", (json.dumps(scheda, ensure_ascii=False), c, bid))
+            ds = conn.execute("SELECT drive_stato FROM faro_bandi WHERE id = %s", (bid,)).fetchone()["drive_stato"]
+        from . import faro_drive   # la scheda tecnica su Drive si completa con i dati letti
+        with connessione() as conn:
+            if faro_drive.acceso(conn):
+                faro_drive.archivia_tutti([bid], scarica=ds != "salvato")
     except Exception as e:  # noqa: BLE001
         msg = str(e) if isinstance(e, ErroreLettura) else f"lettura non riuscita ({type(e).__name__})"
         with connessione() as conn:

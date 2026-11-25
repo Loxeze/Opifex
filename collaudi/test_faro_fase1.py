@@ -39,6 +39,8 @@ copione = []
 agente_browser._chiama_api = lambda corpo: copione.pop(0) if copione else fine("ok")
 faro.SINCRONO = True
 faro_lettura.SINCRONO = True
+from app import faro_drive
+faro_drive.SINCRONO = True
 OGGI = datetime.now(faro.FUSO).date()
 fra = lambda g: (OGGI + timedelta(days=g)).isoformat()
 
@@ -222,8 +224,19 @@ with TestClient(app) as c:
        and sql("SELECT count(*) FROM task WHERE progetto_id=%s AND scadenza IS NOT NULL", (cd2.json()["progetto"],))[0][0] == 1, cd2.text)
 
     # --- aggiornamento di Matteo e avvisi ---
+    LOR = sql("SELECT id FROM utenti WHERE nome='Lorenzo'")[0][0]
     with connessione() as cn:
-        ok("aggiornamento settimanale: un compito a chi ha il reparto Bandi", faro.aggiornamento_settimanale(cn) == 1)
+        n_agg = faro.aggiornamento_settimanale(cn)
+    ok("di serie il primo setaccio lo fa il titolare: il compito della settimana va a Lorenzo", n_agg == 1
+           and sql("SELECT count(*) FROM task WHERE assegnato_utente_id=%s AND titolo='Setaccio dei bandi della settimana'", (LOR,))[0][0] == 1
+           and sql("SELECT count(*) FROM task WHERE assegnato_utente_id=%s", (MATTEO,))[0][0] == 0, str(sql("SELECT assegnato_utente_id, titolo FROM task WHERE assegnato_utente_id IS NOT NULL AND progetto_id IS NULL")))
+    im0 = c.get("/gestione/faro", headers=H).json()
+    ok("si puo' scegliere chi fa il setaccio solo tra il titolare e chi ha il reparto Bandi",
+       [u["nome"] for u in im0["setaccio_possibili"]] == ["Lorenzo", "Matteo"] and im0["impostazioni"]["setaccio"] == LOR
+       and c.put("/gestione/faro/impostazioni", headers=H, json={**im0["impostazioni"], "setaccio": sql("SELECT id FROM utenti WHERE nome='Carla'")[0][0]}).status_code == 422)
+    ok("... passa a Matteo", c.put("/gestione/faro/impostazioni", headers=H, json={**im0["impostazioni"], "setaccio": MATTEO}).json()["setaccio"] == MATTEO)
+    with connessione() as cn:
+        ok("aggiornamento settimanale: un compito a chi fa il setaccio", faro.aggiornamento_settimanale(cn) == 1)
         faro.aggiornamento_settimanale(cn)
     t = sql("SELECT count(*), max(descrizione) FROM task WHERE assegnato_utente_id=%s AND titolo='Setaccio dei bandi della settimana'", (MATTEO,))[0]
     ok("... uno solo anche se si ripete, con i bandi nuovi delle mie societa' (non quelli mensili)", t[0] == 1 and "primo setaccio" in t[1] and "nuove imprese culturali" not in t[1], str(t))

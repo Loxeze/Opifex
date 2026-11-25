@@ -572,7 +572,8 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                     from . import faro
                     extra.extend(faro.STRUMENTI)
                     avviso_extra += faro.AVVISO
-                    gestori["faro_segnala_bando"] = faro.gestore(connessione)
+                    _gf = faro.gestore(connessione)   # uno stato per giro: conta segnalazioni e fonti proposte
+                    gestori["faro_segnala_bando"] = gestori["faro_proponi_fonte"] = _gf
                 if crm_nom_tool:
                     extra.extend(crm_contatti_agenti.STRUMENTI)
                     avviso_extra += crm_contatti_agenti.AVVISO

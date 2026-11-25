@@ -36,6 +36,8 @@ def finta_api(corpo):
 agente_browser._chiama_api = finta_api
 faro.SINCRONO = True
 faro_lettura.SINCRONO = True
+from app import faro_drive
+faro_drive.SINCRONO = True
 def _senza_rete(u):
     raise faro_lettura.ErroreLettura("rete spenta nei collaudi")
 faro_lettura.scarica = _senza_rete   # nei collaudi nessuna pagina vera: la verifica e la lettura hanno i loro collaudi

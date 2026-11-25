@@ -118,6 +118,21 @@ function _bloccoSchedaFr(b, d, ricarica, dire) {
     box, ges ? h("div", { class: "azioni" }, leggi()) : null);
 }
 
+// ---------- il bando su Drive: cartella con il materiale e scheda tecnica ----------
+function _driveFr(b, d, ricarica, dire) {
+  const ges = d.gestione, st = b.drive_stato || "";
+  const salva = ges && d.drive_collegato ? _btnFr(st === "salvato" ? "Aggiorna su Drive" : "Salva su Drive", async () => {
+    try { await api("POST", "/gestione/faro/bandi/" + b.id + "/drive"); dire("Sto scaricando il materiale del bando nella sua cartella su Drive, con la scheda tecnica."); ricarica(); } catch (e) { dire(e.message, "no"); }
+  }) : null;
+  if (st === "salvato") return h("div", { class: "fr-drive" },
+    h("a", { href: "https://docs.google.com/document/d/" + b.drive_scheda_id + "/edit", target: "_blank", rel: "noopener", class: "fr-scheda-link" }, "📄 Scheda tecnica"),
+    h("a", { href: "https://drive.google.com/drive/folders/" + b.drive_cartella_id, target: "_blank", rel: "noopener" }, "📁 Cartella su Drive (" + (b.drive_file || []).length + " file)"), salva);
+  if (st === "in_corso") return h("p", { class: "sotto" }, "⏳ Sto salvando il materiale su Drive…");
+  if (st.startsWith("errore")) return h("div", { class: "fr-drive" }, h("span", { class: "etichetta avv", title: st }, "Drive: non riuscito, riprovo da solo tra un'ora"), salva);
+  if (st === "drive_non_collegato") return ges ? h("p", { class: "sotto" }, "Il materiale andrà su Drive appena colleghi Google Drive (Impostazioni › Collegamenti).") : null;
+  return salva ? h("div", { class: "fr-drive" }, salva) : null;
+}
+
 // ---------- elenco dei bandi ----------
 async function _bandiFr(d, ricarica, dire, sezione) {
   const ges = d.gestione, st = stato.faroStato || "aperti", prof = stato.faroProfilo || "";
@@ -180,6 +195,7 @@ async function _bandiFr(d, ricarica, dire, sezione) {
     b.importo !== null && b.importo_nota ? h("p", { class: "sotto" }, b.importo_nota) : null,
     b.profili.map(p => h("div", { class: "fr-perche" }, h("span", { class: "etichetta " + (p.esito === "da_valutare" ? "avv" : "ok") }, p.profilo + (p.esito === "da_valutare" ? " · da valutare" : "")), " ", p.motivo)),
     b.nota ? h("p", { class: "sotto" }, (b.stato === "scartato" ? "Scartato" : "Motivo") + (b.setaccio_da ? " (" + b.setaccio_da + ")" : "") + ": " + b.nota) : null,
+    _driveFr(b, d, ricarica, dire),
     b.progetto ? h("p", {}, "Progetto della candidatura: ", h("a", { href: "#", onclick: (e) => { e.preventDefault(); stato.progettoAperto = b.progetto_id; vai("progetto"); } }, b.progetto)) : null,
     _bloccoSchedaFr(b, d, ricarica, dire),
     setaccio(b), candidatura(b));
@@ -259,8 +275,8 @@ async function _fontiFr(d, ricarica, dire) {
   let fonti;
   try { fonti = await api("GET", "/gestione/faro/fonti"); } catch (e) { return avviso(e.message, "no"); }
   const soloRotte = !!stato.faroFontiRotte;
-  const gruppi = {};
-  for (const f of fonti) if (!soloRotte || f.raggiungibile === false) (gruppi[f.categoria] = gruppi[f.categoria] || []).push(f);
+  const gruppi = {}, proposte = fonti.filter(f => f.proposta && !f.scartata);
+  for (const f of fonti) if (!f.proposta && !f.scartata && (!soloRotte || f.raggiungibile === false)) (gruppi[f.categoria] = gruppi[f.categoria] || []).push(f);
   const salva = async (f, cambi) => { try { await api("PUT", "/gestione/faro/fonti/" + f.id, { nome: f.nome, url: f.url, categoria: f.categoria, regione: f.regione, attiva: f.attiva, ...cambi }); ricarica(); } catch (e) { dire(e.message, "no"); } };
   const riga = (f) => h("li", { class: "fr-fonte" + (f.attiva ? "" : " spenta") },
     h("div", {}, h("a", { href: f.url, target: "_blank", rel: "noopener" }, f.nome, " ↗"), f.regione ? h("span", { class: "etichetta" }, f.regione) : null,
@@ -271,9 +287,20 @@ async function _fontiFr(d, ricarica, dire) {
   const nome = h("input", { type: "text", maxlength: 200, placeholder: "Es. Fondazione Carige – Bandi" }), url = h("input", { type: "url", maxlength: 500, placeholder: "https://…" });
   const cat = h("input", { type: "text", maxlength: 60, placeholder: "Es. Fondazioni", list: "fr-categorie" }), reg = h("select", {}, h("option", { value: "" }, "Nazionale o non legata a una regione"), d.regioni.map(r => h("option", { value: r }, r)));
   const elenco = h("textarea", { rows: 8, placeholder: "[Fondazioni bancarie]\n- Fondazione Carige: https://www.fondazionecarige.it/bandi/\n- Fondazione CRT: https://www.fondazionecrt.it/bandi/\n\noppure, da un foglio di calcolo:\nNome;Indirizzo;Categoria;Regione" });
-  return [h("p", { class: "aiuto" }, "Il registro delle fonti originali: " + d.fonti.attive + " attive su " + d.fonti.n + ". A ogni giro Faro ne controlla " + d.impostazioni.fonti_per_giro + ", partendo da quelle che non vede da più tempo" +
-      (d.fonti.mai ? " (" + d.fonti.mai + " non ancora controllate)" : "") + ". Le fonti che non portano mai bandi utili si mettono in pausa."),
+  const proposta = (f) => h("li", { class: "fr-fonte" },
+    h("div", {}, h("a", { href: f.url, target: "_blank", rel: "noopener" }, f.nome, " ↗"), h("span", { class: "etichetta" }, f.categoria), f.regione ? h("span", { class: "etichetta" }, f.regione) : null,
+      f.motivo ? h("div", { class: "sotto" }, "Perché: " + f.motivo) : null),
+    h("div", { class: "fr-azioni" }, _btnFr("Accetta", () => salva(f, { attiva: true }), "p"),
+      _btnFr("Scarta", async () => { try { await api("DELETE", "/gestione/faro/fonti/" + f.id); dire("Scartata: Faro non la riproporrà."); ricarica(); } catch (e) { dire(e.message, "no"); } })));
+  return [h("p", { class: "aiuto" }, "Qui vive il registro delle fonti: i siti degli enti e delle istituzioni che pubblicano bandi (" + d.fonti.attive + " attive su " + d.fonti.n + "). " +
+      "Si amplia in tre modi: le aggiungi tu, le importi da un elenco, oppure le propone Faro quando durante i giri trova un ente che non c'è. A ogni giro Faro ne controlla " + d.impostazioni.fonti_per_giro + ", partendo da quelle che non vede da più tempo" +
+      (d.fonti.mai ? " (" + d.fonti.mai + " non ancora controllate)" : "") + "."),
+    proposte.length ? h("div", { class: "carta" }, h("div", { class: "nome" }, "Fonti proposte da Faro (" + proposte.length + ")"),
+      h("p", { class: "sotto" }, "Enti che Faro ha trovato durante i giri e che non erano nel registro. Accettate, entrano nella rotazione; scartate, non tornano."),
+      h("ul", { class: "fr-fonti" }, proposte.map(proposta))) : null,
     h("div", { class: "azioni" },
+      _btnFr("Copia il registro su Drive", async () => { try { const r = await api("POST", "/gestione/faro/fonti/drive"); dire("Registro copiato su Drive (Opifex › Bandi), in un foglio Google: " + r.link); ricarica(); } catch (e) { dire(e.message, "no"); } }),
+      d.registro_drive ? h("a", { href: "https://docs.google.com/spreadsheets/d/" + d.registro_drive + "/edit", target: "_blank", rel: "noopener" }, "Apri il foglio su Drive ↗") : null,
       _btnFr("Controlla che gli indirizzi rispondano", async () => { try { const r = await api("POST", "/gestione/faro/fonti/controlla"); dire("Controllo avviato su " + r.fonti + " fonti: senza modello, costo zero. Ricarica tra qualche minuto."); } catch (e) { dire(e.message, "no"); } }),
       d.fonti.irraggiungibili ? h("label", { class: "fr-spunta" }, h("input", { type: "checkbox", checked: soloRotte, onchange: (e) => { stato.faroFontiRotte = e.target.checked; ricarica(); } }), " solo le " + d.fonti.irraggiungibili + " che non rispondono") : null),
     h("datalist", { id: "fr-categorie" }, Object.keys(gruppi).map(c => h("option", { value: c }))),
@@ -328,7 +355,8 @@ function _lavoroFr(d, ricarica, dire) {
   const rich = h("textarea", { rows: 3, maxlength: 2000, placeholder: "Es. Cerca bandi per mostre d'arte italiana all'estero, in particolare in Cina." });
   const settimana = Math.ceil(d.fonti.attive / Math.max(1, im.fonti_per_giro));
   const salvaTutto = (extra) => api("PUT", "/gestione/faro/impostazioni", { acceso: im.acceso, giorni_fonte: Number(gf.value), fonti_per_giro: Number(fg.value), giri_al_giorno: Number(gg.value),
-    giorni_avviso: Number(ga.value), bollettino_giorno: Number(bg.value), lettura: lq.value, modello_lettura: lm.value, ...extra });
+    giorni_avviso: Number(ga.value), bollettino_giorno: Number(bg.value), lettura: lq.value, modello_lettura: lm.value, setaccio: Number(chi.value), ...extra });
+  const chi = h("select", {}, d.setaccio_possibili.map(u => h("option", { value: String(u.id), selected: u.id === im.setaccio }, u.nome + (u.ruolo_globale === "titolare" ? " (titolare)" : " (reparto Bandi)"))));
   const collaudi = d.giri.filter(g => g.collaudo);
   const giriMese = co.giro_medio * Math.min(im.giri_al_giorno, Math.max(1, settimana)) * 30;
   return [
@@ -362,8 +390,15 @@ function _lavoroFr(d, ricarica, dire) {
       h("p", { class: "sotto" }, "Con questi numeri servono circa " + settimana + " giri per passare tutte le fonti attive. Ogni giro è una ricerca sul web con il modello " + d.agente.modello + "."),
       h("div", { class: "riga" }, h("label", {}, "Ogni fonte si ricontrolla dopo (giorni)", gf), h("label", {}, "Fonti per giro", fg), h("label", {}, "Giri al giorno, al massimo", gg)),
       h("div", { class: "riga" }, h("label", {}, "Avviso di scadenza (giorni prima)", ga), h("label", {}, "Bollettino e aggiornamento della settimana", bg)),
-      h("p", { class: "sotto" }, "Chi ha il reparto Bandi riceve ogni settimana un compito con i bandi nuovi da setacciare e, subito, un compito urgente se un bando non ancora guardato scade entro i giorni di avviso."),
+      h("div", { class: "riga" }, h("label", {}, "Chi fa il primo setaccio", chi)),
+      h("p", { class: "sotto" }, "Chi fa il primo setaccio riceve ogni settimana un compito con i bandi nuovi da guardare e, subito, un compito urgente se un bando non ancora guardato scade entro i giorni di avviso. " +
+        "Qui compaiono il titolare e chi ha il reparto Bandi (Impostazioni › Utenti)."),
       h("div", { class: "azioni" }, _btnFr("Salva", async () => { try { await salvaTutto({}); dire("Salvato."); ricarica(); } catch (e) { dire(e.message, "no"); } }, "p"))),
+    h("div", { class: "carta" }, h("div", { class: "nome" }, "Il materiale su Drive ", h("span", { class: "etichetta " + (im.drive ? "ok" : "") }, im.drive ? "acceso" : "spento")),
+      h("p", { class: "sotto" }, "Per ogni bando trovato (tranne quelli che il controllo non ritrova sulla pagina) Opifex crea una cartella in Drive › Opifex › Bandi, chiamata «scadenza - titolo», " +
+        "e ci scarica la pagina ufficiale, l'avviso, gli allegati e le FAQ, con la scheda tecnica da leggere a colpo d'occhio. La scheda si completa da sola dopo la lettura approfondita. Senza modello: costo zero." +
+        (d.drive_collegato ? "" : " Drive non è ancora collegato: Impostazioni › Collegamenti.")),
+      h("div", { class: "azioni" }, _btnFr(im.drive ? "Spegni il salvataggio su Drive" : "Accendi il salvataggio su Drive", async () => { try { await salvaTutto({ drive: !im.drive }); ricarica(); } catch (e) { dire(e.message, "no"); } }))),
     h("div", { class: "carta" }, h("div", { class: "nome" }, "Filone clienti ", h("span", { class: "etichetta " + (im.clienti_acceso ? "ok" : "") }, im.clienti_acceso ? "acceso" : "spento")),
       h("p", { class: "sotto" }, "Il filone commerciale (clienti, potenziali clienti, profili tipo come il piccolo museo locale) è predisposto ma resta spento finché non dai il via: spento, Faro non cerca per quei profili e i loro bollettini non si preparano. " +
         "La scheda opportunità e il collegamento al CRM arrivano con la fase 2."),

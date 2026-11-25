@@ -6,6 +6,7 @@
   Agenti/<nome dell'agente>                          la cartella personale di ogni agente: memoria e documenti che produce
   Agenti/Tavoli/<data - titolo>                      verbali e documenti dei tavoli di lavoro (fonti condivise)
   Agenti/Riunioni/<data - titolo>                    verbali e documenti delle riunioni
+  Bandi/<scadenza - titolo>                          i bandi trovati da Faro: pagina, avviso, allegati, FAQ e la scheda tecnica
   Sistema/<...>                                      cio' che scrive il sistema da solo (backup cifrati, backup dei siti)
 Nella radice non nasce piu' niente. Lo spostamento lo fa il sistema, non un agente: riconosce le cartelle dall'identificativo salvato in Opifex,
 quindi non sbaglia per nomi simili; cio' che non riconosce resta dov'e' e viene segnalato. Spostare non cambia l'identificativo: nessun collegamento si rompe."""
@@ -16,7 +17,7 @@ from . import google
 from .google import ErroreGoogle, _DRIVE, _q
 
 CARTELLA = "application/vnd.google-apps.folder"
-CONTENITORI = {"gestione": "Controllo di gestione", "imprese": "Imprese", "progetti": "Progetti", "agenti": "Agenti", "sistema": "Sistema"}
+CONTENITORI = {"gestione": "Controllo di gestione", "imprese": "Imprese", "progetti": "Progetti", "agenti": "Agenti", "bandi": "Bandi", "sistema": "Sistema"}
 CONDIVISE = ("Tavoli", "Riunioni")              # dentro Agenti: le fonti condivise fra gli agenti
 GESTIONE = {"uscita": "Passive", "entrata": "Attive"}
 DI_SISTEMA = ("Backup", "Maestro di chiavi - backup siti")

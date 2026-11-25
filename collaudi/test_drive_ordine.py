@@ -64,7 +64,7 @@ with TestClient(app) as c:
     nuovo("PM " + pid[1], "ROOT", fid="X1")            # nome quasi uguale a un progetto, ma non e' ne' agente ne' progetto noti
     nuovo("Backup", "ROOT", fid="BK"); nuovo("vecchio.enc", "BK", "application/octet-stream")
     nuovo("Maestro di chiavi - backup siti", "ROOT", fid="MK")
-    nuovo("Ricognizione.xlsx", "ROOT", "application/vnd.ms-excel", fid="F1"); nuovo("Bandi", "ROOT", fid="BA")
+    nuovo("Ricognizione.xlsx", "ROOT", "application/vnd.ms-excel", fid="F1"); nuovo("Varie", "ROOT", fid="BA")
 
     p = c.get("/gestione/google/ordine", headers=H).json()
     ok("piano: agenti, progetti e sistema riconosciuti dall'identificativo, il resto «da chiarire»", sorted(x["id"] for x in p["agenti"]) == ["A0", "A1", "A2"] and [x["id"] for x in p["progetti"]] == ["P0"]
@@ -76,7 +76,7 @@ with TestClient(app) as c:
     ok("riordino: ogni cartella al suo posto, con lo stesso identificativo e lo stesso nome", all(dove(x) == "Agenti" for x in ("A0", "A1", "A2")) and dove("P0") == "Progetti" and dove("BK") == "Sistema" and dove("MK") == "Sistema"
        and r["spostati"] == 6 and not r["errori"], str(r)[:300])
     ok("riordino: il contenuto delle cartelle non viene toccato", figli("P0") == ["agent", "repository"] and figli("BK") == ["vecchio.enc"])
-    ok("riordino: cio' che non riconosce resta nella radice (anche un nome quasi uguale a un progetto)", figli("ROOT") == sorted(["Agenti", "Progetti", "Sistema", "Imprese", "Controllo di gestione", "Bandi", "PM " + pid[1], "Ricognizione.xlsx"]), str(figli("ROOT")))
+    ok("riordino: cio' che non riconosce resta nella radice (anche un nome quasi uguale a un progetto)", figli("ROOT") == sorted(["Agenti", "Progetti", "Sistema", "Imprese", "Controllo di gestione", "Bandi", "Varie", "PM " + pid[1], "Ricognizione.xlsx"]), str(figli("ROOT")))
     ok("riordino registrato", sql("SELECT dettagli->>'spostati' FROM registro_azioni WHERE azione='drive_riordinato' ORDER BY id DESC LIMIT 1")[0][0] == "6")
     n = len(mosse); r2 = c.post("/gestione/google/ordine", headers=H).json()
     ok("ripetuto: non sposta piu' nulla", r2["spostati"] == 0 and len(mosse) == n)
@@ -107,7 +107,7 @@ with TestClient(app) as c:
     with connessione() as conn:
         fare = drive_ordine.da_fare(conn); drive_ordine.giro(conn); dopo = drive_ordine.da_fare(conn)
     ok("automatico: una volta al giorno rimette a posto cio' che e' finito nella radice", fare and not dopo and dove("Z9") == "Agenti")
-    ok("automatico: avvisa una volta di cio' che non riconosce", sql("SELECT count(*) FROM notifiche")[0][0] == n0 + 1 and "Bandi" in sql("SELECT testo FROM notifiche ORDER BY id DESC LIMIT 1")[0][0])
+    ok("automatico: avvisa una volta di cio' che non riconosce", sql("SELECT count(*) FROM notifiche")[0][0] == n0 + 1 and "Varie" in sql("SELECT testo FROM notifiche ORDER BY id DESC LIMIT 1")[0][0])
     sql("DELETE FROM impostazioni_sistema WHERE chiave='drive_ordine_ultimo'")
     with connessione() as conn: drive_ordine.giro(conn)
     ok("automatico: stesso elenco, nessun nuovo avviso", sql("SELECT count(*) FROM notifiche")[0][0] == n0 + 1)
