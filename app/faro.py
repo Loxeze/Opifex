@@ -1123,6 +1123,35 @@ def resoconto_giro(gid: int, _: dict = Depends(solo_titolare)):
                           "costo": float(g["costo"] or 0)}}
 
 
+@router.get("/storico")
+def storico(u: dict = Depends(chi_bandi)):
+    """Lo storico dei bandi (anche scaduti e scartati: in Opifex non si cancella nulla): quanti ne escono, quando scadono, quanto valgono, chi li emette.
+    Serve a riprendere i bandi passati e a vedere l'andamento dei bandi in Italia nel tempo."""
+    with connessione() as conn:
+        tot = conn.execute("""SELECT count(*) AS bandi, count(*) FILTER (WHERE stato='archiviato' OR scadenza < CURRENT_DATE) AS scaduti,
+                                     count(*) FILTER (WHERE stato='candidatura' OR progetto_id IS NOT NULL) AS candidature, count(*) FILTER (WHERE stato='scartato') AS scartati,
+                                     count(DISTINCT lower(trim(ente))) AS enti, min(creato_il) AS dal, round(avg(importo)) AS importo_medio, round(avg(copertura)) AS copertura_media
+                              FROM faro_bandi""").fetchone()
+        mesi = conn.execute("""WITH m AS (SELECT generate_series(date_trunc('month', NOW()) - interval '23 months', date_trunc('month', NOW()), interval '1 month')::date AS mese)
+                               SELECT to_char(m.mese, 'YYYY-MM') AS mese,
+                                      (SELECT count(*) FROM faro_bandi b WHERE date_trunc('month', b.creato_il)::date = m.mese) AS trovati,
+                                      (SELECT count(*) FROM faro_bandi b WHERE date_trunc('month', b.scadenza)::date = m.mese) AS in_scadenza,
+                                      (SELECT round(avg(importo)) FROM faro_bandi b WHERE date_trunc('month', b.creato_il)::date = m.mese) AS importo_medio
+                               FROM m ORDER BY m.mese""").fetchall()
+        enti = conn.execute("""SELECT min(ente) AS ente, count(*) AS bandi, count(*) FILTER (WHERE stato IN ('nuovo','interessante','candidatura')) AS aperti,
+                                      count(*) FILTER (WHERE stato='candidatura' OR progetto_id IS NOT NULL) AS candidature, max(scadenza) AS ultima_scadenza,
+                                      round(avg(importo)) AS importo_medio, count(DISTINCT extract(year FROM COALESCE(scadenza, creato_il::date))) AS anni
+                               FROM faro_bandi GROUP BY lower(trim(ente)) ORDER BY count(*) DESC, min(ente) LIMIT 40""").fetchall()
+        categorie = conn.execute("""SELECT COALESCE(categoria, 'Non indicata') AS categoria, count(*) AS bandi, round(avg(importo)) AS importo_medio
+                                    FROM faro_bandi GROUP BY 1 ORDER BY 2 DESC""").fetchall()
+        regioni = conn.execute("""SELECT COALESCE(NULLIF(regione, ''), 'Non indicata') AS regione, count(*) AS bandi FROM faro_bandi GROUP BY 1 ORDER BY 2 DESC LIMIT 25""").fetchall()
+        ricorrenti = conn.execute("""SELECT min(titolo) AS titolo, min(ente) AS ente, count(*) AS edizioni, array_agg(DISTINCT extract(year FROM scadenza)::int ORDER BY extract(year FROM scadenza)::int)
+                                           FILTER (WHERE scadenza IS NOT NULL) AS anni
+                                    FROM faro_bandi GROUP BY lower(trim(ente)), lower(regexp_replace(titolo, '\\s*(19|20)\\d\\d(\\s*[-/]\\s*(19|20)?\\d\\d)?', '', 'g'))
+                                    HAVING count(*) > 1 ORDER BY count(*) DESC LIMIT 20""").fetchall()
+    return {"totali": tot, "mesi": mesi, "enti": enti, "categorie": categorie, "regioni": regioni, "ricorrenti": ricorrenti}
+
+
 @router.get("/fonti")
 def elenco_fonti(_: dict = Depends(solo_titolare)):
     with connessione() as conn:
@@ -1168,7 +1197,7 @@ def elimina_fonte(fid: int, _: dict = Depends(solo_titolare)):
 
 @router.post("/fonti/drive")
 def registro_su_drive(_: dict = Depends(solo_titolare)):
-    """Copia il registro delle fonti in un foglio Google (Opifex/Bandi/Registro delle fonti dei bandi). Il registro vero resta qui."""
+    """Copia il registro delle fonti in un foglio Google (Opifex/File/Bandi/Registro delle fonti dei bandi). Il registro vero resta qui."""
     with connessione() as conn:
         try:
             return {"link": faro_drive.copia_registro(conn)}

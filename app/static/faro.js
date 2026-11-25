@@ -21,7 +21,7 @@ function vistaFaro() {
     try { d = await api("GET", "/gestione/faro"); } catch (e) { riempi(corpo, avviso(e.message, "no")); return; }
     if (!d.pronto) { riempi(corpo, d.gestione ? _preparaFr(ricarica, dire) : h("p", { class: "sotto" }, "Faro non è ancora stato preparato dal titolare.")); return; }
     const ges = d.gestione, c = d.conteggi, im = d.impostazioni;
-    const ammesse = ges ? ["bandi", "mensile", "clienti", "bollettini", "profili", "fonti", "lavoro"] : ["bandi", "mensile", "bollettini"];
+    const ammesse = ges ? ["bandi", "mensile", "clienti", "bollettini", "storico", "profili", "fonti", "lavoro"] : ["bandi", "mensile", "bollettini", "storico"];
     let scheda = stato.faroScheda || "bandi";
     if (!ammesse.includes(scheda) || (scheda === "clienti" && !im.clienti_acceso)) scheda = "bandi";
     const tab = (id, et, n) => h("button", { type: "button", class: scheda === id ? "attivo" : "", "aria-current": scheda === id ? "page" : null,
@@ -31,7 +31,7 @@ function vistaFaro() {
       h("div", { class: "sotto" }, titolo), h("div", { class: "valore" }, String(valore)), sotto ? h("div", { class: "sotto" }, sotto) : null);
     const accendi = async (si) => { try { await api("PUT", "/gestione/faro/impostazioni", { ...im, acceso: si }); dire(si ? "Ricerca automatica accesa." : "Ricerca automatica spenta: Faro lavora solo quando glielo chiedi."); ricarica(); } catch (e) { dire(e.message, "no"); } };
     const pagine = { bandi: (dd, r, di) => _bandiFr(dd, r, di, "mie"), mensile: (dd, r, di) => _bandiFr(dd, r, di, "mensile"), clienti: (dd, r, di) => _bandiFr(dd, r, di, "clienti"),
-      bollettini: _bollettiniFr, profili: _profiliFr, fonti: _fontiFr, lavoro: _lavoroFr };
+      bollettini: _bollettiniFr, storico: _storicoFr, profili: _profiliFr, fonti: _fontiFr, lavoro: _lavoroFr };
     riempi(corpo, [
       h("div", { class: "lg-stato" },
         h("span", { class: "lg-pallino" + (d.in_corso || im.acceso ? " attivo" : "") }),
@@ -53,7 +53,7 @@ function vistaFaro() {
           h("div", { class: "sotto" }, "giri " + euro(d.costi.giri_mese) + " · letture " + euro(d.costi.letture_mese))) : tessera("Trovati in 7 giorni", c.settimana, null, "aperti")),
       h("nav", { class: "schede-gruppo lg-schede", "aria-label": "Sezioni dei bandi" },
         tab("bandi", "Le mie società", c.nuovi), tab("mensile", "Nuove imprese · mensile", c.mensili),
-        ges && im.clienti_acceso ? tab("clienti", "Clienti", c.clienti) : null, tab("bollettini", "Bollettini"),
+        ges && im.clienti_acceso ? tab("clienti", "Clienti", c.clienti) : null, tab("bollettini", "Bollettini"), tab("storico", "Storico"),
         ges ? tab("profili", "Per chi cerca") : null, ges ? tab("fonti", "Fonti (" + d.fonti.attive + ")") : null, ges ? tab("lavoro", "Come lavora") : null),
       await (pagine[scheda] || pagine.bandi)(d, ricarica, dire)]);
   };
@@ -209,6 +209,38 @@ async function _bandiFr(d, ricarica, dire, sezione) {
     righe.length ? righe.map(carta) : h("p", { class: "sotto" }, vuoto)];
 }
 
+// ---------- storico: i bandi di sempre, per riprenderli e per vedere l'andamento ----------
+async function _storicoFr(d, ricarica, dire) {
+  let s;
+  try { s = await api("GET", "/gestione/faro/storico"); } catch (e) { return avviso(e.message, "no"); }
+  const t = s.totali, max = Math.max(1, ...s.mesi.map(m => Math.max(m.trovati, m.in_scadenza)));
+  const meseNome = (x) => { const [a, m] = x.split("-"); return ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"][Number(m) - 1] + " " + a.slice(2); };
+  const imp = (x) => x === null || x === undefined ? "—" : _euroFr(x);
+  const tabella = (testa, righe) => h("div", { class: "fr-tab-scorre" }, h("table", { class: "fr-storico" }, h("thead", {}, h("tr", {}, testa.map(x => h("th", { scope: "col" }, x)))), h("tbody", {}, righe)));
+  const cerca = (q) => { stato.faroScheda = "bandi"; stato.faroStato = "tutti"; stato.faroCerca = q; ricarica(); };
+  return [h("p", { class: "aiuto" }, "Tutti i bandi che Faro ha trovato, anche scaduti e scartati: in Opifex non si cancella nulla, e su Drive restano in File › Bandi › ente › bando. " +
+      "Serve a riprendere i bandi passati (molti tornano ogni anno) e a vedere l'andamento dei bandi nel tempo." + (t.dal ? " Lo storico parte dal " + _dataFr(t.dal) + "." : "")),
+    h("div", { class: "tessere" },
+      [["Bandi in archivio", t.bandi], ["Enti che li emettono", t.enti], ["Scaduti", t.scaduti], ["Candidature", t.candidature], ["Contributo medio", imp(t.importo_medio)], ["Copertura media", t.copertura_media ? t.copertura_media + "%" : "—"]]
+        .map(([a, b]) => h("div", { class: "tessera lg-tessera" }, h("div", { class: "sotto" }, a), h("div", { class: "valore" }, String(b))))),
+    h("div", { class: "carta" }, h("div", { class: "nome" }, "Mese per mese (ultimi 24 mesi)"),
+      h("p", { class: "sotto" }, "Barra piena: bandi trovati nel mese. Barra chiara: bandi che scadono nel mese."),
+      h("div", { class: "fr-mesi", role: "img", "aria-label": "Bandi trovati e in scadenza per mese" }, s.mesi.map((m, i) => h("div", { class: "fr-mese", title: meseNome(m.mese) + ": trovati " + m.trovati + ", in scadenza " + m.in_scadenza + (m.importo_medio ? ", contributo medio " + _euroFr(m.importo_medio) : "") },
+        h("div", { class: "fr-barre" }, h("span", { class: "fr-b1", style: "height:" + (m.trovati / max * 100) + "%" }), h("span", { class: "fr-b2", style: "height:" + (m.in_scadenza / max * 100) + "%" })),
+        h("div", { class: "fr-mese-n" }, i % 3 === 2 ? meseNome(m.mese) : "\u00a0")))),
+      tabella(["Mese", "Trovati", "In scadenza", "Contributo medio"], s.mesi.filter(m => m.trovati || m.in_scadenza).reverse().map(m => h("tr", {}, h("td", {}, meseNome(m.mese)), h("td", {}, String(m.trovati)), h("td", {}, String(m.in_scadenza)), h("td", {}, imp(m.importo_medio)))))),
+    s.ricorrenti.length ? h("div", { class: "carta" }, h("div", { class: "nome" }, "Bandi che tornano"),
+      h("p", { class: "sotto" }, "Lo stesso bando dello stesso ente trovato più volte (edizioni di anni diversi): utile per prepararsi prima che esca."),
+      tabella(["Bando", "Ente", "Edizioni", "Anni"], s.ricorrenti.map(r => h("tr", {}, h("td", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); cerca(r.titolo.slice(0, 40)); } }, r.titolo)), h("td", {}, r.ente), h("td", {}, String(r.edizioni)), h("td", {}, (r.anni || []).join(", ")))))) : null,
+    h("div", { class: "carta" }, h("div", { class: "nome" }, "Chi emette i bandi"),
+      tabella(["Ente", "Bandi", "Aperti", "Candidature", "Anni", "Ultima scadenza", "Contributo medio"], s.enti.map(r => h("tr", {},
+        h("td", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); cerca(r.ente); } }, r.ente)), h("td", {}, String(r.bandi)), h("td", {}, String(r.aperti)), h("td", {}, String(r.candidature)),
+        h("td", {}, String(r.anni)), h("td", {}, r.ultima_scadenza ? _dataFr(r.ultima_scadenza) : "—"), h("td", {}, imp(r.importo_medio)))))),
+    h("div", { class: "riga fr-due" },
+      h("div", { class: "carta" }, h("div", { class: "nome" }, "Per tema"), tabella(["Tema", "Bandi", "Contributo medio"], s.categorie.map(r => h("tr", {}, h("td", {}, r.categoria), h("td", {}, String(r.bandi)), h("td", {}, imp(r.importo_medio)))))),
+      h("div", { class: "carta" }, h("div", { class: "nome" }, "Per territorio"), tabella(["Regione", "Bandi"], s.regioni.map(r => h("tr", {}, h("td", {}, r.regione), h("td", {}, String(r.bandi)))))))];
+}
+
 async function _bollettiniFr(d, ricarica, dire) {
   let righe;
   try { righe = await api("GET", "/gestione/faro/bollettini"); } catch (e) { return avviso(e.message, "no"); }
@@ -299,7 +331,7 @@ async function _fontiFr(d, ricarica, dire) {
       h("p", { class: "sotto" }, "Enti che Faro ha trovato durante i giri e che non erano nel registro. Accettate, entrano nella rotazione; scartate, non tornano."),
       h("ul", { class: "fr-fonti" }, proposte.map(proposta))) : null,
     h("div", { class: "azioni" },
-      _btnFr("Copia il registro su Drive", async () => { try { const r = await api("POST", "/gestione/faro/fonti/drive"); dire("Registro copiato su Drive (Opifex › Bandi), in un foglio Google: " + r.link); ricarica(); } catch (e) { dire(e.message, "no"); } }),
+      _btnFr("Copia il registro su Drive", async () => { try { const r = await api("POST", "/gestione/faro/fonti/drive"); dire("Registro copiato su Drive (Opifex › File › Bandi), in un foglio Google: " + r.link); ricarica(); } catch (e) { dire(e.message, "no"); } }),
       d.registro_drive ? h("a", { href: "https://docs.google.com/spreadsheets/d/" + d.registro_drive + "/edit", target: "_blank", rel: "noopener" }, "Apri il foglio su Drive ↗") : null,
       _btnFr("Controlla che gli indirizzi rispondano", async () => { try { const r = await api("POST", "/gestione/faro/fonti/controlla"); dire("Controllo avviato su " + r.fonti + " fonti: senza modello, costo zero. Ricarica tra qualche minuto."); } catch (e) { dire(e.message, "no"); } }),
       d.fonti.irraggiungibili ? h("label", { class: "fr-spunta" }, h("input", { type: "checkbox", checked: soloRotte, onchange: (e) => { stato.faroFontiRotte = e.target.checked; ricarica(); } }), " solo le " + d.fonti.irraggiungibili + " che non rispondono") : null),
@@ -395,7 +427,7 @@ function _lavoroFr(d, ricarica, dire) {
         "Qui compaiono il titolare e chi ha il reparto Bandi (Impostazioni › Utenti)."),
       h("div", { class: "azioni" }, _btnFr("Salva", async () => { try { await salvaTutto({}); dire("Salvato."); ricarica(); } catch (e) { dire(e.message, "no"); } }, "p"))),
     h("div", { class: "carta" }, h("div", { class: "nome" }, "Il materiale su Drive ", h("span", { class: "etichetta " + (im.drive ? "ok" : "") }, im.drive ? "acceso" : "spento")),
-      h("p", { class: "sotto" }, "Per ogni bando trovato (tranne quelli che il controllo non ritrova sulla pagina) Opifex crea una cartella in Drive › Opifex › Bandi, chiamata «scadenza - titolo», " +
+      h("p", { class: "sotto" }, "Per ogni bando trovato (tranne quelli che il controllo non ritrova sulla pagina) Opifex crea una cartella in Drive › Opifex › File › Bandi › nome dell’ente › nome del bando (con l’anno), " +
         "e ci scarica la pagina ufficiale, l'avviso, gli allegati e le FAQ, con la scheda tecnica da leggere a colpo d'occhio. La scheda si completa da sola dopo la lettura approfondita. Senza modello: costo zero." +
         (d.drive_collegato ? "" : " Drive non è ancora collegato: Impostazioni › Collegamenti.")),
       h("div", { class: "azioni" }, _btnFr(im.drive ? "Spegni il salvataggio su Drive" : "Accendi il salvataggio su Drive", async () => { try { await salvaTutto({ drive: !im.drive }); ricarica(); } catch (e) { dire(e.message, "no"); } }))),

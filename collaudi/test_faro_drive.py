@@ -58,16 +58,17 @@ def f_contesto(conn):
         raise RuntimeError("Google ha risposto 503")
     return "tok", "RADICE"
 def f_contenitore(conn, tok, radice):
-    return f_cartella_nome("Bandi", "RADICE")
+    return f_cartella_nome("Bandi", f_cartella_nome("File", "RADICE"))
 def f_cartella_nome(nome, genitore):
     for k, v in DRIVE.items():
         if v["nome"] == nome and v["genitore"] == genitore and v["mime"] == "cartella":
             return k
     k = f"C{len(DRIVE) + 1}"; DRIVE[k] = {"nome": nome, "genitore": genitore, "mime": "cartella"}; return k
-def f_cartella(conn, tok, radice, nome, esistente):
+def f_cartella(conn, tok, radice, ente, nome, esistente):
+    dell_ente = f_cartella_nome(ente, f_contenitore(conn, tok, radice))
     if esistente in DRIVE:
-        return esistente
-    return f_cartella_nome(nome, f_contenitore(conn, tok, radice))
+        DRIVE[esistente].update({"genitore": dell_ente, "nome": nome}); return esistente
+    return f_cartella_nome(nome, dell_ente)
 def f_nomi(tok, cid):
     return {v["nome"]: k for k, v in DRIVE.items() if v["genitore"] == cid}
 def f_carica(tok, cid, nome, mime, dati, converti=None):
@@ -83,8 +84,8 @@ faro_drive._contesto, faro_drive._contenitore, faro_drive._cartella, faro_drive.
 with TestClient(app) as c:
     H = {"Authorization": "Bearer " + accedi(c, "l@p.it", PW)}
     c.post("/gestione/faro/prepara", headers=H)
-    ok("salvataggio su Drive acceso di serie, la cartella Bandi tra quelle ordinate di Opifex", c.get("/gestione/faro", headers=H).json()["impostazioni"]["drive"] is True
-       and "bandi" in __import__("app.drive_ordine", fromlist=["x"]).CONTENITORI)
+    ok("salvataggio su Drive acceso di serie, la cartella File tra quelle ordinate di Opifex", c.get("/gestione/faro", headers=H).json()["impostazioni"]["drive"] is True
+       and "file" in __import__("app.drive_ordine", fromlist=["x"]).CONTENITORI)
     base = {"ente": "Regione Liguria", "scadenza": "2027-03-15", "importo": 50000, "copertura": 80, "categoria": "Cultura e Patrimonio",
             "sintesi": "Contributi a fondo perduto per la valorizzazione dei musei liguri gestiti da enti del terzo settore."}
     pr = [{"profilo": "Renovatio", "motivo": "Renovatio e' un ETS genovese che valorizza il patrimonio culturale."}]
@@ -133,7 +134,9 @@ with TestClient(app) as c:
     b = sql("SELECT drive_stato, drive_cartella_id, drive_scheda_id, drive_file FROM faro_bandi WHERE id=%s", (bid,))[0]
     ok("bando salvato su Drive", b[0] == "salvato", str(b))
     cart = DRIVE[b[1]]
-    ok("cartella Opifex/Bandi/«scadenza - titolo»", cart["nome"] == "2027-03-15 - Avviso per la valorizzazione dei musei liguri 2027" and DRIVE[cart["genitore"]]["nome"] == "Bandi")
+    ente_c = DRIVE[cart["genitore"]]
+    ok("cartella Opifex/File/Bandi/<ente>/<bando (anno)>", cart["nome"] == "Avviso per la valorizzazione dei musei liguri 2027 (2027)" and ente_c["nome"] == "Regione Liguria"
+       and DRIVE[ente_c["genitore"]]["nome"] == "Bandi" and DRIVE[DRIVE[ente_c["genitore"]]["genitore"]]["nome"] == "File", str(cart))
     nomi = sorted(v["nome"] for v in DRIVE.values() if v["genitore"] == b[1])
     ok("dentro: la pagina, l'avviso, le FAQ e la scheda tecnica (l'allegato irraggiungibile no)", nomi == ["00 - Pagina del bando (regione.liguria.it).html", "01 - Avviso pubblico (avviso-musei-2027).pdf",
        "02 - FAQ.pdf", "Scheda tecnica - Avviso per la valorizzazione dei musei liguri 2027"], str(nomi))
@@ -161,6 +164,28 @@ with TestClient(app) as c:
     cd = c.post(f"/gestione/faro/bandi/{bid}/candidatura", headers=H, json={"azienda_id": az})
     ok("nel progetto della candidatura il link al materiale su Drive", cd.status_code == 201 and f"drive.google.com/drive/folders/{b[1]}" in sql("SELECT stato_attuale FROM progetti WHERE id=%s", (cd.json()["progetto"],))[0][0])
 
+    # --- lo stesso ente scritto diversamente: stessa cartella ---
+    sql("INSERT INTO faro_bandi (titolo, ente, url, url_chiave, sintesi, scadenza_nota) VALUES ('Contributi per i borghi liguri','regione liguria ','https://z.it/c','z.it/c','Sintesi lunga quanto basta per il collaudo del bando.','a sportello')")
+    b3 = sql("SELECT id FROM faro_bandi WHERE url='https://z.it/c'")[0][0]
+    PAGINE["https://z.it/c"] = ("text/html", "<p>Contributi per i borghi liguri</p>")
+    faro_drive.archivia(b3)
+    c3 = DRIVE[sql("SELECT drive_cartella_id FROM faro_bandi WHERE id=%s", (b3,))[0][0]]
+    ok("lo stesso ente scritto in un altro modo finisce nella stessa cartella; senza scadenza il nome e' solo il titolo", c3["genitore"] == cart["genitore"] and c3["nome"] == "Contributi per i borghi liguri")
+    # --- una cartella del vecchio ordine si sposta e si rinomina, stesso identificativo ---
+    vecchia = f_cartella_nome("2027-03-15 - Vecchio nome", "RADICE")
+    sql("UPDATE faro_bandi SET drive_cartella_id=%s WHERE id=%s", (vecchia, b3))
+    faro_drive.archivia(b3, scarica=False)
+    ok("cartella del vecchio ordine portata al suo posto e rinominata", sql("SELECT drive_cartella_id FROM faro_bandi WHERE id=%s", (b3,))[0][0] == vecchia
+       and DRIVE[vecchia]["genitore"] == cart["genitore"] and DRIVE[vecchia]["nome"] == "Contributi per i borghi liguri")
+
+    # --- lo storico ---
+    sql("UPDATE faro_bandi SET stato='archiviato', scadenza='2025-03-10' WHERE url='https://z.it/c'")
+    sql("INSERT INTO faro_bandi (titolo, ente, url, url_chiave, sintesi, scadenza, importo, categoria) VALUES ('Contributi per i borghi liguri 2026','Regione Liguria','https://z.it/d','z.it/d','Sintesi lunga quanto basta per il collaudo del bando.','2026-03-10',20000,'Turismo')")
+    st_ = c.get("/gestione/faro/storico", headers=H).json()
+    ok("storico: totali, 24 mesi, enti (grafie unite), temi, territori", st_["totali"]["bandi"] == sql("SELECT count(*) FROM faro_bandi")[0][0] and len(st_["mesi"]) == 24
+       and st_["enti"][0]["bente" if False else "bandi"] >= 3 and st_["enti"][0]["ente"].lower() == "regione liguria" and any(x["categoria"] == "Turismo" for x in st_["categorie"]), str(st_["enti"][:2]))
+    ok("storico: i bandi che tornano ogni anno (stesso ente, titolo senza l'anno)", any(r["titolo"].startswith("Contributi per i borghi liguri") and r["edizioni"] == 2 and r["anni"] == [2025, 2026] for r in st_["ricorrenti"]), str(st_["ricorrenti"]))
+
     # --- a mano, errori, interruttore ---
     r = c.post(f"/gestione/faro/bandi/{bid}/drive", headers=H)
     ok("«Aggiorna su Drive»: niente doppioni dei file gia' salvati", r.status_code == 202 and sql("SELECT drive_stato FROM faro_bandi WHERE id=%s", (bid,))[0][0] == "salvato"
@@ -187,7 +212,7 @@ with TestClient(app) as c:
     fid_r = sql("SELECT valore FROM impostazioni_sistema WHERE chiave='faro_registro_drive'")[0][0]
     csv_t = DRIVE[fid_r]["dati"].decode()
     ok("registro copiato su Drive come foglio Google in Opifex/Bandi", rg.status_code == 200 and DRIVE[fid_r]["converti"] == "application/vnd.google-apps.spreadsheet"
-       and DRIVE[DRIVE[fid_r]["genitore"]]["nome"] == "Bandi" and csv_t.startswith("Categoria,Regione,Ente / fonte,Pagina dei bandi") and "Fondazione Compagnia di San Paolo" in csv_t
+       and DRIVE[DRIVE[fid_r]["genitore"]]["nome"] == "Bandi" and DRIVE[DRIVE[DRIVE[fid_r]["genitore"]]["genitore"]]["nome"] == "File" and csv_t.startswith("Categoria,Regione,Ente / fonte,Pagina dei bandi") and "Fondazione Compagnia di San Paolo" in csv_t
        and "scartata" in csv_t, rg.text)
     rg2 = c.post("/gestione/faro/fonti/drive", headers=H)
     ok("rifarlo aggiorna lo stesso foglio", rg2.json()["link"] == rg.json()["link"] and sum(1 for v in DRIVE.values() if v["nome"] == "Registro delle fonti dei bandi") == 1)

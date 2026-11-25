@@ -1,8 +1,8 @@
-"""FARO su Drive: per ogni bando trovato una cartella Opifex/Bandi/<scadenza - titolo> con tutto il materiale scaricato
+"""FARO su Drive: per ogni bando trovato una cartella Opifex/File/Bandi/<ente>/<bando> con tutto il materiale scaricato
 (la pagina ufficiale, l'avviso, gli allegati, le FAQ) e la SCHEDA TECNICA, un documento Google da leggere a colpo d'occhio.
 La scheda si scrive con i dati della segnalazione e si completa quando c'e' la lettura approfondita. Nessun modello: costo zero.
 
-Il registro delle fonti si copia su Drive come foglio Google (Opifex/Bandi/Registro delle fonti): la copia e' in sola lettura,
+Il registro delle fonti si copia su Drive come foglio Google (Opifex/File/Bandi/Registro delle fonti dei bandi): la copia e' in sola lettura,
 il registro vero resta in Opifex (Bandi > Fonti), dove si ampliano e si correggono le fonti."""
 import html
 import json
@@ -40,14 +40,30 @@ def _contesto(conn):
     return tok, google.radice_valida(conn, tok)
 
 
-def _cartella(conn, tok: str, radice: str, nome: str, esistente: str | None) -> str:
-    from . import drive_ordine, google
-    return google.cartella(tok, nome, drive_ordine.contenitore(conn, tok, radice, "bandi"), esistente)
-
-
 def _contenitore(conn, tok: str, radice: str) -> str:
-    from . import drive_ordine
-    return drive_ordine.contenitore(conn, tok, radice, "bandi")
+    """Id di Opifex/File/Bandi. Una cartella «Bandi» nata prima nella radice (versione 2.81) viene portata dentro File, con tutto quello che contiene."""
+    from . import drive_ordine, google
+    file = drive_ordine.contenitore(conn, tok, radice, "file")
+    salvato = google._leggi(conn, "faro_drive_bandi")
+    vecchio = google._leggi(conn, "drive_contenitore_bandi")
+    if not salvato and vecchio and drive_ordine._valida(tok, vecchio):
+        drive_ordine.sposta(tok, vecchio, file)
+        salvato = vecchio
+    cid = google.cartella(tok, "Bandi", file, salvato or None)
+    if cid != salvato:
+        google._scrivi(conn, "faro_drive_bandi", cid)
+    return cid
+
+
+def _cartella(conn, tok: str, radice: str, ente: str, nome: str, esistente: str | None) -> str:
+    """Id di Opifex/File/Bandi/<ente>/<bando>. Una cartella gia' creata altrove (o con un altro nome) si sposta e si rinomina: stesso identificativo, niente doppioni."""
+    from . import drive_ordine, google
+    dell_ente = google.cartella(tok, ente, _contenitore(conn, tok, radice))
+    if esistente and drive_ordine._valida(tok, esistente):
+        drive_ordine.sposta(tok, esistente, dell_ente)
+        google.rinomina_cartella(tok, esistente, nome)
+        return esistente
+    return google.cartella(tok, nome, dell_ente)
 
 
 def _nomi(tok: str, cartella_id: str) -> dict:
@@ -84,7 +100,14 @@ def _pulito(t: str, n: int = 90) -> str:
 
 
 def nome_cartella(b: dict) -> str:
-    return (b["scadenza"].isoformat() if b.get("scadenza") else "senza data") + " - " + _pulito(b["titolo"])
+    """Il nome del bando; con l'anno della scadenza, cosi' le edizioni di anni diversi dello stesso bando restano distinte."""
+    return _pulito(b["titolo"]) + (f" ({b['scadenza'].year})" if b.get("scadenza") else "")
+
+
+def nome_ente(conn, ente: str) -> str:
+    """Lo stesso ente scritto in modi diversi («Ministero del turismo», «Ministero del Turismo») finisce nella stessa cartella: vale la prima grafia vista."""
+    r = conn.execute("SELECT ente FROM faro_bandi WHERE lower(trim(ente)) = lower(trim(%s)) ORDER BY id LIMIT 1", (ente,)).fetchone()
+    return _pulito((r["ente"] if r else ente), 80)
 
 
 def materiale(url: str) -> tuple[list[tuple[str, str, bytes, str]], list[str]]:
@@ -209,7 +232,7 @@ def archivia(bid: int, scarica: bool = True) -> str:
         conn.commit()
     try:
         with connessione() as conn:
-            cid = _cartella(conn, tok, radice, nome_cartella(b), b["drive_cartella_id"])
+            cid = _cartella(conn, tok, radice, nome_ente(conn, b["ente"]), nome_cartella(b), b["drive_cartella_id"])
         file = list(b["drive_file"] or [])
         errori = []
         if scarica:
@@ -290,7 +313,7 @@ def archivia_tutti(ids: list[int], scarica: bool = True) -> None:
 
 # ---------- il registro delle fonti su Drive ----------
 def copia_registro(conn) -> str:
-    """Copia il registro delle fonti in un foglio Google dentro Opifex/Bandi. Restituisce il link. Il registro vero resta in Opifex."""
+    """Copia il registro delle fonti in un foglio Google dentro Opifex/File/Bandi. Restituisce il link. Il registro vero resta in Opifex."""
     import csv
     import io
     tok, radice = _contesto(conn)
