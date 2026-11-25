@@ -602,3 +602,18 @@ button.bt-cp-tessera { cursor: pointer; }
 .fr details.carta{margin-bottom:10px}
 .fr details.carta>summary{cursor:pointer}
 @media (max-width:900px){.fr .riga>*{flex:0 0 auto}}
+.fr h3{margin:18px 0 6px}
+.fr-setaccio{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.fr-setaccio input{max-width:640px}
+.fr-lettura,.fr-candida{margin-top:8px;padding-top:8px;border-top:1px solid var(--bordo)}
+.fr-lettura>summary,.fr-candida>summary{cursor:pointer}
+.fr-giudizio{margin:8px 0}
+.fr-giudizio ul{margin:4px 0 8px;padding-left:20px}
+.fr-campi{width:100%;border-collapse:collapse;margin:8px 0}
+.fr-campi th{text-align:left;vertical-align:top;width:28%;padding:6px 10px 6px 0;font-weight:600}
+.fr-campi td{vertical-align:top;padding:6px 0;border-top:1px solid var(--bordo)}
+.fr-campi th{border-top:1px solid var(--bordo)}
+.fr-cit>summary{cursor:pointer}
+.fr-cit q{display:block;margin:4px 0;font-style:italic}
+.fr-resoconto{margin-top:8px}
+@media (max-width:700px){.fr-campi th{width:auto;display:block;border-top:0;padding-bottom:0}.fr-campi td{display:block}.fr-campi tr{display:block;border-top:1px solid var(--bordo);padding:6px 0}.fr-campi td{border-top:0}}

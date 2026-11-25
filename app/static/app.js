@@ -239,7 +239,7 @@ function cornice(contenuto) {
   radice.replaceChildren(
     h("header", {}, h("h1", {}, stato.edizione === 3 ? "Opifex 3" : "Opifex", h("small", {}, "la bottega degli agenti")),
       h("nav", { "aria-label": "Menu principale" }, nav),
-      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.26.0" : "2.79.0"))),
+      h("div", { class: "bt-piede" }, h("button", { class: "s", onclick: esci }, "Esci"), h("button", { class: "bt-riduci", type: "button", title: "Riduci o allarga il menu", "aria-label": "Riduci o allarga il menu", onclick: () => Vetro.riduciMenu() }, "⇔"), h("span", { class: "bt-ver" }, stato.edizione === 3 ? "3.27.0" : "2.80.0"))),
     h("main", { class: stato.vista === "dashboard" || stato.vista === "chat" || stato.vista === "organigramma" ? "largo" : "" }, stato.ruolo === "titolare" ? schedeGruppo() : null, contenuto));
 }
 
@@ -260,6 +260,10 @@ async function avvia() {
     avviaConteggioChat(); avviaUso();
     if (stato.ruolo !== "titolare") {   // il collaboratore vede solo la chat con gli agenti delle sue divisioni
       stato.agenti = await api("GET", "/agenti");
+      try {   // chi ha il reparto Bandi vede la pagina dei bandi e fa il primo setaccio
+        const fa = await api("GET", "/gestione/faro/accesso");
+        if (fa.bandi && !VISTE_COLLABORATORE.some(([id]) => id === "faro")) VISTE_COLLABORATORE.splice(1, 0, ["faro", "Bandi"]);
+      } catch (e) { /* senza Faro la pagina non c'e' */ }
       if (!VISTE_COLLABORATORE.some(([id]) => id === stato.vista)) stato.vista = "chat";
       return disegna();
     }

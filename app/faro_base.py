@@ -69,6 +69,8 @@ FONTI = [
 REGOLE = ("Regole di Lorenzo: si scartano i bandi con contributo sotto la soglia minima; se il contributo copre meno della percentuale minima dei costi il bando e' «da valutare» caso per caso.")
 
 # (nome del profilo, tipo, nome dell'impresa a cui legarlo o None, descrizione, regioni, importo minimo, copertura minima, attivo)
+MENSILI = ("Nuove imprese",)   # sezione a parte, da guardare una volta al mese
+
 PROFILI = [
     ("Renovatio", "impresa", "Renovatio",
      "Associazione Renovatio ETS/ODV: ente del terzo settore che fa promozione culturale e valorizzazione del patrimonio, con collaborazioni internazionali e universitarie. "

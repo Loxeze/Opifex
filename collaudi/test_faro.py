@@ -13,7 +13,7 @@ from app.main import app
 from app.db import connessione
 from app.sicurezza import cifra_password
 from aiuto2fa import accedi
-from app import agente_browser, faro, faro_base
+from app import agente_browser, faro, faro_base, faro_lettura
 DSN = os.environ["DATABASE_URL"]
 ris = []
 def ok(n, c, d=""):
@@ -35,6 +35,10 @@ def finta_api(corpo):
     return copione.pop(0) if copione else fine("ok")
 agente_browser._chiama_api = finta_api
 faro.SINCRONO = True
+faro_lettura.SINCRONO = True
+def _senza_rete(u):
+    raise faro_lettura.ErroreLettura("rete spenta nei collaudi")
+faro_lettura.scarica = _senza_rete   # nei collaudi nessuna pagina vera: la verifica e la lettura hanno i loro collaudi
 OGGI = datetime.now(faro.FUSO).date()
 fra = lambda g: (OGGI + timedelta(days=g)).isoformat()
 def risposte():   # che cosa ha risposto il sistema alle chiamate dello strumento, nell'ordine
@@ -129,7 +133,7 @@ with TestClient(app) as c:
     s = c.put(f"/gestione/faro/bandi/{bid}", headers=H, json={"stato": "interessante", "nota": "Da sentire il commercialista"})
     ok("primo setaccio: interessante, con una nota", s.status_code == 200 and s.json()["stato"] == "interessante" and s.json()["nota"].startswith("Da sentire"), s.text)
     ok("stato inventato rifiutato; bando inesistente 404", c.put(f"/gestione/faro/bandi/{bid}", headers=H, json={"stato": "boh"}).status_code == 422
-       and c.put("/gestione/faro/bandi/999999", headers=H, json={"stato": "scartato"}).status_code == 404)
+       and c.put("/gestione/faro/bandi/999999", headers=H, json={"stato": "scartato", "nota": "non serve a nessuno"}).status_code == 404)
     q = c.get("/gestione/faro", headers=H).json()
     ok("conteggi: 2 nuovi, 1 interessante, 1 in scadenza, 3 nella settimana", (q["conteggi"]["nuovi"], q["conteggi"]["interessanti"], q["conteggi"]["in_scadenza"], q["conteggi"]["settimana"]) == (2, 1, 1, 3), str(q["conteggi"]))
     ok("conteggi per profilo e ultimo giro", {x["nome"]: x["bandi"] for x in q["profili"]}["Renovatio"] == 1 and q["giri"][0]["segnalati"] == 3 and q["giri"][0]["fonti"] == 6)
@@ -189,7 +193,7 @@ with TestClient(app) as c:
     # --- fonti e profili ---
     n0 = sql("SELECT count(*) FROM faro_fonti")[0][0]
     im = c.post("/gestione/faro/fonti/importa", headers=H, json={"testo": "[05_Fondazioni_bancarie]\n- Fondazione Carige: https://www.fondazionecarige.it/bandi/\n- Incentivi.gov.it: https://www.incentivi.gov.it/"})
-    ok("importazione da elenco incollato: entra solo la fonte nuova", im.status_code == 200 and im.json() == {"fonti": 1, "lette": 2} and sql("SELECT count(*) FROM faro_fonti")[0][0] == n0 + 1, im.text)
+    ok("importazione da elenco incollato: entra solo la fonte nuova", im.status_code == 200 and im.json() == {"fonti": 1, "nuove": 1, "lette": 2, "doppioni": 1} and sql("SELECT count(*) FROM faro_fonti")[0][0] == n0 + 1, im.text)
     ok("senza n8n collegato lo dice", c.post("/gestione/faro/fonti/n8n", headers=H).status_code == 409)
     nf = c.post("/gestione/faro/fonti", headers=H, json={"nome": "Fondazione di prova", "url": "https://www.fondazioneprova.it/bandi", "categoria": "Fondazioni", "regione": "Toscana"})
     ok("fonte aggiunta a mano; doppione e indirizzo non valido rifiutati", nf.status_code == 201 and c.post("/gestione/faro/fonti", headers=H, json={"nome": "Doppia", "url": "https://www.fondazioneprova.it/bandi"}).status_code == 409
@@ -203,7 +207,10 @@ with TestClient(app) as c:
     am = c.put(f"/gestione/faro/profili/{museo}", headers=H, json={"nome": "Piccolo museo locale", "tipo": "esterno", "descrizione": pr["Piccolo museo locale"][4], "regioni": "tutte", "importo_min": 2000, "copertura_min": 50, "attivo": True})
     ok("il profilo del piccolo museo si accende", am.status_code == 200 and am.json()["attivo"] is True, am.text)
     with connessione() as cn:
-        ok("... e da quel momento entra nel compito di Faro", "- Piccolo museo locale:" in faro._blocco_profili(cn))
+        ok("... ma a filone clienti spento non entra nel compito di Faro", "Piccolo museo locale" not in faro._blocco_profili(cn))
+        faro._scrivi(cn, "faro_clienti_acceso", "1")
+        ok("... acceso il filone clienti, entra, in una sezione separata dalle mie societa'",
+           "- Piccolo museo locale:" in faro._blocco_profili(cn) and faro._blocco_profili(cn).index("CLIENTI E PROFILI TIPO") < faro._blocco_profili(cn).index("- Piccolo museo locale:"))
     ok("profilo eliminato: spariscono i suoi abbinamenti, non i bandi", c.delete(f"/gestione/faro/profili/{pid}", headers=H).status_code == 200 and sql("SELECT count(*) FROM faro_abbinamenti WHERE profilo_id=%s", (pid,))[0][0] == 0
        and sql("SELECT count(*) FROM faro_bandi WHERE ente='FILSE'")[0][0] == 1)
     sql("UPDATE agenti SET attivo = FALSE WHERE nome = 'Faro'")
