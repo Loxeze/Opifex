@@ -557,3 +557,13 @@ body.bottega .storico-barra>div{background:#1F4D43}
 .cp-pronte { display: grid; gap: 8px; margin: 8px 0; }
 .cp-pronta { display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; min-width: 0; }
 .cp-pronta > div { min-width: 0; }
+
+/* 2.78: risposte arrivate, separate dalle nostre email */
+.cp-sezione { margin-top: 18px; display: grid; gap: 10px; }
+.cp-sez-arrivate { border: 2px solid var(--accento, #1F6B52); border-radius: 12px; padding: 12px; }
+.cp-conta { margin-left: 8px; font-size: .8em; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: var(--accento, #1F6B52); color: #fff; vertical-align: middle; }
+.cp-arrivata { border-left: 4px solid var(--accento, #1F6B52); }
+.cp-lettera { background: var(--carta2, rgba(31,107,82,.06)); border-radius: 8px; padding: 8px 10px; }
+.cp-lettera > summary { cursor: pointer; }
+.cp-lettera-testo .cp-testo { white-space: pre-wrap; margin-top: 8px; }
+.cp-sintesi { margin: 6px 0 0; }

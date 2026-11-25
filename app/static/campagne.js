@@ -316,8 +316,8 @@ async function apriCampagna(corpo, cid, torna) {
       _btnCp("Accetta", async () => { await api("POST", "/gestione/campagne/correzioni/" + x.id, { accetta: true }); ricarica(); }, "s piccolo"),
       _btnCp("No", async () => { await api("POST", "/gestione/campagne/correzioni/" + x.id, { accetta: false }); ricarica(); }, "s piccolo")))) : null;
   // destinatari
-  const dest = (x) => {
-    const box = h("div", { class: "carta cp-dest" });
+  const dest = (x, inRisposte) => {
+    const box = h("div", { class: "carta cp-dest" + (inRisposte ? " cp-arrivata" : "") });
     box.append(h("div", { class: "mq-titolo" }, h("b", {}, x.ente || x.nome || x.email), x.nome && x.ente ? h("span", { class: "sotto" }, x.nome) : null,
       h("span", { class: "sotto" }, x.email), x.localita ? h("span", { class: "sotto" }, x.localita) : null, h("span", { class: "cp-stato cp-" + x.stato }, STATI_DEST[x.stato] || x.stato),
       x.passo > 1 ? h("span", { class: "sotto" }, "sollecito " + (x.passo - 1)) : null,
@@ -327,7 +327,8 @@ async function apriCampagna(corpo, cid, torna) {
     if (x.zona) box.append(h("div", { class: "sotto" + (/Attenzione|controllalo/.test(x.zona) ? " cp-avviso" : "") }, x.zona));
     if (x.nota) box.append(h("div", { class: "sotto" }, x.nota));
     if (x.richiamo_il) box.append(h("div", { class: "cp-richiamo" }, (x.richiamo_fatto ? "✓ Ricontattato: " : "⏰ Da ricontattare il ") + new Date(x.richiamo_il + "T12:00:00").toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" }) + (x.richiamo_nota ? " — «" + x.richiamo_nota + "»" : "")));
-    if (x.risposta_oggetto || x.risposta_sintesi) box.append(h("div", { class: "sotto" }, "Risposta" + (x.risposta_oggetto ? ": «" + x.risposta_oggetto + "»" : "") + (x.risposta_sintesi ? " — " + x.risposta_sintesi : "")));
+    if (inRisposte) box.append(_letteraArrivataCp(x));
+    else if (x.risposta_oggetto || x.risposta_sintesi) box.append(h("div", { class: "sotto" }, "Ha risposto" + (x.risposta_il ? " il " + new Date(x.risposta_il).toLocaleDateString("it-IT") : "") + ": la trovi in «Risposte arrivate»"));
     if (x.errore && x.email_id) box.append(avviso(x.errore, "no"));
     const editor = (email_id, ogg, tes, oggP, tesP, titolo, aperto, html, allegati, tipo) => {
       const zona = h("div", { class: "cp-bozza" });
@@ -393,11 +394,29 @@ async function apriCampagna(corpo, cid, torna) {
     }
     return box;
   };
-  const filtro = h("select", { "aria-label": "Mostra", class: "si-periodo" }, [["", "Tutti"], ["da_approvare", "Da approvare"], ["interessato", "Interessati"], ["inviata", "In attesa di risposta"], ["errore", "Con errori"], ["chiusi", "Chiusi"]].map(([v, t]) => { const o = h("option", { value: v }, t); if (v === (stato.campagnaFiltro || "")) o.selected = true; return o; }));
+  // 2.78: le risposte arrivate stanno in una sezione a parte, separate dalle email che mandiamo noi
+  const RISPOSTO = ["risposto", "interessato", "non_interessato", "rimosso"];
+  const arrivate = c.destinatari.filter(x => x.risposta_il && RISPOSTO.includes(x.stato)).sort((a, b) => new Date(b.risposta_il) - new Date(a.risposta_il));
+  const daGestire = x => (x.risposta && (x.risposta.stato === "da_approvare" || x.risposta.stato === "errore")) || (x.stato === "risposto" && !x.risposta);
+  const nGestire = arrivate.filter(daGestire).length;
+  const filtroArr = h("select", { "aria-label": "Mostra le risposte", class: "si-periodo" }, [["gestire", "Da gestire (" + nGestire + ")"], ["interessato", "Interessati"], ["tutte", "Tutte (" + arrivate.length + ")"]].map(([v, t]) => { const o = h("option", { value: v }, t); if (v === (stato.campagnaRisposte || (nGestire ? "gestire" : "tutte"))) o.selected = true; return o; }));
+  const listaArr = h("div");
+  const mostraArr = () => {
+    const f = filtroArr.value; stato.campagnaRisposte = f;
+    const sel = arrivate.filter(x => f === "tutte" || (f === "gestire" ? daGestire(x) : x.stato === "interessato"));
+    riempi(listaArr, sel.length ? sel.slice(0, 200).map(x => dest(x, true)) : h("p", { class: "sotto" }, arrivate.length ? "Niente da gestire: hai già deciso su tutte le risposte." : "Nessuna risposta ancora."));
+  };
+  filtroArr.onchange = mostraArr; mostraArr();
+  const sezRisposte = h("section", { class: "cp-sezione cp-sez-arrivate" },
+    h("div", { class: "azioni", style: "align-items:center" }, h("h3", { style: "margin:0" }, "📥 Risposte arrivate", nGestire ? h("span", { class: "cp-conta" }, nGestire + " da gestire") : null), filtroArr),
+    h("p", { class: "sotto" }, "Le email che i contatti ti hanno scritto, con sotto il secondo messaggio da mandare (da leggere, correggere e approvare). Qui non ci sono le email che partono da te."),
+    listaArr);
+  const filtro = h("select", { "aria-label": "Mostra", class: "si-periodo" }, [["", "Tutte"], ["da_approvare", "Da approvare"], ["inviata", "In attesa di risposta"], ["errore", "Con errori"], ["chiusi", "Chiusi"]].map(([v, t]) => { const o = h("option", { value: v }, t); if (v === (stato.campagnaFiltro || "")) o.selected = true; return o; }));
   const lista = h("div");
   const mostra = () => {
     const f = filtro.value; stato.campagnaFiltro = f;
-    const sel = c.destinatari.filter(x => !f || (f === "chiusi" ? ["non_interessato", "rimosso", "nessuna_risposta", "scartata", "respinto"].includes(x.stato) : x.stato === f || (f === "interessato" && x.stato === "risposto")));
+    const sel = c.destinatari.filter(x => !(x.risposta_il && RISPOSTO.includes(x.stato)))   // chi ha risposto sta in «Risposte arrivate»
+      .filter(x => !f || (f === "chiusi" ? ["nessuna_risposta", "scartata", "respinto"].includes(x.stato) : x.stato === f));
     riempi(lista, sel.length ? sel.slice(0, 200).map(dest) : h("p", { class: "sotto" }, c.destinatari.length ? "Nessuno in questo gruppo." : "Nessun destinatario ancora: aggiungi righe al foglio o scegli i contatti dal CRM."));
   };
   filtro.onchange = mostra; mostra();
@@ -410,13 +429,32 @@ async function apriCampagna(corpo, cid, torna) {
   riempi(corpo, [h("div", { class: "azioni" }, indietro), h("h2", { class: "cp-nome" }, c.nome, h("span", { class: "cp-stato" }, STATI_CP[c.stato])),
     h("div", { class: "azioni" }, ...[avvia, approvaTutte, riapriTutte, riscriviTutte, statoBtn, duplica, chiudi].filter(Boolean)), conferma, msg,
     c.imbuto && c.imbuto[0].n ? h("div", { class: "carta" }, graficoImbutoCp(c.imbuto, "L'imbuto della campagna")) : null,
-    abbinare, cartaDaChiamareCp(c), bloccoBrief, quadro, bloccoTesto, cartaProvaAbCp(c, salva),
+    sezRisposte, abbinare, cartaDaChiamareCp(c), bloccoBrief, quadro, bloccoTesto, cartaProvaAbCp(c, salva),
     h("details", { class: "carta", open: true }, h("summary", {}, h("b", {}, "Il flusso")), _blocchiFlusso(c, salva)),
     correzioni, cartaAllegatiCp(c, ricarica), cartaStileCp(),
-    h("div", { class: "azioni", style: "align-items:center" }, h("h3", { style: "margin:0" }, "Destinatari"), filtro), lista]);
+    h("section", { class: "cp-sezione" }, h("div", { class: "azioni", style: "align-items:center" }, h("h3", { style: "margin:0" }, "📤 Le nostre email (bozze e inviate)"), filtro), lista)]);
 }
 
 function apriContatto(id) { stato.contattoAperto = id; vai("contatto"); }
+
+// 2.78: l'email che il contatto ci ha scritto, letta dalla casella quando la apri
+function _letteraArrivataCp(x) {
+  const corpo = h("div", { class: "cp-lettera-testo" }, h("p", { class: "sotto" }, "Carico l'email…"));
+  let caricata = false;
+  const carica = async () => {
+    if (caricata) return; caricata = true;
+    try {
+      const d = await api("GET", "/gestione/campagne/destinatari/" + x.id + "/risposta-ricevuta");
+      corpo.replaceChildren(...[d.avviso ? avviso(d.avviso, "no") : null, d.testo ? h("div", { class: "cp-testo" }, d.testo) : null].filter(Boolean));
+    } catch (e) { caricata = false; corpo.replaceChildren(avviso(e.message, "no")); }
+  };
+  const det = h("details", { class: "cp-lettera", ontoggle: (ev) => { if (ev.currentTarget.open) carica(); } },
+    h("summary", {}, h("b", {}, "La loro email"), " · " + (x.risposta_il ? new Date(x.risposta_il).toLocaleString("it-IT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""),
+      x.risposta_oggetto ? h("span", { class: "sotto" }, " — «" + x.risposta_oggetto + "»") : null),
+    x.risposta_sintesi ? h("p", { class: "cp-sintesi" }, h("b", {}, "In breve: "), x.risposta_sintesi) : null, corpo);
+  if ((x.risposta && x.risposta.stato === "da_approvare") || x.stato === "risposto") { det.open = true; carica(); }
+  return det;
+}
 
 // Confronto parola per parola fra la bozza del Redattore e la versione di Lorenzo (2.67)
 function _diffCp(a, b, lato) {

@@ -835,6 +835,28 @@ class Esito(BaseModel):
     crea_affare: bool = False
 
 
+@router.get("/destinatari/{did}/risposta-ricevuta")
+def risposta_ricevuta(did: int, u: dict = Depends(solo_titolare)):
+    """2.78: il testo dell'email che il contatto ci ha mandato, per leggerla dentro la campagna (letta dalla casella, non salvata)."""
+    from . import posta_vaglio
+    with connessione() as conn:
+        d = conn.execute("SELECT risposta_vaglio_id, risposta_oggetto, risposta_il FROM campagne_posta_dest WHERE id=%s", (did,)).fetchone()
+        if d is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Destinatario non trovato")
+        v = conn.execute("SELECT origine, casella_id, msg_id, mittente, oggetto, data FROM posta_vaglio WHERE id=%s", (d["risposta_vaglio_id"],)).fetchone() if d["risposta_vaglio_id"] else None
+        if v is None:
+            return {"testo": "", "avviso": "L'email non è più nella posta letta da Opifex: la trovi nella tua casella."}
+        try:
+            t = posta_vaglio.leggi(conn, v["origine"], v["casella_id"], v["msg_id"]) or ""
+        except Exception:  # noqa: BLE001 - casella non raggiungibile adesso
+            t = ""
+        if not t or t.startswith("ERRORE"):
+            return {"testo": "", "da": v["mittente"], "oggetto": v["oggetto"], "data": v["data"], "avviso": "Non riesco a leggerla adesso dalla casella: riprova tra poco."}
+        intest, _, corpo = t.partition("\n\n")
+        return {"da": v["mittente"], "oggetto": v["oggetto"] or d["risposta_oggetto"], "data": v["data"] or d["risposta_il"],
+                "testo": posta_vaglio._senza_citazioni(corpo or t)[:8000]}
+
+
 @router.post("/destinatari/{did}/esito")
 def segna_esito(did: int, d: Esito, u: dict = Depends(solo_titolare)):
     with connessione() as conn:
