@@ -42,7 +42,7 @@ def _carica_agente(conn, agente_id: int) -> dict:
         """
         SELECT a.id, a.nome, a.ruolo, a.istruzioni, a.tipo, a.fascia_dati_max, a.attivo,
                a.modello AS modello_richiesto,
-               a.max_token_risposta, a.sforzo, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.invio_posta, a.crm_attivo, a.crm_nominativo, a.crm_ricerca, a.n8n_attivo, a.canva_attivo, a.finestre_attivo, a.finestre_siti, a.archivio_attivo, a.ruolo_speciale, a.usa_biblioteca, a.sandbox_attivo, a.controllore_id, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
+               a.max_token_risposta, a.sforzo, a.budget_token_mensile, a.dialoghi_attivi, a.vede_tutto, a.divisione_id, a.drive_attivo, a.gmail_account_id, a.social_attivo, a.email_attivo, a.invio_posta, a.crm_attivo, a.crm_nominativo, a.crm_ricerca, a.faro, a.n8n_attivo, a.canva_attivo, a.finestre_attivo, a.finestre_siti, a.archivio_attivo, a.ruolo_speciale, a.usa_biblioteca, a.sandbox_attivo, a.controllore_id, a.livello, a.accesso_web, a.siti_consentiti, a.max_ricerche,
                m.id AS modello_id, m.nome AS modello_nome,
                m.costo_input_per_milione, m.costo_output_per_milione,
                f.id AS fornitore_id, f.nome AS fornitore, f.fascia_dati_max AS fascia_fornitore,
@@ -414,6 +414,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
             crm_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["crm_attivo"])
             crm_nom_tool = bool(a["fornitore"] == "anthropic" and a["crm_nominativo"])
             crm_ric_tool = bool(a["fornitore"] == "anthropic" and a["crm_ricerca"])
+            faro_tool = bool(a["fornitore"] == "anthropic" and a["faro"] and not VELOCE.get())   # FARO: ricerca dei bandi
             n8n_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["n8n_attivo"] and n8n_mod.collegato(conn))
             archivio_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["archivio_attivo"])
             finestre_tool = bool(a["fornitore"] in STRUMENTI_FORNITORI and a["finestre_attivo"])
@@ -456,7 +457,7 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                 scuola_tool = False
                 traffico_tool = False
                 legale_tool = False
-            if ((a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get()) or creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val or scuola_tool or traffico_tool or legale_tool or legale_master):
+            if ((a["fornitore"] == "locale" and "locale" in STRUMENTI_FORNITORI and a["accesso_web"] and not VELOCE.get()) or creativi_tool or banco_tool or siti or colleghi_ok or doc_tool or finestre_tool or crm_nom_tool or crm_ric_tool or faro_tool or n8n_tool or drive_tool or gmail_tool or social_tool or posta_tool or email_tool or crm_tool or spec_tool or bib_tool or sb_tool or rev_tool or pm_tool or canva_tool or archivio_tool or costi_tool or siti_tool or prog_tool or prog_crea or form_tool or sq_pm or sq_val or scuola_tool or traffico_tool or legale_tool or legale_master):
                 conn.commit()  # libera la connessione durante la navigazione/dialoghi (puo' durare minuti)
                 uscita_extra, uscita_gestori, uscita_avviso = [], {}, []
                 extra, gestori = [], {}
@@ -567,6 +568,11 @@ def _esegui_agente_interno(agente_id: int, messaggio: str, fascia_dati: str = "i
                         extra.append(crm_ricerca.STRUMENTO_RESP)
                         avviso_extra += crm_ricerca.AVVISO_RESP
                         gestori["crm_responsabile"] = gcr
+                if faro_tool:
+                    from . import faro
+                    extra.extend(faro.STRUMENTI)
+                    avviso_extra += faro.AVVISO
+                    gestori["faro_segnala_bando"] = faro.gestore(connessione)
                 if crm_nom_tool:
                     extra.extend(crm_contatti_agenti.STRUMENTI)
                     avviso_extra += crm_contatti_agenti.AVVISO

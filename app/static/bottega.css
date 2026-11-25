@@ -583,3 +583,22 @@ button.bt-cp-tessera { cursor: pointer; }
 .bt-cp-sintesi { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bt-cp-elenco { display: grid; gap: 6px; }
 .bt-tag.grigio { opacity: .7; }
+/* Bandi (FARO) */
+.fr .tessere{margin:4px 0 12px}
+.fr-filtri{margin:0 0 12px}
+.fr-bando{margin-bottom:12px}
+.fr-testa{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
+.fr-testa .nome{font-weight:700;color:inherit;text-decoration:none}
+.fr-testa .nome:hover{text-decoration:underline}
+.fr-perche{margin:6px 0;line-height:1.45}
+.fr-bollettino{white-space:pre-wrap;font:inherit;line-height:1.5;margin:12px 0 0;max-height:60vh;overflow:auto}
+.fr-spunta{display:flex;gap:8px;align-items:center;font-weight:400}
+.fr-spunta input{width:auto}
+.fr-fonti{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.fr-fonte{display:flex;gap:12px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--bordo)}
+.fr-fonte.spenta{opacity:.55}
+.fr-azioni{display:flex;gap:6px;flex:none}
+.fr-esito{white-space:pre-wrap;margin:6px 0 0}
+.fr details.carta{margin-bottom:10px}
+.fr details.carta>summary{cursor:pointer}
+@media (max-width:900px){.fr .riga>*{flex:0 0 auto}}
