@@ -403,6 +403,9 @@ def sincronizza_foglio(conn, c: dict) -> dict:
         if gia and gia["impronta"] == impronta:
             continue
         kid = (gia["contatto_id"] if gia else None) or _trova(conn, email, sito)
+        if kid is None and "@" in email:   # stessa email gia' nella lista (anche sotto un altro sito): e' lo stesso contatto, non un doppione
+            r_ = conn.execute("SELECT id FROM crm_contatti WHERE lista_id=%s AND email_hash=%s", (lista, crm.hash_email(email))).fetchone()
+            kid = r_["id"] if r_ else None
         if kid is None:
             kid = conn.execute("""INSERT INTO crm_contatti (lista_id, tipo, genere, comune, provincia, regione, ente_cifrato, email_cifrata, email_hash, note_cifrate,
                                                           azienda_id, fonte_url, importato_il)
@@ -414,7 +417,10 @@ def sincronizza_foglio(conn, c: dict) -> dict:
             nuove += 1
         else:   # contatto gia' noto: si aggiornano i dati che il foglio porta
             sets, par = [], []
-            if "@" in email:
+            if "@" in email and not conn.execute("""SELECT 1 FROM crm_contatti WHERE email_hash=%s AND id<>%s
+                                                     AND lista_id IS NOT DISTINCT FROM (SELECT lista_id FROM crm_contatti WHERE id=%s)""",
+                                                  (crm.hash_email(email), kid, kid)).fetchone():
+                # un'email che nella stessa lista ha gia' un altro contatto non si copia qui (fermava tutto il giro: UniqueViolation)
                 sets += ["email_cifrata=%s", "email_hash=%s"]; par += [cassaforte.cifra(email), crm.hash_email(email)]
             for campo in ("comune", "provincia", "regione"):
                 if v.get(campo):

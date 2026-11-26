@@ -19,5 +19,5 @@ pillow==13.0.0
 youtube-transcript-api==1.2.2
 # numpy e' facoltativo: se c'e' i calcoli sono piu' veloci, altrimenti Opifex usa la libreria standard
 defusedxml==0.7.1
-yt-dlp==2025.10.22
-dnspython==2.7.0
+yt-dlp==2026.10.26
+dnspython==2.9.2

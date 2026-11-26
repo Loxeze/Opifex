@@ -228,6 +228,10 @@ def responsabile(conn, d: dict, stato: dict) -> str:
             email = ""
     k = conn.execute("SELECT email_cifrata FROM crm_contatti WHERE id=%s", (dest["contatto_id"],)).fetchone()
     conn.execute("UPDATE crm_contatti SET nome_cifrato=%s, genere='persona' WHERE id=%s", (c(nome), dest["contatto_id"]))
+    if email and conn.execute("""SELECT 1 FROM crm_contatti WHERE email_hash=%s AND id<>%s
+                                 AND lista_id IS NOT DISTINCT FROM (SELECT lista_id FROM crm_contatti WHERE id=%s)""",
+                              (crm.hash_email(email), dest["contatto_id"], dest["contatto_id"])).fetchone():
+        email = ""   # quell'indirizzo nella stessa lista ha gia' un altro contatto: resta il nome del responsabile, l'email no
     if email:
         h = crm.hash_email(email)
         vecchia = _dec(k["email_cifrata"]) if k else ""

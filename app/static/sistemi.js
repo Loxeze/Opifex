@@ -128,6 +128,21 @@ function schedaDatabase(db) {
     h("p", { class: "aiuto" }, "Sono solo informazioni di lettura. L'ultimo aggiornamento dello schema dovrebbe essere l'ultimo file SQL della versione installata."));
 }
 
+let _chiaveBackupDaSalvare = "";   // resta a schermo finche' Lorenzo non conferma di averla salvata (anche se la pagina si ricarica)
+function _riquadroChiaveBackup(rinfresca) {
+  if (!_chiaveBackupDaSalvare) return null;
+  const campo = h("input", { type: "text", readonly: true, value: _chiaveBackupDaSalvare, style: "width:100%;font-family:monospace", onfocus: (e) => e.target.select() });
+  const esito = h("span", { class: "sotto" });
+  return h("div", { class: "carta", style: "border:2px solid var(--avviso, #b7791f)" },
+    h("b", {}, "La tua chiave di backup"),
+    h("p", {}, "Si vede solo adesso: Opifex non la conserva in chiaro. Copiala e salvala fuori dal server (gestore di password o nota protetta). Senza questa chiave i backup non si aprono."),
+    campo,
+    h("div", { class: "azioni" },
+      h("button", { class: "s", onclick: async () => { try { await navigator.clipboard.writeText(_chiaveBackupDaSalvare); esito.textContent = "Copiata."; } catch (e) { campo.focus(); campo.select(); esito.textContent = "Selezionata: premi Ctrl+C (Cmd+C sul Mac)."; } } }, "Copia la chiave"),
+      h("button", { class: "p", onclick: () => { _chiaveBackupDaSalvare = ""; rinfresca(); } }, "L'ho salvata, chiudi"),
+      esito));
+}
+
 function vistaSistema() {
   const corpo = h("div");
   const carica = async () => {
@@ -144,6 +159,7 @@ function vistaSistema() {
         h("h3", {}, "Database e versione"),
         schedaDatabase(d.database),
         h("h3", {}, "Backup automatico"),
+        _riquadroChiaveBackup(carica),
         h("div", { class: "carta" },
           !b.chiave_creata ? avviso("Prima di tutto crea la chiave di backup: senza, il backup non parte.", "avv") : null,
           u ? avviso((u.ok ? "Ultimo backup riuscito: " : "Ultimo tentativo FALLITO: ") + new Date(u.quando).toLocaleString("it-IT") + " · " + (u.ok ? KB(u.dimensione) + " · " + (u.drive || "") : u.dettaglio), u.ok ? "ok" : "no")
@@ -159,7 +175,7 @@ function vistaSistema() {
               const rigenera = b.chiave_creata;
               if (rigenera && !confirm("Rigenerare la chiave? I backup già fatti si apriranno solo con la VECCHIA chiave.")) return;
               try { const r = await api("POST", "/gestione/sistema/backup/chiave" + (rigenera ? "?rigenera=true" : "")); 
-                msg.replaceChildren(avviso("CHIAVE DI BACKUP (si vede una volta sola, conservala in un posto sicuro fuori dal server, per esempio nel tuo gestore di password): " + r.chiave, "avv")); carica(); }
+                _chiaveBackupDaSalvare = r.chiave; carica(); }
               catch (x) { msg.replaceChildren(avviso(x.message, "no")); } } }, b.chiave_creata ? "Rigenera la chiave" : "Crea la chiave di backup")),
           (() => { const r = b.ripristino; const bt = h("button", { class: "s", onclick: async () => { bt.disabled = true; bt.textContent = "Provo il ripristino…";
             try { const e = await api("POST", "/gestione/sistema/backup/prova-ripristino"); msg.replaceChildren(avviso(e.ok ? "Prova riuscita: " + e.dettaglio : "Prova FALLITA: " + e.dettaglio, e.ok ? "ok" : "no")); } catch (x) { msg.replaceChildren(avviso(x.message, "no")); }

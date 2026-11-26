@@ -58,5 +58,5 @@ def una_volta(conn) -> int:
     conn.execute("INSERT INTO impostazioni_sistema (chiave, valore) VALUES (%s, 'fatto') ON CONFLICT (chiave) DO NOTHING", (MARCA,))
     if n:
         conn.execute("INSERT INTO notifiche (testo, urgente, critica) VALUES (%s, FALSE, FALSE)",
-                     (f"Aggiornamento: {n} agenti ora usano il modello piu' economico adatto ai loro dati. In Impostazioni → Backup e costi puoi tornare ai modelli di prima.",))
+                     (f"Aggiornamento: {n} agenti ora usano il modello piu' economico adatto ai loro dati. In Controllo → Backup e costi puoi tornare ai modelli di prima.",))
     return n

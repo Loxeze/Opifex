@@ -64,11 +64,11 @@ def controlla(conn, percorso_disco: str = "/") -> list[str]:
     # backup
     if _imp(conn, "backup_attivo", "1") == "1":
         if not _imp(conn, "backup_chiave_cifrata"):
-            invia("backup_chiave", "il backup automatico non e' attivo perche' manca la chiave di backup: creala in Impostazioni → Backup e costi.")
+            invia("backup_chiave", "il backup automatico non e' attivo perche' manca la chiave di backup: creala in Controllo → Backup e costi.")
         else:
             u = _imp(conn, "backup_ultimo_ok")
             if not u or datetime.now(timezone.utc) - datetime.fromisoformat(u) > timedelta(hours=36):
-                invia("backup_vecchio", "l'ultimo backup riuscito ha piu' di 36 ore (o non c'e' ancora): apri Impostazioni → Backup e costi.")
+                invia("backup_vecchio", "l'ultimo backup riuscito ha piu' di 36 ore (o non c'e' ancora): apri Controllo → Backup e costi.")
     # budget mensile dei singoli agenti: un avviso all'80% e uno al 100%, una volta al mese
     mese = ora_mese()
     for r in conn.execute("""SELECT a.id, a.nome, a.budget_token_mensile AS b,

@@ -105,6 +105,11 @@ with TestClient(app) as c:
     r = c.post(f"/gestione/campagne/{cid}/foglio", headers=H).json()
     ok("riga corretta nel foglio (email): contatto aggiornato, senza ricominciare", r["aggiornate"] == 1 and r["nuove"] == 0
        and sql("SELECT count(*) FROM campagne_posta_dest WHERE campagna_id=%s AND email_hash=%s", (cid, crm.hash_email("direzione@senzasito.com"))) == [(1,)], r)
+    FOGLIO[0] = FOGLIO[0].replace("Senza Email Hotel,www.senzaemail.com,,", "Senza Email Hotel,www.senzaemail.com,direzione@coralbay.com,")
+    r = c.post(f"/gestione/campagne/{cid}/foglio", headers=H)
+    ok("la stessa email su due righe con siti diversi non ferma la lettura (prima: UniqueViolation)", r.status_code == 200
+       and sql("SELECT count(*) FROM crm_contatti WHERE email_hash=%s", (crm.hash_email("direzione@coralbay.com"),)) == [(1,)], r.text[:300])
+    FOGLIO[0] = FOGLIO[0].replace("Senza Email Hotel,www.senzaemail.com,direzione@coralbay.com,", "Senza Email Hotel,www.senzaemail.com,,")
 
     # ======== brief, avvio, studio ========
     RISPOSTE_MOD[:] = [json.dumps({"destinatari": "Hotel 4-5 stelle di Sharm", "occasione": "A marzo siamo a Sharm per un lavoro", "offerta": "Video a prezzo ridotto",
