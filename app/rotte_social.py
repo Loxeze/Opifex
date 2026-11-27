@@ -42,8 +42,13 @@ def collega(d: Chiave, utente: dict = Depends(solo_titolare)):
             raise _err(e, status.HTTP_503_SERVICE_UNAVAILABLE)
         except buffer.ErroreBuffer as e:
             conn.rollback()
+            from . import social_diagnosi
+            social_diagnosi.registra(conn, "buffer", "account Buffer non collegato", str(e))
+            conn.commit()
             raise _err(e)
         registro.registra(conn, utente, "collegamento", "Buffer collegato", "Buffer", "buffer", "buffer")
+        from . import social_diagnosi
+        social_diagnosi.registra(conn, "buffer", "account Buffer collegato", f"{len(canali)} canali")
     return {"collegato": True, "id": aid, "canali": canali}
 
 

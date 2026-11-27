@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import registro, social_nativo as sn
+from . import registro, social_diagnosi, social_nativo as sn
 from .db import connessione
 from .permessi import solo_titolare
 
@@ -17,6 +17,16 @@ router = APIRouter(prefix="/gestione/social-nativo", tags=["social"])
 
 def _err(e: Exception, codice: int = status.HTTP_409_CONFLICT):
     return HTTPException(codice, str(e))
+
+
+@router.get("/diagnosi")
+def diagnosi(prova: bool = True, _: dict = Depends(solo_titolare)):
+    """Il resoconto di tutti i collegamenti social, da scaricare e mandare per l'analisi. Niente token ne' segreti."""
+    from fastapi.responses import PlainTextResponse
+    with connessione() as conn:
+        testo = social_diagnosi.resoconto(conn, prova)
+    nome = "social-opifex-" + datetime.now().strftime("%Y-%m-%d-%H%M") + ".txt"
+    return PlainTextResponse(testo, headers={"Content-Disposition": f'attachment; filename="{nome}"', "Cache-Control": "no-store"})
 
 
 @router.get("/stato")
@@ -57,6 +67,7 @@ def salva_app(provider: str, d: App, utente: dict = Depends(solo_titolare)):
                 raise _err(e, status.HTTP_503_SERVICE_UNAVAILABLE)
             raise
         registro.registra(conn, utente, "collegamento", "credenziali app social salvate", sn.ETICHETTE_PROVIDER[provider], "social_app", provider)
+        social_diagnosi.registra(conn, provider, "credenziali dell'app salvate", "indirizzo di ritorno: " + sn.redirect_uri(conn, provider))
         return {"redirect": sn.redirect_uri(conn, provider)}
 
 
@@ -70,27 +81,35 @@ def collega(provider: str, d: Collega, _: dict = Depends(solo_titolare)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Rete sconosciuta")
     with connessione() as conn:
         try:
-            return {"url": sn.url_autorizzazione(conn, provider, {"pagine": d.pagine})}
+            u = sn.url_autorizzazione(conn, provider, {"pagine": d.pagine})
+            social_diagnosi.registra(conn, provider, "collegamento avviato", "si apre la pagina di consenso della rete")
+            return {"url": u}
         except sn.ErroreSocial as e:
+            social_diagnosi.registra(conn, provider, "collegamento non avviato", str(e))
             raise _err(e)
 
 
 @router.get("/callback/{provider}", include_in_schema=False)
 def ritorno(provider: str, code: str | None = Query(default=None, max_length=2000), state: str | None = Query(default=None, max_length=200),
-            error: str | None = Query(default=None, max_length=200)):
+            error: str | None = Query(default=None, max_length=200), error_description: str | None = Query(default=None, max_length=500),
+            error_reason: str | None = Query(default=None, max_length=200)):
     """Pagina aperta dalla rete dopo il consenso: vale lo stato monouso creato dal titolare."""
     if provider not in sn.ETICHETTE_PROVIDER:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Rete sconosciuta")
     with connessione() as conn:
         if error or not code or not state:
-            sn._scrivi(conn, "sn_ultimo_esito", f"Collegamento a {sn.ETICHETTE_PROVIDER[provider]} annullato o rifiutato.")
+            sn._scrivi(conn, "sn_ultimo_esito", f"Collegamento a {sn.ETICHETTE_PROVIDER[provider]} annullato o rifiutato." + (f" ({error_description or error})" if (error_description or error) else ""))
+            social_diagnosi.registra(conn, provider, "consenso rifiutato o annullato dalla rete",
+                                     " · ".join(x for x in (error, error_reason, error_description) if x) or ("manca il codice" if not code else "manca lo stato"))
         else:
             try:
                 r = sn.completa_autorizzazione(conn, provider, code, state)
                 sn._scrivi(conn, "sn_ultimo_esito", f"ok:{sn.ETICHETTE_PROVIDER[provider]}: collegati {r['canali']} canali.")
+                social_diagnosi.registra(conn, provider, "collegamento riuscito", f"{r['canali']} canali")
             except sn.ErroreSocial as e:
                 conn.rollback()
                 sn._scrivi(conn, "sn_ultimo_esito", f"{sn.ETICHETTE_PROVIDER[provider]}: {e}")
+                social_diagnosi.registra(conn, provider, "collegamento fallito al ritorno", str(e))
     return RedirectResponse("/app/", status_code=303)
 
 

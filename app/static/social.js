@@ -179,7 +179,24 @@ async function schedaCanali(corpo, apri) {
   const [st, bf] = await Promise.all([api("GET", "/gestione/social-nativo/stato"), api("GET", "/gestione/social/buffer").catch(() => ({ collegato: false, canali: [] }))]);
   const ricarica = () => schedaCanali(corpo, apri);
   const esito = st.esito ? (st.esito.startsWith("ok:") ? avviso(st.esito.slice(3), "ok") : avviso(st.esito, "no")) : null;
-  riempi(corpo, [esito, h("p", { class: "aiuto" }, "Ogni rete richiede una piccola app registrata sul suo portale per sviluppatori (una volta sola, gratuita). Opifex pubblica e raccoglie i risultati direttamente, senza limiti di canali. Gli agenti preparano i post, ma pubblichi solo tu con l'approvazione."),
+  const msgD = h("div");
+  const scaricaD = h("button", { class: "s", type: "button" }, "⬇ Scarica il resoconto dei social");
+  scaricaD.addEventListener("click", async () => {
+    scaricaD.disabled = true; msgD.replaceChildren(avviso("Preparo il resoconto e provo dal vivo ogni collegamento (qualche secondo)…", "ok"));
+    try {
+      const r = await fetch("/gestione/social-nativo/diagnosi", { headers: token ? { Authorization: "Bearer " + token } : {} });
+      if (!r.ok) { let d = null; try { d = await r.json(); } catch (e) { /* ok */ } throw new Error(messaggioErrore(d)); }
+      const blob = await r.blob(), url = URL.createObjectURL(blob), a = document.createElement("a");
+      a.href = url; a.download = ((r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || "social-opifex.txt";
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+      msgD.replaceChildren(avviso("Resoconto scaricato: in cima ci sono i problemi trovati. Mandamelo in chat e lo analizzo. Non contiene token né chiavi.", "ok"));
+    } catch (e) { msgD.replaceChildren(avviso(e.message, "no")); }
+    scaricaD.disabled = false;
+  });
+  riempi(corpo, [esito, h("div", { class: "carta" }, h("div", { class: "nome" }, "Resoconto di tutti i collegamenti"),
+      h("p", { class: "sotto" }, "Un file di testo con lo stato di ogni rete, profilo, canale, account Buffer, marchio e profilo monitorato, la prova dal vivo di ogni accesso, i post non partiti e gli ultimi eventi di collegamento. In cima, l'elenco dei problemi trovati."),
+      h("div", { class: "azioni" }, scaricaD), msgD),
+    h("p", { class: "aiuto" }, "Ogni rete richiede una piccola app registrata sul suo portale per sviluppatori (una volta sola, gratuita). Opifex pubblica e raccoglie i risultati direttamente, senza limiti di canali. Gli agenti preparano i post, ma pubblichi solo tu con l'approvazione."),
     st.provider.map(p => schedaApp(p, ricarica)),
     h("h3", {}, "Buffer: per i profili che non si collegano direttamente"),
     h("p", { class: "aiuto" }, "Instagram e Facebook personali non si possono collegare con il login diretto: passano da Buffer. I canali collegati a Buffer compaiono accanto agli altri in «Scrivi e pubblica» e per gli agenti; i risultati dettagliati restano solo per i canali diretti."),
