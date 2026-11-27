@@ -67,12 +67,23 @@ def resoconto(conn, prova: bool = True) -> str:
                 try:
                     tk = sn.token(conn, a["id"])
                     if p == "meta":   # una domanda innocua a Meta: chi sono e quali permessi ho davvero
-                        perm = sn._http("GET", f"{sn._graph(conn)}/me/permissions", params={"access_token": tk}).get("data") or []
+                        try:
+                            perm = sn._http("GET", f"{sn._graph(conn)}/me/permissions", params={"access_token": tk}).get("data") or []
+                        except Exception as e1:  # noqa: BLE001
+                            if "permissions" not in str(e1):
+                                raise
+                            # accesso di una Pagina: non ha l'elenco dei permessi, basta che risponda
+                            io = sn._http("GET", f"{sn._graph(conn)}/me", params={"access_token": tk, "fields": "id,name"})
+                            r.append(f"   prova dal vivo: Meta risponde (accesso della pagina «{io.get('name') or '?'}»)")
+                            perm = None
+                    if p == "meta" and perm is not None:
                         dati = {x.get("permission"): x.get("status") for x in perm if isinstance(x, dict)}
                         manca = [x for x in sn._scope("meta", {}).split(",") if dati.get(x) != "granted"]
                         r.append("   prova dal vivo: Meta risponde" + (f"; permessi NON concessi: {', '.join(manca)}" if manca else "; tutti i permessi concessi"))
                         if manca:
                             problemi.append(f"{et}, profilo «{a['nome']}»: permessi non concessi ({', '.join(manca)}). Ricollega e lascia tutte le spunte; in modalita' sviluppo l'account deve essere tra gli amministratori o i tester dell'app.")
+                    elif p == "meta":
+                        pass
                     elif p == "linkedin":
                         sn._http("GET", "https://api.linkedin.com/v2/userinfo", headers={"Authorization": "Bearer " + tk})
                         r.append("   prova dal vivo: LinkedIn risponde")
@@ -86,7 +97,7 @@ def resoconto(conn, prova: bool = True) -> str:
                 r.append("   canali: NESSUNO")
                 problemi.append(f"{et}, profilo «{a['nome']}»: collegato ma senza canali (per Instagram serve un account professionale legato a una pagina Facebook).")
             for c in canali:
-                r.append(f"   canale {c['rete']}: «{c['nome']}» {'acceso' if c['attivo'] else 'SPENTO'}" + (f" — errore: {pulito(c['ultimo_errore'])}" if c["ultimo_errore"] else ""))
+                r.append(f"   canale n:{c['id']} {c['rete']}: «{c['nome']}» {'acceso' if c['attivo'] else 'SPENTO'}" + (f" — errore: {pulito(c['ultimo_errore'])}" if c["ultimo_errore"] else ""))
                 if c["ultimo_errore"]:
                     problemi.append(f"{et}, canale «{c['nome']}» ({c['rete']}): {pulito(c['ultimo_errore'])[:150]}")
     # 2. Buffer
@@ -110,12 +121,22 @@ def resoconto(conn, prova: bool = True) -> str:
     for m in conn.execute("SELECT * FROM social_marchi ORDER BY nome").fetchall():
         canali = conn.execute("SELECT * FROM social_marchi_canali WHERE marchio_id=%s ORDER BY rete", (m["id"],)).fetchall()
         r.append(f"«{m['nome']}» ({m['tipo']}{'' if m['attivo'] else ', SPENTO'}): presente su {', '.join(m['reti']) or 'nessuna rete indicata'}")
-        collegate = {c["rete"] for c in canali if c["canale_id"]}
+        def _esiste(cid):
+            if cid.startswith("n:"):
+                return conn.execute("SELECT 1 FROM canali_nativi WHERE id::text=%s", (cid[2:],)).fetchone() is not None
+            return conn.execute("SELECT 1 FROM canali_buffer WHERE canale_id=%s", (cid,)).fetchone() is not None
+        collegate = set()
         for c in canali:
-            r.append(f"   {c['rete']}: {c['indirizzo'] or '(senza indirizzo)'} → " + (f"collegato al canale {c['canale_id']}" if c["canale_id"] else "NON COLLEGATO a un canale"))
+            if not c["canale_id"]:
+                r.append(f"   {c['rete']}: {c['indirizzo'] or '(senza indirizzo)'} → NON COLLEGATO a un canale")
+            elif _esiste(c["canale_id"]):
+                collegate.add(c["rete"])
+                r.append(f"   {c['rete']}: {c['indirizzo'] or '(senza indirizzo)'} → collegato al canale {c['canale_id']}")
+            else:
+                r.append(f"   {c['rete']}: {c['indirizzo'] or '(senza indirizzo)'} → collegato al canale {c['canale_id']}, che NON ESISTE PIU'")
         manca = [x for x in m["reti"] if x not in collegate]
         if m["attivo"] and manca:
-            problemi.append(f"Marchio «{m['nome']}»: nessun canale collegato per {', '.join(manca)}.")
+            problemi.append(f"Marchio «{m['nome']}»: nessun canale funzionante collegato per {', '.join(manca)}.")
     if r[-1].startswith("== 3."):
         r.append("Nessun marchio configurato.")
     # 4. profili monitorati

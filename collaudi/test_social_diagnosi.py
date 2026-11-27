@@ -33,6 +33,10 @@ def fake(metodo, url, con_header=False, **kw):
             return {"access_token": TOKEN_UTENTE}
         if url.endswith("/me/accounts"):
             return {"data": [{"id": "P1", "name": "Pagina Uno", "access_token": "ptok-" + "y" * 70, "instagram_business_account": {"id": "IG1", "username": "uno"}}]}
+        if url.endswith("/me/permissions") and str(p.get("access_token", "")).startswith("ptok"):
+            raise sn.ErroreSocial("400: (#100) Tried accessing nonexisting field (permissions)")
+        if url.endswith("/me") and str(p.get("access_token", "")).startswith("ptok"):
+            return {"id": "P1", "name": "Pagina Uno"}
         if url.endswith("/me/permissions"):
             return {"data": [{"permission": "pages_show_list", "status": "granted"}, {"permission": "instagram_content_publish", "status": "declined"}]}
     if "linkedin.com" in url:
@@ -65,10 +69,17 @@ with TestClient(app) as c:
     t = c.get("/gestione/social-nativo/diagnosi", headers=H).text
     ok("riporta l'app Meta, l'ID e l'indirizzo di ritorno", "APPID" in t and "https://app.opifex.space/gestione/social-nativo/callback/meta" in t, t[:800])
     ok("prova dal vivo: elenca i permessi non concessi", "instagram_content_publish" in t, t)
+    ok("accesso di pagina: la prova dal vivo usa /me e non segnala un falso guasto", "Meta risponde (accesso della pagina «Pagina Uno»)" in t and "Tried accessing" not in t, t[:1500])
     ok("riporta l'errore Buffer", "chiave non valida" in t)
     for segreto in ("segreto-meta-123", "segreto-linkedin-456", TOKEN_UTENTE, "ptok-", "EAAG"):
         ok(f"nessun segreto nel resoconto ({segreto[:12]}…)", segreto not in t)
     ok("pulito(): toglie access_token e stringhe lunghe", "abc123" not in sd.pulito("errore ?access_token=abc123&x=1") and "z" * 70 not in sd.pulito("tok " + "z" * 70))
+    mid = sql("INSERT INTO social_marchi (nome, reti) VALUES ('Prova', '{facebook,instagram}') RETURNING id")[0][0]
+    cn = sql("SELECT id FROM canali_nativi WHERE rete='instagram'")[0][0]
+    sql("INSERT INTO social_marchi_canali (marchio_id, rete, canale_id) VALUES (%s,'facebook','n:999'), (%s,'instagram',%s)", (mid, mid, f"n:{cn}"))
+    t3 = c.get("/gestione/social-nativo/diagnosi?prova=false", headers=H).text
+    ok("marchio collegato a un canale che non esiste piu': segnalato", "NON ESISTE PIU'" in t3 and "Marchio «Prova»: nessun canale funzionante collegato per facebook." in t3, t3[-1500:])
+    ok("i canali mostrano il loro numero (n:ID)", f"canale n:{cn} instagram" in t3)
     t2 = c.get("/gestione/social-nativo/diagnosi?prova=false", headers=H).text
     ok("senza prova dal vivo funziona lo stesso", "PROBLEMI TROVATI" in t2)
 
