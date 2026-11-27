@@ -100,6 +100,12 @@ with TestClient(app) as c:
     sql("""INSERT INTO email_in_uscita (canale, account_id, mittente, destinatari, oggetto, testo, campagna_id, tipo_campagna, stato, decisa_il)
            SELECT 'gmail', 1, 'l@p.it', 'x'||g||'@c.it', 'o', 't', %s, 'primo', 'approvata', NOW() - INTERVAL '3 hours' FROM generate_series(1,5) g""", (cp,))
     ok("campagne: approvate ferme da ore, niente partito oggi: fermo", esiti(k)["campagne"]["stato"] == "fermo")
+    from app import regole_invio as _ri
+    _h = _ri.adesso().hour
+    sql("UPDATE campagne_posta SET ore_dal=%s, ore_al=%s WHERE id=%s", ((_h + 2) % 24, (_h + 3) % 24 or 24, cp))
+    e = esiti(k)["campagne"]
+    ok("campagne: approvate che aspettano la fascia oraria: non e' un fermo, dice perche'", e["stato"] == "va" and "fascia oraria" in e["messaggio"] and "Partono da sole" in e["messaggio"], e)
+    sql("UPDATE campagne_posta SET ore_dal=NULL, ore_al=NULL WHERE id=%s", (cp,))
     campagne.MAX_GIORNO, vecchio = 3, campagne.MAX_GIORNO
     sql("""INSERT INTO email_in_uscita (canale, account_id, mittente, destinatari, oggetto, testo, campagna_id, tipo_campagna, stato, decisa_il)
            SELECT 'gmail', 1, 'l@p.it', 'y'||g||'@c.it', 'o', 't', %s, 'primo', 'inviata', date_trunc('day', NOW()) + INTERVAL '1 minute' FROM generate_series(1,3) g""", (cp,))

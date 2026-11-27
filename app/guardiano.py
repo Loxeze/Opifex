@@ -204,6 +204,21 @@ def _campagne(conn) -> dict | None:
                           f"Tetto di oggi raggiunto per {'la casella' if len(piene) == 1 else 'le caselle'} {elenco}, per non finire nello spam. "
                           f"Le altre {c['ferme']} approvate partono da sole domani; le campagne da altre caselle continuano.", "Non devi fare niente.", "campagne",
                           {"in attesa": c["ferme"]})
+    if c["ferme"]:   # 2.84: chi aspetta per una regola di invio (fascia oraria, giorni feriali, periodo da evitare) non e' fermo
+        from . import regole_invio
+        attese = {}
+        tutte = True
+        for cp in conn.execute("""SELECT DISTINCT c.* FROM email_in_uscita e JOIN campagne_posta c ON c.id = e.campagna_id
+                                  WHERE c.stato = 'in_corso' AND e.stato = 'approvata' AND e.decisa_il < NOW() - INTERVAL '2 hours'""").fetchall():
+            motivo = regole_invio.perche_non_parte(cp)
+            if motivo:
+                attese[cp["nome"]] = motivo
+            else:
+                tutte = False
+        if attese and tutte:
+            return _esito("campagne", "Campagne email", "invia le email approvate", "va",
+                          f"{c['ferme']} email approvate aspettano il momento giusto: " + "; ".join(f"{n}: {m}" for n, m in attese.items()) + ". Partono da sole.",
+                          "Non devi fare niente.", "campagne", {"in attesa": c["ferme"]})
     if c["ferme"] and (not ultimo or ultimo < datetime.now(timezone.utc) - timedelta(hours=2)):
         return _esito("campagne", "Campagne email", "invia le email approvate", "fermo", f"{c['ferme']} email approvate aspettano da piu' di 2 ore e non ne parte nessuna.",
                       "Apri Comunicazione → Campagne email: guarda gli errori e prova la casella da cui partono.", "campagne", {"ferme": c["ferme"]})
